@@ -169,7 +169,10 @@ export class ReplayStore {
                             console.log('mean: ', center.lng / cnt, center.lat / cnt)
                         }
                     }
-                    status.status = Object.fromEntries(Object.entries(status.status).map(([k, v]) => [k, formatStatus(v)]))
+                    if (typeof status.status === 'object' && status.status !== null) {
+                        status.status = Object.fromEntries(Object.entries(status.status).map(([k, v]) => [k, formatStatus(v)]))
+                    }
+                    // 如果status是字符串，直接保持原样
                     const profile = this._agent2Profile.get(status.id)
                     if (profile !== undefined) {
                         newAgents.set(status.id, { ...profile, ...status })
@@ -221,7 +224,10 @@ export class ReplayStore {
                 const res = await fetchCustom(`/api/experiments/${this.expID}/agents/${this.clickedAgentID}/status`)
                 const data = await res.json()
                 for (const status of data.data as AgentStatus[]) {
-                    status.status = Object.fromEntries(Object.entries(status.status).map(([k, v]) => [k, formatStatus(v)]))
+                    if (typeof status.status === 'object' && status.status !== null) {
+                        status.status = Object.fromEntries(Object.entries(status.status).map(([k, v]) => [k, formatStatus(v)]))
+                    }
+                    // 如果status是字符串，直接保持原样
                 }
                 runInAction(() => {
                     this._clickedAgentStatuses = data.data as AgentStatus[]
@@ -255,7 +261,12 @@ export class ReplayStore {
             const res = await fetchCustom(`/api/experiments/${this.expID}/metrics`)
             const data = await res.json()
             runInAction(() => {
-                this._metrics = new Map(Object.entries(data.data))
+                // Handle null or undefined data.data
+                if (data.data && typeof data.data === 'object') {
+                    this._metrics = new Map(Object.entries(data.data))
+                } else {
+                    this._metrics = new Map()
+                }
             })
         } catch (err) {
             message.error(`Failed to fetch metrics: ${JSON.stringify(err)}`, 3);

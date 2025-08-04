@@ -56,6 +56,7 @@ class AgentType(Enum):
     Citizen = "Citizen"
     Institution = "Institution"
     Supervisor = "Supervisor"
+    Individual = "Individual"
 
 
 def extract_json(output_str):
@@ -186,6 +187,11 @@ class Agent(ABC):
     def id(self):
         """The Agent's Simulator ID"""
         return self._id
+    
+    @property
+    def toolbox(self):
+        """The Agent's Toolbox"""
+        return self._toolbox
 
     @property
     def llm(self):
@@ -222,12 +228,10 @@ class Agent(ABC):
         """The Agent's Stream Memory"""
         return self.memory.stream
 
-    @abstractmethod
     async def reset(self):
         """Reset the agent."""
         raise NotImplementedError("This method should be implemented by subclasses")
 
-    @abstractmethod
     async def react_to_intervention(self, intervention_message: str):
         """
         React to an intervention.
@@ -260,6 +264,10 @@ class Agent(ABC):
             - Sends the message asynchronously using `_send_message`.
             - Optionally records the message in Database if it's a "social" type message.
         """
+        if self.messager is None:
+            raise ValueError("Messager is not initialized")
+        if self.environment is None:
+            raise ValueError("Environment is not initialized")
         day, t = self.environment.get_datetime()
         # send message with `Messager`
         if type not in ["social", "economy"]:
@@ -331,6 +339,10 @@ class Agent(ABC):
         - **Description**:
             - Register a message to target aoi.
         """
+        if self.messager is None:
+            raise ValueError("Messager is not initialized")
+        if self.environment is None:
+            raise ValueError("Environment is not initialized")
         day, t = self.environment.get_datetime()
         if isinstance(target_aoi, int):
             target_aoi = [target_aoi]
@@ -353,6 +365,10 @@ class Agent(ABC):
         """
         Cancel a message to target aoi
         """
+        if self.messager is None:
+            raise ValueError("Messager is not initialized")
+        if self.environment is None:
+            raise ValueError("Environment is not initialized")
         day, t = self.environment.get_datetime()
         if isinstance(target_aoi, int):
             target_aoi = [target_aoi]
@@ -382,6 +398,12 @@ class Agent(ABC):
             - It is intended to be overridden by subclasses to define specific behaviors.
         """
         raise NotImplementedError
+    
+    async def status_summary(self):
+        """
+        Status summary
+        """
+        await self.status.update("status_summary", "Nothing")
 
     async def close(self):
         """Execute when the agent is deleted or the simulation is finished."""
@@ -434,5 +456,6 @@ class Agent(ABC):
         # run required methods after agent forward
         await self.after_blocks()
         await self.after_forward()
+        await self.status_summary()
         end_time = time.time()
         return end_time - start_time

@@ -1,4 +1,5 @@
 from typing import Any, Awaitable, Callable, List, Optional, Union
+import uuid
 
 from pydantic import BaseModel, Field, field_serializer
 
@@ -10,11 +11,10 @@ from .exp import (
     AgentFilterConfig,
     EnvironmentConfig,
     ExpConfig,
-    MetricExtractorConfig,
-    MetricType,
     WorkflowStepConfig,
     WorkflowType,
 )
+from ..taskloader import Task
 from .utils import load_config_from_file
 
 __all__ = [
@@ -22,14 +22,14 @@ __all__ = [
     "AgentConfig",
     "WorkflowStepConfig",
     "ExpConfig",
-    "MetricExtractorConfig",
     "EnvironmentConfig",
     "Config",
     "load_config_from_file",
     "InstitutionAgentClass",
-    "MetricType",
     "WorkflowType",
     "AgentFilterConfig",
+    "TaskLoaderConfig",
+    "IndividualConfig",
 ]
 
 
@@ -50,9 +50,6 @@ class AgentsConfig(BaseModel):
 
     governments: list[AgentConfig] = Field(default=[])
     """Government Agent configuration"""
-
-    others: list[AgentConfig] = Field([])
-    """Other Agent configuration"""
 
     supervisor: Optional[AgentConfig] = Field(None)
     """Supervisor Agent configuration"""
@@ -99,3 +96,44 @@ class Config(BaseModel):
         default_factory=lambda: AdvancedConfig.model_validate({})
     )
     """Advanced configuration for the simulation (keep it empty if you don't need it)"""
+    
+
+class TaskLoaderConfig(BaseModel):
+    """Configuration for the task loader."""
+
+    task_type: type[Task]
+    """Task type"""
+
+    file_path: str
+    """File path"""
+
+    shuffle: bool = Field(default=False)
+    """Shuffle the tasks"""
+
+
+class IndividualConfig(BaseModel):
+    """Configuration for the individual."""
+    name: str = Field("default_individual")
+    """Name of the solver"""
+
+    llm: List[LLMConfig] = Field(..., min_length=1)
+    """List of LLM configurations"""
+
+    env: EnvConfig
+    """Environment configuration"""
+
+    id: uuid.UUID = Field(default_factory=uuid.uuid4)
+    """Unique identifier for the individual"""
+
+    individual: AgentConfig
+    """Individual Agent configuration"""
+
+    task_loader: TaskLoaderConfig
+    """Task loader configuration"""
+
+    logging_level: str = Field("INFO")
+    """Logging level"""
+
+    @field_serializer("id")
+    def serialize_id(self, id, info):
+        return str(id)

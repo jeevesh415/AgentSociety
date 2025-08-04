@@ -1,8 +1,7 @@
 import random
 import time
 
-import json
-from typing import Any, Optional
+from typing import Optional
 
 import json_repair
 
@@ -140,19 +139,10 @@ class SocietyAgent(CitizenAgentBase):
         ),
         # social
         MemoryAttribute(
-            name="friends", type=list, default_or_value=[], description="agent's friends list"
-        ),
-        MemoryAttribute(
-            name="relationships",
-            type=dict,
-            default_or_value={},
-            description="agent's relationship strength with each friend",
-        ),
-        MemoryAttribute(
-            name="relation_types",
-            type=dict,
-            default_or_value={},
-            description="agent's relation types with each friend",
+            name="social_network",
+            type=list,
+            default_or_value=[],
+            description="all social network",
         ),
         MemoryAttribute(
             name="chat_histories",
@@ -241,9 +231,77 @@ You can add more blocks to the citizen as you wish to adapt to the different sce
         self.step_count = -1
         self.cognition_update = -1
 
+    async def status_summary(self):
+        """
+        Status summary
+        """
+        # Environment Information
+        current_time = self.context.current_time
+        weather = self.context.weather
+        temperature = self.context.temperature
+        other_information = self.context.other_information
+
+        # Agent Profile
+        name = await self.memory.status.get("name")
+        occupation = await self.memory.status.get("occupation")
+        age = await self.memory.status.get("age")
+        gender = await self.memory.status.get("gender")
+        education = await self.memory.status.get("education")
+        personality = await self.memory.status.get("personality")
+        background_story = await self.memory.status.get("background_story")
+
+        # Current Status
+        current_need = self.context.current_need
+        current_plan_target = self.context.plan_target
+        current_intention = self.context.current_intention
+        current_emotion = self.context.current_emotion
+        current_thought = self.context.current_thought
+        current_location = self.context.current_location
+
+        # Create LLM prompt for status description
+        status_description_prompt = f"""
+Based on the following information, provide a concise 1-2 sentence description of the agent's current status:
+
+**Agent Profile:**
+- Name: {name}
+- Age: {age}
+- Gender: {gender}
+- Occupation: {occupation}
+- Education: {education}
+- Personality: {personality}
+- Background: {background_story}
+
+**Current Environment:**
+- Time: {current_time}
+- Weather: {weather}
+- Temperature: {temperature}
+- Location: {current_location}
+- Other Information: {other_information}
+
+**Current Status:**
+- Current Need: {current_need}
+- Plan Target: {current_plan_target}
+- Current Intention: {current_intention}
+- Emotion: {current_emotion}
+- Thought: {current_thought}
+
+Please provide a natural, human-like description of what the agent is currently doing and feeling, considering their personality, current situation, and environment. Focus on the most relevant aspects that define their current state.
+
+Response format: 1-2 sentences describing the agent's current status from a first-person perspective.
+
+Example:
+"I am working at the office, the work is not too busy, but I am a bit tired."
+"""
+        summary_text = await self.llm.atext_request([
+            {"role": "system", "content": "You are an AI assistant that describes the current status of a citizen agent in a city simulation."},
+            {"role": "user", "content": status_description_prompt}
+        ])
+        await self.memory.status.update("status_summary", summary_text)
+
     async def before_forward(self):
         """Before forward"""
         await super().before_forward()
+        assert self.environment is not None
         # preparing context values
         # Current Time
         now_time = self.environment.get_datetime(format_time=True)
@@ -369,6 +427,7 @@ You can add more blocks to the citizen as you wish to adapt to the different sce
 
     async def check_and_update_step(self):
         """Check if the previous step has been completed"""
+        assert self.environment is not None
         status = await self.memory.status.get("status")
         if status == 2:
             # Agent is moving
@@ -469,19 +528,9 @@ You can add more blocks to the citizen as you wish to adapt to the different sce
                 if not sender_id:
                     return ""
 
-                raw_content = payload.get("content", "")
-
-                # Parse message content
-                try:
-                    message_data: Any = json_repair.loads(raw_content)
-                    content = message_data["content"]
-                    propagation_count = message_data.get("propagation_count", 1)
-                except (TypeError, KeyError):
-                    content = raw_content
-                    propagation_count = 1
-
-                if not content:
-                    return ""
+                content = payload.get("content", "Hello, how are you?")
+                if isinstance(content, dict):
+                    content = content.get("content", "Hello, how are you?")
 
                 # add social memory
                 description = f"You received a social message: {content}"
@@ -500,97 +549,89 @@ You can add more blocks to the citizen as you wish to adapt to the different sce
                     chat_histories[sender_id] = ""
                 if chat_histories[sender_id]:
                     chat_histories[sender_id] += "，"
-                chat_histories[sender_id] += f"them: {content}"
+                chat_histories[sender_id] += f"he/she: {content}"
 
-                # Check propagation limit
-                if propagation_count > 5:
-                    await self.memory.status.update("chat_histories", chat_histories)
-                    return ""
+                # Get relationship strength and type
+                my_social_network = await self.memory.status.get("social_network", [])
+                relationship_strength = 0.0
+                relationship_type = "I don't know him/her"
+                for relation in my_social_network:
+                    if relation.target_id == sender_id:
+                        relationship_strength = relation.strength
+                        relationship_type = relation.kind
+                        break
 
-                # Get relationship score
-                relationships = await self.memory.status.get("relationships") or {}
-                relationship_score = relationships.get(sender_id, 50)
+                recent_chat_history = chat_histories.get(sender_id, "No chat history")
+                get_logger().info(f"Recent chat history: {recent_chat_history}")
+                try:
+                    recent_chat_history = recent_chat_history[-200:]
+                except Exception as e:
+                    get_logger().warning(f"Error in do_chat (recent_chat_history): {str(e)}")
+                    recent_chat_history = "No chat history"
+
+                current_intention = "I am doing nothing"
+                current_plan = await self.memory.status.get("current_plan")
+                if (
+                    current_plan is None
+                    or not current_plan
+                    or len(current_plan.get("steps", [])) == 0
+                ):
+                    current_intention = "I am doing nothing"
+                else:
+                    step_index = current_plan.get("index", 0)
+                    current_step = current_plan.get("steps", [])[step_index]
+                    current_intention = current_step.get("intention", "I am doing nothing")
 
                 # Decision prompt
-                should_respond_prompt = f"""Based on:
-        - Received message: "{content}"
-        - Our relationship score: {relationship_score}/100
-        - My profile: {{
-            "gender": "{await self.memory.status.get("gender") or ""}",
-            "education": "{await self.memory.status.get("education") or ""}",
-            "personality": "{await self.memory.status.get("personality") or ""}",
-            "occupation": "{await self.memory.status.get("occupation") or ""}"
-        }}
-        - My current emotion: {await self.memory.status.get("emotion_types")}
-        - Recent chat history: {chat_histories.get(sender_id, "")}
+                should_respond_prompt = f"""
+My current action/intention is: {current_intention}
+My profile: 
+    - gender: {await self.memory.status.get("gender", "unknown")}
+    - education: {await self.memory.status.get("education", "unknown")}
+    - personality: {await self.memory.status.get("personality", "unknown")}
+    - occupation: {await self.memory.status.get("occupation", "unknown")}
+    - background_story: {await self.memory.status.get("background_story", "unknown")}
+My current emotion: {await self.memory.status.get("emotion_types", "unknown")}
 
-        Should I respond to this message? Consider:
-        1. Is this a message that needs/deserves a response?
-        2. Would it be natural for someone with my personality to respond?
-        3. Is our relationship close enough to warrant a response?
+I received a message:{content}
+    - My relationship strength with him/her: {relationship_strength}
+    - Our relationship type: {relationship_type}
+    - Recent chat history: {recent_chat_history}
 
-        Answer only YES or NO, in JSON format, e.g. {{"should_respond": "YES"}}"""
+Based on the above all information, should I respond to this message? If I should respond, what should I say?
+1. Is this a message that needs/deserves a response?
+2. If you think the conversation should end, you should not respond or end quick and say goodbye.
+3. If I should respond, what should I say? (only output the response content from a first person perspective, no other text)
+4. If I am busy, I should not respond or tell him/her that I am busy.
+5. The length of the social message should be less than 20 characters.
+6. If I need to respond, I should respond in a natural way, not like a robot, talk in the point but not nonsense.
 
-                should_respond = await self.llm.atext_request(
+Answer only YES or NO, in JSON format, e.g. {{"should_respond": "YES", "response_content": "Hello, how are you?(optional)"}}"""
+
+                respond = await self.llm.atext_request(
                     dialog=[
                         {
                             "role": "system",
-                            "content": "You are helping decide whether to respond to a message.",
+                            "content": "You are helping decide whether to respond to a message, and if so, what to say.",
                         },
                         {"role": "user", "content": should_respond_prompt},
                     ],
                     response_format={"type": "json_object"},
                 )
-                should_respond = json_repair.loads(should_respond)["should_respond"]  # type: ignore
+                should_respond = json_repair.loads(respond)["should_respond"]  # type: ignore
                 if should_respond == "NO":
                     return ""
-
-                response_prompt = f"""Based on:
-        - Received message: "{content}"
-        - Our relationship score: {relationship_score}/100
-        - My profile: {{
-            "gender": "{await self.memory.status.get("gender") or ""}",
-            "education": "{await self.memory.status.get("education") or ""}",
-            "personality": "{await self.memory.status.get("personality") or ""}",
-            "occupation": "{await self.memory.status.get("occupation") or ""}"
-        }}
-        - My current emotion: {await self.memory.status.get("emotion_types")}
-        - Recent chat history: {chat_histories.get(sender_id, "")}
-
-        Generate an appropriate response that:
-        1. Matches my personality and background
-        2. Maintains natural conversation flow
-        3. Is concise (under 100 characters)
-        4. Reflects our relationship level
-
-        Response should be ONLY the message text, no explanations."""
-
-                response = await self.llm.atext_request(
-                    [
-                        {
-                            "role": "system",
-                            "content": "You are helping generate a chat response.",
-                        },
-                        {"role": "user", "content": response_prompt},
-                    ]
-                )
-
-                if response:
+                response_content = json_repair.loads(respond)["response_content"]  # type: ignore
+                if response_content:
                     # Update chat history with response
-                    chat_histories[sender_id] += f"，me: {response}"
+                    chat_histories[sender_id] += f"，me: {response_content}"
                     await self.memory.status.update("chat_histories", chat_histories)
 
                     # Send response
-                    serialized_response = json.dumps(
-                        {
-                            "content": response,
-                            "propagation_count": propagation_count + 1,
-                        },
-                        ensure_ascii=False,
-                    )
-                    await self.send_message_to_agent(sender_id, serialized_response)
-                return response
-
+                    await self.send_message_to_agent(sender_id, response_content)
+                    return response_content
+                else:
+                    return ""
             except Exception as e:
                 get_logger().warning(f"SocietyAgent Error in do_chat: {str(e)}")
                 return ""
@@ -619,12 +660,14 @@ You can add more blocks to the citizen as you wish to adapt to the different sce
 
     async def reset_position(self):
         """Reset the position of the agent."""
+        assert self.environment is not None
         home = await self.status.get("home")
         home = home["aoi_position"]["aoi_id"]
         await self.environment.reset_person_position(person_id=self.id, aoi_id=home)
 
     async def step_execution(self):
         """Execute the current step in the active plan based on step type."""
+        assert self.environment is not None
         current_plan = await self.memory.status.get("current_plan")
         if (
             current_plan is None
