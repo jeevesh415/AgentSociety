@@ -12,5 +12,7 @@ dist/
 examples/
 frontend/dist/
 frontend/node_modules/
+extension/node_modules/
+extension/out/
 log/
 test/

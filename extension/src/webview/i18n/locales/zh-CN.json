@@ -1,0 +1,185 @@
+{
+  "simSettings": {
+    "title": "模拟环境配置",
+    "description": "配置用于检验该假设的模拟环境设置",
+    "descriptionDetail": "配置将用于检验该假设的模拟实验中的智能体类和环境模块。这些设置定义了用于验证研究假设的模拟环境。",
+    "agentClasses": {
+      "title": "智能体类",
+      "description": "选择将参与模拟以检验该假设的智能体类。",
+      "placeholder": "选择智能体类（可多选）",
+      "hint": "点击卡片查看完整描述",
+      "viewDescription": "查看描述",
+      "selected": "已选择",
+      "available": "可用"
+    },
+    "envModules": {
+      "title": "环境模块",
+      "description": "选择将用于创建检验该假设的模拟环境的环境模块。",
+      "placeholder": "选择环境模块（可多选）",
+      "hint": "点击卡片查看完整描述",
+      "viewDescription": "查看描述",
+      "selected": "已选择",
+      "available": "可用"
+    },
+    "save": "保存设置",
+    "loadDefaults": "重置为默认值",
+    "saved": "设置已保存",
+    "loading": "正在加载智能体类和环境模块...",
+    "note": {
+      "title": "说明：",
+      "text1": "选中的智能体类和环境模块定义了将用于检验和验证该假设的模拟环境。",
+      "text2": "这些设置决定了将参与模拟的智能体类型以及它们将交互的环境条件。",
+      "text3": "更改将自动保存到 SIM_SETTINGS.json 文件中。"
+    },
+    "descriptionModal": {
+      "title": "描述",
+      "noDescription": "暂无描述"
+    },
+    "close": "关闭",
+    "add": "添加",
+    "remove": "移除"
+  },
+  "chat": {
+    "title": "AI 助手",
+    "placeholder": "输入您的问题或请求... (Shift+Enter 换行)",
+    "send": "发送",
+    "clear": "清除对话",
+    "checkHealth": "检查连接状态",
+    "connected": "已连接",
+    "disconnected": "未连接",
+    "disconnectedWithUrl": "未连接: {{url}}",
+    "thinking": "思考中...",
+    "generating": "正在生成回复...",
+    "you": "您",
+    "assistant": "AI 助手",
+    "startChat": "开始与 AI 对话...",
+    "error": "错误",
+    "appTitle": "AI Social Scientist",
+    "toolCalling": "调用工具",
+    "filesSaved": "已保存文件",
+    "clearChatTitle": "清除对话",
+    "history": "历史",
+    "historyTitle": "历史会话",
+    "processing": "处理中...",
+    "processed": "处理完成",
+    "eventsCount": "个事件",
+    "view": "查看",
+    "reply": "回复",
+    "replyPrompt": "请输入回复内容：",
+    "noHistory": "暂无历史会话",
+    "messagesCount": "条消息",
+    "toolStatus": {
+      "start": "开始执行",
+      "started": "已开始",
+      "progress": "执行中",
+      "progressed": "已执行",
+      "success": "执行成功",
+      "error": "执行失败"
+    },
+    "events": "事件",
+    "showEvents": "显示事件",
+    "hideEvents": "隐藏事件",
+    "eventLog": "事件日志",
+    "eventLogWithCount": "事件日志 ({{count}} 个事件)",
+    "clearLog": "清除日志"
+  },
+  "prefillParams": {
+    "title": "预填充参数",
+    "loading": "正在加载预填充参数...",
+    "error": "错误",
+    "refresh": "刷新",
+    "searchPlaceholder": "搜索类...",
+    "noClasses": "未找到类",
+    "selectClass": "选择一个类以查看其预填充参数",
+    "classInfo": {
+      "className": "类名",
+      "kind": "类型",
+      "description": "描述",
+      "prefillParams": "预填充参数",
+      "noPrefillParams": "此类未配置预填充参数",
+      "hasPrefill": "已配置预填充参数",
+      "envModule": "环境模块",
+      "agent": "智能体"
+    },
+    "errorMessages": {
+      "loadFailed": "加载数据失败",
+      "noWorkspace": "未找到工作区文件夹"
+    }
+  },
+  "replay": {
+    "loading": "正在加载回放数据...",
+    "loadingExperiment": "实验: {{id}}",
+    "errorTitle": "加载回放失败",
+    "retry": "重试",
+    "noData": "暂无回放数据",
+    "noDataHint": "本实验没有已记录的仿真步骤。请确保仿真已开启回放记录。",
+    "left": {
+      "agentInfo": "智能体信息",
+      "selectAgent": "在地图上选择智能体以查看详情",
+      "currentStatus": "当前状态",
+      "statusHistory": "状态历史",
+      "noHistoryData": "暂无历史数据",
+      "step": "步骤 {{step}}",
+      "stepCurrent": "（当前）",
+      "name": "姓名",
+      "gender": "性别",
+      "age": "年龄",
+      "education": "学历",
+      "occupation": "职业",
+      "marriage_status": "婚姻状况",
+      "background_story": "背景故事",
+      "selectAgentPlaceholder": "选择智能体",
+      "unknown": "未知"
+    },
+    "right": {
+      "database": "数据库",
+      "posts": "帖子",
+      "reflection": "反思",
+      "chat": "聊天",
+      "selectTable": "选择数据表",
+      "viewTable": "查看数据表: {{name}}",
+      "selectTableHint": "请选择一个表以查看数据",
+      "tableTitle": "数据表: {{name}}",
+      "loading": "加载中...",
+      "waitingData": "等待数据...",
+      "noPosts": "暂无帖子（随时间线步进加载）",
+      "postDetail": "帖子详情",
+      "postByAuthor": "帖子 · {{author}}",
+      "likes": "点赞",
+      "comments": "评论",
+      "reposts": "转发",
+      "commentsSection": "评论",
+      "noComments": "暂无评论",
+      "noReflection": "暂无反思记录",
+      "privateChat": "私聊",
+      "groupChat": "群聊",
+      "noDm": "暂无私信",
+      "noGroup": "暂无群聊",
+      "conversationWith": "与 {{name}} 的对话",
+      "messagesCount": "{{count}} 条消息",
+      "username": "用户名",
+      "following": "关注",
+      "followers": "粉丝",
+      "userId": "用户 {{id}}",
+      "groupId": "群组 {{id}}"
+    },
+    "timeline": {
+      "status": "实验状态",
+      "refresh": "刷新",
+      "step": "步骤 {{current}} / {{total}}",
+      "stepTooltip": "步骤 {{step}} - {{time}}"
+    },
+    "map": {
+      "loadFailed": "地图加载失败"
+    },
+    "placeholder": {
+      "noLocation": "暂无位置数据",
+      "noLocationHint": "未使用 MobilitySpace 环境的智能体不会产生位置数据",
+      "agentPositions": "智能体位置 ({{count}} 个)",
+      "mapIntegration": "地图集成",
+      "mapIntegrationHint": "如需使用 DeckGL + Mapbox 进行交互式地图展示，请安装依赖：",
+      "installHint": "npm install deck.gl react-map-gl mapbox-gl"
+    }
+  }
+}
+
