@@ -1,0 +1,359 @@
+{
+  "name": "ai-social-scientist",
+  "displayName": "AI Social Scientist",
+  "description": "AI Social Scientist - Next-generation human-AI interaction interface for social science research",
+  "version": "0.0.1",
+  "publisher": "tsinghua-fib-lab",
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/tsinghua-fib-lab/agentsociety.git"
+  },
+  "engines": {
+    "vscode": "^1.80.0"
+  },
+  "categories": [
+    "Other"
+  ],
+  "activationEvents": [
+    "onStartupFinished"
+  ],
+  "icon": "resources/icon128.png",
+  "main": "./out/extension.js",
+  "contributes": {
+    "views": {
+      "aiSocialScientist": [
+        {
+          "id": "projectStructureView",
+          "name": "Project Structure",
+          "when": "workspaceFolderCount > 0"
+        }
+      ]
+    },
+    "viewsContainers": {
+      "activitybar": [
+        {
+          "id": "aiSocialScientist",
+          "title": "AI Social Scientist",
+          "icon": "resources/activitybar.png"
+        }
+      ]
+    },
+    "commands": [
+      {
+        "command": "aiSocialScientist.initProject",
+        "title": "AI Social Scientist: Initialize Research Project",
+        "icon": "$(add)"
+      },
+      {
+        "command": "aiSocialScientist.openChat",
+        "title": "AI Social Scientist: Open AI Chat",
+        "icon": "$(comment-discussion)"
+      },
+      {
+        "command": "aiSocialScientist.deleteLiterature",
+        "title": "AI Social Scientist: Delete Literature",
+        "icon": "$(trash)"
+      },
+      {
+        "command": "aiSocialScientist.renameLiterature",
+        "title": "AI Social Scientist: Rename Literature",
+        "icon": "$(edit)"
+      },
+      {
+        "command": "aiSocialScientist.parseWithMinerU",
+        "title": "AI Social Scientist: Parse with MinerU",
+        "icon": "$(file-code)"
+      },
+      {
+        "command": "aiSocialScientist.openMarkdownInEditor",
+        "title": "AI Social Scientist: Open Markdown in Editor",
+        "icon": "$(edit)"
+      },
+      {
+        "command": "agentsociety.viewPrefillParams",
+        "title": "AI Social Scientist: View Prefill Parameters",
+        "icon": "$(settings)"
+      },
+      {
+        "command": "aiSocialScientist.openReplay",
+        "title": "AI Social Scientist: Open Simulation Replay",
+        "icon": "$(play-circle)"
+      },
+      {
+        "command": "aiSocialScientist.startBackend",
+        "title": "AI Social Scientist: Start Backend Service",
+        "icon": "$(play)"
+      },
+      {
+        "command": "aiSocialScientist.stopBackend",
+        "title": "AI Social Scientist: Stop Backend Service",
+        "icon": "$(stop)"
+      },
+      {
+        "command": "aiSocialScientist.restartBackend",
+        "title": "AI Social Scientist: Restart Backend Service",
+        "icon": "$(refresh)"
+      },
+      {
+        "command": "aiSocialScientist.showBackendLogs",
+        "title": "AI Social Scientist: Show Backend Logs",
+        "icon": "$(output)"
+      },
+      {
+        "command": "aiSocialScientist.showBackendStatus",
+        "title": "AI Social Scientist: Show Backend Status",
+        "icon": "$(info)"
+      }
+    ],
+    "menus": {
+      "view/title": [
+        {
+          "command": "aiSocialScientist.openChat",
+          "when": "view == projectStructureView",
+          "group": "navigation",
+          "icon": "$(comment-discussion)"
+        },
+        {
+          "command": "aiSocialScientist.initProject",
+          "when": "view == projectStructureView",
+          "group": "navigation"
+        }
+      ],
+      "view/item/context": [
+        {
+          "command": "aiSocialScientist.openReplay",
+          "when": "view == projectStructureView && viewItem == experiment",
+          "group": "1_actions"
+        },
+        {
+          "command": "aiSocialScientist.deleteLiterature",
+          "when": "view == projectStructureView && (viewItem == paper || viewItem == file || viewItem =~ /markdown/)",
+          "group": "1_modification"
+        },
+        {
+          "command": "aiSocialScientist.renameLiterature",
+          "when": "view == projectStructureView && (viewItem == paper || viewItem == file || viewItem =~ /markdown/)",
+          "group": "1_modification"
+        },
+        {
+          "command": "aiSocialScientist.parseWithMinerU",
+          "when": "view == projectStructureView && viewItem == paper",
+          "group": "2_actions"
+        },
+        {
+          "command": "aiSocialScientist.openMarkdownInEditor",
+          "when": "view == projectStructureView && viewItem =~ /markdown/",
+          "group": "2_actions"
+        }
+      ]
+    },
+    "webview": [
+      {
+        "viewType": "aiSocialScientistChat",
+        "title": "AI Chat",
+        "icon": "$(comment-discussion)"
+      }
+    ],
+    "customEditors": [
+      {
+        "viewType": "aiSocialScientist.simSettings",
+        "displayName": "SIM Settings Editor",
+        "selector": [
+          {
+            "filenamePattern": "**/SIM_SETTINGS.json"
+          }
+        ],
+        "priority": "default"
+      }
+    ],
+    "configuration": {
+      "title": "AI Social Scientist",
+      "properties": {
+        "aiSocialScientist.backendUrl": {
+          "type": "string",
+          "default": "http://localhost:8001",
+          "description": "FastAPI后端服务的URL地址",
+          "markdownDescription": "FastAPI后端服务的URL地址。默认为 `http://localhost:8001`"
+        },
+        "aiSocialScientist.backend.autoStart": {
+          "type": "boolean",
+          "default": true,
+          "description": "是否在插件启动时自动启动后端服务",
+          "markdownDescription": "如果启用，插件启动时会自动启动后端服务。如果禁用，需要手动启动后端服务。"
+        },
+        "aiSocialScientist.backend.pythonPath": {
+          "type": "string",
+          "default": "",
+          "description": "Python可执行文件的路径",
+          "markdownDescription": "Python可执行文件的路径。如果为空，将自动检测 `python3` 或 `python`。例如：`/usr/bin/python3` 或 `python3`"
+        },
+        "aiSocialScientist.env.backendHost": {
+          "type": "string",
+          "default": "127.0.0.1",
+          "description": "后端服务监听的主机地址",
+          "markdownDescription": "后端服务监听的主机地址。默认为 `0.0.0.0`（监听所有网络接口）。"
+        },
+        "aiSocialScientist.env.backendPort": {
+          "type": "number",
+          "default": 8001,
+          "description": "后端服务监听的端口号",
+          "markdownDescription": "后端服务监听的端口号。默认为 `8001`。"
+        },
+        "aiSocialScientist.env.backendLogLevel": {
+          "type": "string",
+          "default": "info",
+          "enum": ["critical", "error", "warning", "info", "debug", "trace"],
+          "description": "后端服务的日志级别",
+          "markdownDescription": "后端服务的日志级别。可选值：`critical`, `error`, `warning`, `info`, `debug`, `trace`。默认为 `info`。"
+        },
+        "aiSocialScientist.env.llmApiKey": {
+          "type": "string",
+          "default": "",
+          "description": "默认LLM服务的API密钥（必需）",
+          "markdownDescription": "默认LLM服务的API密钥。这是必需的配置项，用于大多数LLM操作。对应环境变量 `AGENTSOCIETY_LLM_API_KEY`。"
+        },
+        "aiSocialScientist.env.llmApiBase": {
+          "type": "string",
+          "default": "https://cloud.infini-ai.com/maas/v1",
+          "description": "默认LLM服务的API基础URL",
+          "markdownDescription": "默认LLM服务的API基础URL。应该指向支持OpenAI兼容API的端点。默认为 `https://cloud.infini-ai.com/maas/v1`。"
+        },
+        "aiSocialScientist.env.llmModel": {
+          "type": "string",
+          "default": "qwen3-next-80b-a3b-instruct",
+          "description": "默认LLM模型名称",
+          "markdownDescription": "默认LLM模型名称，用于大多数语言理解和生成任务。默认为 `qwen3-next-80b-a3b-instruct`。"
+        },
+        "aiSocialScientist.env.coderLlmApiKey": {
+          "type": "string",
+          "default": "",
+          "description": "代码生成LLM的API密钥（可选）",
+          "markdownDescription": "代码生成LLM的API密钥。如果未设置，将回退到默认LLM API密钥。对应环境变量 `AGENTSOCIETY_CODER_LLM_API_KEY`。"
+        },
+        "aiSocialScientist.env.coderLlmApiBase": {
+          "type": "string",
+          "default": "",
+          "description": "代码生成LLM的API基础URL（可选）",
+          "markdownDescription": "代码生成LLM的API基础URL。如果未设置，将回退到默认LLM API基础URL。对应环境变量 `AGENTSOCIETY_CODER_LLM_API_BASE`。"
+        },
+        "aiSocialScientist.env.coderLlmModel": {
+          "type": "string",
+          "default": "glm-4.7",
+          "description": "代码生成LLM模型名称",
+          "markdownDescription": "代码生成LLM模型名称，专门用于代码生成、代码分析等编程相关操作。默认为 `glm-4.7`。"
+        },
+        "aiSocialScientist.env.nanoLlmApiKey": {
+          "type": "string",
+          "default": "",
+          "description": "高频操作LLM的API密钥（可选）",
+          "markdownDescription": "高频操作LLM的API密钥，用于需要频繁、快速响应的操作。如果未设置，将回退到默认LLM API密钥。对应环境变量 `AGENTSOCIETY_NANO_LLM_API_KEY`。"
+        },
+        "aiSocialScientist.env.nanoLlmApiBase": {
+          "type": "string",
+          "default": "",
+          "description": "高频操作LLM的API基础URL（可选）",
+          "markdownDescription": "高频操作LLM的API基础URL。如果未设置，将回退到默认LLM API基础URL。对应环境变量 `AGENTSOCIETY_NANO_LLM_API_BASE`。"
+        },
+        "aiSocialScientist.env.nanoLlmModel": {
+          "type": "string",
+          "default": "qwen3-next-80b-a3b-instruct",
+          "description": "高频操作LLM模型名称",
+          "markdownDescription": "高频操作LLM模型名称，用于需要快速响应的操作，如内存检索、快速推理等。默认为 `qwen3-next-80b-a3b-instruct`。"
+        },
+        "aiSocialScientist.env.embeddingApiKey": {
+          "type": "string",
+          "default": "",
+          "description": "Embedding模型的API密钥（可选）",
+          "markdownDescription": "Embedding模型的API密钥，用于文本嵌入操作。如果未设置，将回退到默认LLM API密钥。对应环境变量 `AGENTSOCIETY_EMBEDDING_API_KEY`。"
+        },
+        "aiSocialScientist.env.embeddingApiBase": {
+          "type": "string",
+          "default": "",
+          "description": "Embedding模型的API基础URL（可选）",
+          "markdownDescription": "Embedding模型的API基础URL。如果未设置，将回退到默认LLM API基础URL。对应环境变量 `AGENTSOCIETY_EMBEDDING_API_BASE`。"
+        },
+        "aiSocialScientist.env.embeddingModel": {
+          "type": "string",
+          "default": "bge-m3",
+          "description": "Embedding模型名称",
+          "markdownDescription": "Embedding模型名称，用于将文本转换为向量表示。默认为 `bge-m3`。"
+        },
+        "aiSocialScientist.env.embeddingDims": {
+          "type": "number",
+          "default": 1024,
+          "description": "Embedding向量的维度",
+          "markdownDescription": "Embedding向量的维度。更高的维度可以捕获更细微的语义信息，但需要更多存储和计算。默认为 `1024`。"
+        },
+        "aiSocialScientist.env.miroflowMcpUrl": {
+          "type": "string",
+          "default": "",
+          "description": "MiroFlow MCP服务的URL（可选）",
+          "markdownDescription": "MiroFlow MCP HTTP端点的基础URL。例如：`http://127.0.0.1:18001/mcp/`。对应环境变量 `MIROFLOW_MCP_URL`。"
+        },
+        "aiSocialScientist.env.miroflowMcpToken": {
+          "type": "string",
+          "default": "",
+          "description": "MiroFlow MCP服务的认证令牌（可选）",
+          "markdownDescription": "MiroFlow MCP服务器的认证令牌，将作为Bearer token在Authorization头中发送。对应环境变量 `MIROFLOW_MCP_TOKEN`。"
+        },
+        "aiSocialScientist.env.miroflowDefaultLlm": {
+          "type": "string",
+          "default": "qwen-3",
+          "description": "MiroFlow MCP任务使用的默认LLM模型名称",
+          "markdownDescription": "MiroFlow MCP任务使用的默认LLM模型名称。默认为 `qwen-3`。对应环境变量 `MIROFLOW_DEFAULT_LLM`。"
+        },
+        "aiSocialScientist.env.miroflowDefaultAgent": {
+          "type": "string",
+          "default": "mirothinker_v1.5_keep5_max200",
+          "description": "MiroFlow MCP任务使用的默认Agent配置名称",
+          "markdownDescription": "MiroFlow MCP任务使用的默认Agent配置名称。默认为 `mirothinker_v1.5_keep5_max200`。对应环境变量 `MIROFLOW_DEFAULT_AGENT`。"
+        }
+      }
+    }
+  },
+  "scripts": {
+    "vscode:prepublish": "npm run compile && npm run build-webview",
+    "compile": "tsc -p ./",
+    "watch": "tsc -watch -p ./",
+    "build-webview": "webpack --mode production",
+    "watch-webview": "webpack --mode development --watch",
+    "pretest": "npm run compile && npm run lint",
+    "lint": "eslint src --ext ts",
+    "test": "node ./out/test/runTest.js"
+  },
+  "devDependencies": {
+    "@types/node": "^20.0.0",
+    "@types/react": "^18.2.0",
+    "@types/react-dom": "^18.2.0",
+    "@types/vscode": "^1.80.0",
+    "@typescript-eslint/eslint-plugin": "^6.0.0",
+    "@typescript-eslint/parser": "^6.0.0",
+    "css-loader": "^6.8.1",
+    "eslint": "^8.0.0",
+    "less": "^4.2.0",
+    "less-loader": "^12.2.0",
+    "style-loader": "^3.3.3",
+    "ts-loader": "^9.4.4",
+    "typescript": "^5.0.0",
+    "vscode": "^1.1.37",
+    "webpack": "^5.104.1",
+    "webpack-cli": "^5.1.4"
+  },
+  "dependencies": {
+    "@ant-design/icons": "^5.2.0",
+    "@ant-design/x": "^2.0.0",
+    "@ant-design/x-markdown": "^2.1.1",
+    "@deck.gl/core": "^9.0.38",
+    "@deck.gl/layers": "^9.0.38",
+    "@deck.gl/react": "^9.0.38",
+    "antd": "^6.0.0",
+    "dayjs": "^1.11.19",
+    "i18next": "^23.7.0",
+    "mapbox-gl": "^3.9.0",
+    "react": "^18.2.0",
+    "react-dom": "^18.2.0",
+    "react-i18next": "^13.5.0",
+    "react-map-gl": "~7.1.7"
+  },
+  "packageManager": "pnpm@10.7.0+sha512.6b865ad4b62a1d9842b61d674a393903b871d9244954f652b8842c2b553c72176b278f64c463e52d40fff8aba385c235c8c9ecf5cc7de4fd78b8bb6d49633ab6"
+}

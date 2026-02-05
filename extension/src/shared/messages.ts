@@ -1,0 +1,218 @@
+/**
+ * AI Social Scientist - 统一消息协议
+ *
+ * 定义 Extension ↔ WebView 双向通信的所有消息类型
+ */
+
+// ============================================================================
+// SSE 事件类型 (与后端对齐)
+// ============================================================================
+
+export type SSEEventType = 'message' | 'tool' | 'complete' | 'heartbeat';
+
+export interface MessageSSEEvent {
+  type: 'message';
+  content: string;
+  is_thinking: boolean;
+  is_error: boolean;
+}
+
+export interface ToolSSEEvent {
+  type: 'tool';
+  content: string;
+  tool_name: string;
+  tool_id: string;
+  status: 'start' | 'progress' | 'success' | 'error';
+}
+
+export interface CompleteSSEEvent {
+  type: 'complete';
+  content: string;
+}
+
+export interface HeartbeatSSEEvent {
+  type: 'heartbeat';
+  content: string;
+}
+
+export type SSEEvent =
+  | MessageSSEEvent
+  | ToolSSEEvent
+  | CompleteSSEEvent
+  | HeartbeatSSEEvent;
+
+// ============================================================================
+// 基础类型
+// ============================================================================
+
+export interface ChatMessage {
+  id: string;
+  role: 'user' | 'assistant';
+  content: string;
+  timestamp: number;
+}
+
+export interface HistoryItem {
+  fileName: string;
+  startTime?: string;
+  displayName: string;
+}
+
+export interface ConversationProcess {
+  id: string;
+  userMessage: string;
+  events: Array<{ event: SSEEvent; timestamp: number }>;
+  isComplete: boolean;
+  finalContent: string | null;
+  isExpanded: boolean;
+}
+
+export interface BackendStatus {
+  connected: boolean;
+  url?: string;
+  error?: string;
+}
+
+// ============================================================================
+// WebView → Extension 消息
+// ============================================================================
+
+/** 发送聊天消息 */
+export interface SendMessageCommand {
+  command: 'sendMessage';
+  text: string;
+}
+
+/** 清空对话 */
+export interface ClearChatCommand {
+  command: 'clearChat';
+}
+
+/** 检查后端健康状态 */
+export interface CheckHealthCommand {
+  command: 'checkHealth';
+}
+
+/** 打开文件 */
+export interface OpenFileCommand {
+  command: 'openFile';
+  filePath: string;
+  line?: number;
+}
+
+/** 加载历史记录 */
+export interface LoadHistoryCommand {
+  command: 'loadHistory';
+  historyFileName: string;
+}
+
+/** 列出所有历史 */
+export interface ListHistoriesCommand {
+  command: 'listHistories';
+}
+
+/** 工具权限响应 */
+export interface ToolPermissionResponseCommand {
+  command: 'toolPermissionResponse';
+  requestId: string;
+  approved: boolean;
+  remember?: boolean;
+}
+
+/** 中断当前对话 */
+export interface InterruptCommand {
+  command: 'interrupt';
+}
+
+/** WebView → Extension 所有消息类型 */
+export type WebViewToExtensionMessage =
+  | SendMessageCommand
+  | ClearChatCommand
+  | CheckHealthCommand
+  | OpenFileCommand
+  | LoadHistoryCommand
+  | ListHistoriesCommand
+  | ToolPermissionResponseCommand
+  | InterruptCommand;
+
+// ============================================================================
+// Extension → WebView 消息
+// ============================================================================
+
+/** SSE 事件 */
+export interface SSEEventMessage {
+  command: 'sseEvent';
+  event: SSEEvent;
+}
+
+/** 清空消息 */
+export interface ClearMessagesMessage {
+  command: 'clearMessages';
+}
+
+/** 后端状态 */
+export interface BackendStatusMessage {
+  command: 'backendStatus';
+  connected: boolean;
+  url?: string;
+}
+
+/** 打开文件确认 */
+export interface OpenFileMessage {
+  command: 'openFile';
+  filePath: string;
+}
+
+/** 历史加载完成 */
+export interface HistoryLoadedMessage {
+  command: 'historyLoaded';
+  messages: ChatMessage[];
+  startTime?: string;
+  sseEvents?: Array<{
+    userMessageIndex: number;
+    events: Array<{ event: SSEEvent; timestamp: number }>;
+  }>;
+}
+
+/** 历史列表 */
+export interface HistoryListMessage {
+  command: 'historyList';
+  histories: HistoryItem[];
+}
+
+/** 历史加载错误 */
+export interface HistoryLoadErrorMessage {
+  command: 'historyLoadError';
+  error: string;
+}
+
+/** 工具权限请求 (新增) */
+export interface ToolPermissionRequestMessage {
+  command: 'toolPermissionRequest';
+  requestId: string;
+  toolName: string;
+  toolInput: Record<string, unknown>;
+  description: string;
+  riskLevel: 'low' | 'medium' | 'high';
+}
+
+/** 实验状态更新 (新增) */
+export interface ExperimentStatusMessage {
+  command: 'experimentStatus';
+  experimentId: string;
+  status: 'pending' | 'running' | 'completed' | 'failed';
+  progress?: number;
+  message?: string;
+}
+
+/** Extension → WebView 所有消息类型 */
+export type ExtensionToWebViewMessage =
+  | SSEEventMessage
+  | ClearMessagesMessage
+  | BackendStatusMessage
+  | OpenFileMessage
+  | HistoryLoadedMessage
+  | HistoryListMessage
+  | HistoryLoadErrorMessage
+  | ToolPermissionRequestMessage
+  | ExperimentStatusMessage;

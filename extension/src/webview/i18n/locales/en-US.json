@@ -1,0 +1,185 @@
+{
+  "simSettings": {
+    "title": "SIM Settings Configuration",
+    "description": "Configure the simulation environment settings for testing this hypothesis",
+    "descriptionDetail": "Configure the agent classes and environment modules that will be used to test this hypothesis in the simulation experiment. These settings define the simulation environment for validating your research hypothesis.",
+    "agentClasses": {
+      "title": "Agent Classes",
+      "description": "Select the agent classes that will participate in the simulation to test this hypothesis.",
+      "placeholder": "Select agent classes (multiple selection)",
+      "hint": "Click on a card to view full description",
+      "viewDescription": "View Description",
+      "selected": "Selected",
+      "available": "Available"
+    },
+    "envModules": {
+      "title": "Environment Modules",
+      "description": "Select the environment modules that will be used to create the simulation environment for testing this hypothesis.",
+      "placeholder": "Select environment modules (multiple selection)",
+      "hint": "Click on a card to view full description",
+      "viewDescription": "View Description",
+      "selected": "Selected",
+      "available": "Available"
+    },
+    "save": "Save Settings",
+    "loadDefaults": "Load Defaults",
+    "saved": "Settings saved successfully",
+    "loading": "Loading agent classes and environment modules...",
+    "note": {
+      "title": "Note:",
+      "text1": "The selected agent classes and environment modules define the simulation environment that will be used to test and validate this hypothesis.",
+      "text2": "These settings determine what types of agents will participate in the simulation and what environmental conditions they will interact with.",
+      "text3": "Changes will be saved to SIM_SETTINGS.json automatically."
+    },
+    "descriptionModal": {
+      "title": "Description",
+      "noDescription": "No description available"
+    },
+    "close": "Close",
+    "add": "Add",
+    "remove": "Remove"
+  },
+  "chat": {
+    "title": "AI Assistant",
+    "placeholder": "Enter your question or request... (Shift+Enter for new line)",
+    "send": "Send",
+    "clear": "Clear Chat",
+    "checkHealth": "Check Connection Status",
+    "connected": "Connected",
+    "disconnected": "Disconnected",
+    "disconnectedWithUrl": "Disconnected: {{url}}",
+    "thinking": "Thinking...",
+    "generating": "Generating response...",
+    "you": "You",
+    "assistant": "AI Assistant",
+    "startChat": "Start chatting with AI...",
+    "error": "Error",
+    "appTitle": "AI Social Scientist",
+    "toolCalling": "Calling Tools",
+    "filesSaved": "Saved Files",
+    "clearChatTitle": "Clear Chat",
+    "history": "History",
+    "historyTitle": "History Conversations",
+    "processing": "Processing...",
+    "processed": "Processed",
+    "eventsCount": " events",
+    "view": "View",
+    "reply": "Reply",
+    "replyPrompt": "Enter reply content:",
+    "noHistory": "No history conversations",
+    "messagesCount": " messages",
+    "toolStatus": {
+      "start": "Starting",
+      "started": "Started",
+      "progress": "In Progress",
+      "progressed": "Executed",
+      "success": "Success",
+      "error": "Failed"
+    },
+    "events": "Events",
+    "showEvents": "Show Events",
+    "hideEvents": "Hide Events",
+    "eventLog": "Event Log",
+    "eventLogWithCount": "Event Log ({{count}} events)",
+    "clearLog": "Clear Log"
+  },
+  "prefillParams": {
+    "title": "Prefill Parameters",
+    "loading": "Loading prefill parameters...",
+    "error": "Error",
+    "refresh": "Refresh",
+    "searchPlaceholder": "Search classes...",
+    "noClasses": "No classes found",
+    "selectClass": "Select a class to view its prefill parameters",
+    "classInfo": {
+      "className": "Class Name",
+      "kind": "Kind",
+      "description": "Description",
+      "prefillParams": "Prefill Parameters",
+      "noPrefillParams": "This class does not have any prefill parameters configured.",
+      "hasPrefill": "Has prefill parameters",
+      "envModule": "Environment Module",
+      "agent": "Agent"
+    },
+    "errorMessages": {
+      "loadFailed": "Failed to load data",
+      "noWorkspace": "No workspace folder found"
+    }
+  },
+  "replay": {
+    "loading": "Loading replay data...",
+    "loadingExperiment": "Experiment: {{id}}",
+    "errorTitle": "Error loading replay",
+    "retry": "Retry",
+    "noData": "No replay data available",
+    "noDataHint": "This experiment doesn't have any recorded simulation steps. Make sure the simulation was run with replay recording enabled.",
+    "left": {
+      "agentInfo": "Agent Information",
+      "selectAgent": "Select an Agent on the map to view details",
+      "currentStatus": "Current Status",
+      "statusHistory": "Status History",
+      "noHistoryData": "No history data",
+      "step": "Step {{step}}",
+      "stepCurrent": "(current)",
+      "name": "Name",
+      "gender": "Gender",
+      "age": "Age",
+      "education": "Education",
+      "occupation": "Occupation",
+      "marriage_status": "Marriage Status",
+      "background_story": "Background Story",
+      "selectAgentPlaceholder": "Select an Agent",
+      "unknown": "Unknown"
+    },
+    "right": {
+      "database": "Database",
+      "posts": "Posts",
+      "reflection": "Reflection",
+      "chat": "Chat",
+      "selectTable": "Select table",
+      "viewTable": "View table: {{name}}",
+      "selectTableHint": "Select a table to view data",
+      "tableTitle": "Table: {{name}}",
+      "loading": "Loading...",
+      "waitingData": "Waiting for data...",
+      "noPosts": "No posts (loaded by timeline step)",
+      "postDetail": "Post detail",
+      "postByAuthor": "Post · {{author}}",
+      "likes": "Likes",
+      "comments": "Comments",
+      "reposts": "Reposts",
+      "commentsSection": "Comments",
+      "noComments": "No comments",
+      "noReflection": "No reflection records",
+      "privateChat": "Private",
+      "groupChat": "Group",
+      "noDm": "No direct messages",
+      "noGroup": "No group chats",
+      "conversationWith": "Chat with {{name}}",
+      "messagesCount": "{{count}} messages",
+      "username": "Username",
+      "following": "Following",
+      "followers": "Followers",
+      "userId": "User {{id}}",
+      "groupId": "Group {{id}}"
+    },
+    "timeline": {
+      "status": "Experiment status",
+      "refresh": "Refresh",
+      "step": "Step {{current}} / {{total}}",
+      "stepTooltip": "Step {{step}} - {{time}}"
+    },
+    "map": {
+      "loadFailed": "Map failed to load"
+    },
+    "placeholder": {
+      "noLocation": "No location data available",
+      "noLocationHint": "Agents without MobilitySpace environment won't have position data",
+      "agentPositions": "Agent positions ({{count}} agents)",
+      "mapIntegration": "Map Integration",
+      "mapIntegrationHint": "For interactive map visualization with DeckGL and Mapbox, install the required dependencies:",
+      "installHint": "npm install deck.gl react-map-gl mapbox-gl"
+    }
+  }
+}
+

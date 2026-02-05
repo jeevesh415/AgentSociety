@@ -1,4 +1,4 @@
-.vscode/
+scientist_demo/
 docs/_build/
 *.mo
 .env
@@ -26,3 +26,16 @@ agentsociety-sim
 agentsociety-ui
 agentsociety_data/
 .agentsociety-benchmark/
+logs/
+*.txt
+*.pb
+*.pb.*
+venv_arm/
+mobibench/
+*.pkl
+benchmark_results/
+.agentsociety/
+groundtruth/
+.env.*
+*.json
+.vscode/

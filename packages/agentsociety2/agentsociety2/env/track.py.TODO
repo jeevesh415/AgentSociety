@@ -1,0 +1,317 @@
+"""
+Track mechanism for caching Router execution paths in AgentSociety V2
+This module provides Just-In-Time compilation-like optimization for Router calls
+"""
+
+from typing import Any, Dict, List, Optional
+import asyncio
+from datetime import datetime
+from pydantic import BaseModel, Field
+import uuid
+
+from qdrant_client import QdrantClient
+from qdrant_client.models import Distance, VectorParams, PointStruct
+import litellm
+
+from agentsociety2.logger import get_logger
+from agentsociety2.env.base import EnvLLM
+
+__all__ = [
+    "Track",
+    "TrackCache",
+]
+
+
+class Track(BaseModel):
+    """Complete execution track for an instruction"""
+
+    instruction: str
+    """
+    Used to match new instructions
+    """
+    initial_context: Dict[str, Any]
+    """
+    Used to match new context for checking keys and variable types
+    """
+    module_calls: List[ModuleCall] = Field(default_factory=list)
+    """
+    The execution history of the environment modules.
+    """
+    hit_count: int = 0
+    """
+    The number of times the track has been used.
+    """
+    fail_count: int = 0
+    """
+    The number of times the track has failed.
+    """
+    last_used: datetime = Field(default_factory=datetime.now)
+    """
+    The last time the track was used.
+    """
+
+
+class TrackCache:
+    """Cache for execution tracks stored in memory using Qdrant vector database"""
+
+    def __init__(
+        self,
+        llm: EnvLLM,
+        similarity_threshold: float,
+    ):
+        """
+        Initialize track cache with embedding-based retrieval
+
+        Args:
+            llm: EnvLLM object
+            similarity_threshold: Minimum similarity score (0-1) for track retrieval
+        """
+        self.llm = llm
+        self.similarity_threshold = similarity_threshold
+
+        # Initialize Qdrant client in memory mode
+        self._client = QdrantClient(location=":memory:")
+        self._collection_name = "track_cache"
+
+        # Track ID to Track mapping
+        self._tracks: Dict[str, Track] = {}
+        self._lock = asyncio.Lock()
+
+        # Initialize collection (will be created on first use)
+        self._collection_initialized = False
+        self._vector_size: Optional[int] = None
+
+    async def _get_embedding(self, text: str) -> List[float]:
+        """
+        Generate embedding for text using LiteLLM
+
+        Args:
+            text: Input text to embed
+
+        Returns:
+            Embedding vector
+        """
+        response = await self.llm.router.aembedding(
+            model=self.llm.embedding_model_name, input=[text]
+        )
+        return response.data[0]["embedding"]
+
+    def _ensure_collection(self, vector_size: int):
+        """
+        Ensure Qdrant collection exists with proper configuration
+
+        Args:
+            vector_size: Dimension of embedding vectors
+        """
+        if not self._collection_initialized or self._vector_size != vector_size:
+            try:
+                # Try to delete existing collection if vector size changed
+                if self._collection_initialized and self._vector_size != vector_size:
+                    self._client.delete_collection(self._collection_name)
+                    get_logger().info(
+                        f"Deleted collection due to vector size change: {self._vector_size} -> {vector_size}"
+                    )
+
+                # Check if collection exists, and create it if it does not
+                if not self._client.collection_exists(self._collection_name):
+                    self._client.create_collection(
+                        collection_name=self._collection_name,
+                        vectors_config=VectorParams(
+                            size=vector_size, distance=Distance.COSINE
+                        ),
+                    )
+                self._collection_initialized = True
+                self._vector_size = vector_size
+                get_logger().info(
+                    f"Initialized Qdrant collection '{self._collection_name}' with vector size {vector_size}"
+                )
+            except Exception as e:
+                get_logger().error(f"Error creating Qdrant collection: {e}")
+                raise
+
+    def _context_compatible(
+        self, track_context: Dict[str, Any], new_context: Dict[str, Any]
+    ) -> bool:
+        """
+        Check if new context is compatible with track's initial context
+
+        Args:
+            track_context: The context from the cached track
+            new_context: The new context to check
+
+        Returns:
+            True if contexts are compatible, False otherwise
+        """
+        # Check if all keys from track_context exist in new_context
+        for key in track_context:
+            if key not in new_context:
+                get_logger().debug(f"Missing key in new context: {key}")
+                return False
+            if type(track_context[key]) is not type(new_context[key]):
+                get_logger().debug(
+                    f"Type mismatch for key {key}: {type(track_context[key])} vs {type(new_context[key])}"
+                )
+                return False
+
+        get_logger().debug("Context compatibility check passed")
+        return True
+
+    async def get_track(
+        self, instruction: str, context: Dict[str, Any]
+    ) -> Optional[Track]:
+        """
+        Get cached track for an instruction and context using semantic similarity
+
+        Args:
+            instruction: The instruction string
+            context: The context dictionary
+
+        Returns:
+            Track if found with sufficient similarity, None otherwise
+        """
+        async with self._lock:
+            if not self._collection_initialized or len(self._tracks) == 0:
+                get_logger().debug("No tracks in cache")
+                return None
+
+            try:
+                # Generate embedding for query instruction
+                query_embedding = await self._get_embedding(instruction)
+
+                # Search for similar instructions in Qdrant
+                search_results = self._client.query_points(
+                    collection_name=self._collection_name,
+                    query=query_embedding,
+                    limit=5,  # Get top 5 similar tracks
+                ).points
+
+                # Check each result for similarity and context compatibility
+                for result in search_results:
+                    similarity_score = result.score
+                    track_id = str(result.id)  # Convert to string for dict lookup
+
+                    get_logger().debug(
+                        f"Found similar track with score {similarity_score:.3f} "
+                        f"(threshold: {self.similarity_threshold})"
+                    )
+
+                    if similarity_score < self.similarity_threshold:
+                        get_logger().debug(
+                            f"Similarity score {similarity_score:.3f} below threshold "
+                            f"{self.similarity_threshold}"
+                        )
+                        continue
+
+                    # Get the track
+                    track = self._tracks.get(track_id)
+                    if track is None:
+                        continue
+
+                    # Check context compatibility
+                    if self._context_compatible(track.initial_context, context):
+                        track.hit_count += 1
+                        track.last_used = datetime.now()
+                        get_logger().info(
+                            f"Track cache hit! Similarity: {similarity_score:.3f}, "
+                            f"Instruction: {instruction[:50]}..."
+                        )
+                        return track
+                    else:
+                        get_logger().debug(
+                            f"Track with similarity {similarity_score:.3f} has "
+                            "incompatible context"
+                        )
+
+                get_logger().debug(
+                    f"No compatible tracks found for instruction: {instruction[:50]}..."
+                )
+                return None
+
+            except Exception as e:
+                get_logger().error(f"Error searching for track: {e}")
+                return None
+
+    async def save_track(self, track: Track):
+        """
+        Save a track to cache with embedding
+
+        Args:
+            track: The execution track to save
+        """
+        async with self._lock:
+            try:
+                # Generate embedding for instruction
+                embedding = await self._get_embedding(track.instruction)
+
+                # Ensure collection is initialized with correct vector size
+                if not self._collection_initialized:
+                    self._ensure_collection(len(embedding))
+
+                # Generate unique ID for this track
+                track_id = str(uuid.uuid4())
+
+                # Store track in memory
+                self._tracks[track_id] = track
+
+                # Store embedding in Qdrant
+                point = PointStruct(
+                    id=track_id,
+                    vector=embedding,
+                    payload={
+                        "instruction": track.instruction,
+                        "hit_count": track.hit_count,
+                        "fail_count": track.fail_count,
+                        "last_used": track.last_used.isoformat(),
+                    },
+                )
+
+                self._client.upsert(
+                    collection_name=self._collection_name, points=[point]
+                )
+
+                get_logger().debug(
+                    f"Track saved for instruction: {track.instruction[:50]}..."
+                )
+
+            except Exception as e:
+                get_logger().error(f"Error saving track: {e}")
+                raise
+
+    # ---- Dump & Load ----
+    def dump(self) -> dict:
+        """
+        Dump cache configuration and all tracks.
+        """
+        return {
+            "tracks": [t.model_dump() for t in self._tracks.values()],
+        }
+
+    async def load(self, dump_data: dict):
+        """
+        Load cache from dump. Overwrites existing cache.
+        Note: This is now async because we need to regenerate embeddings.
+        """
+
+        tracks = dump_data.get("tracks") or []
+        if not isinstance(tracks, list):
+            return
+
+        # Clear existing cache
+        self._tracks.clear()
+        if self._collection_initialized:
+            try:
+                self._client.delete_collection(self._collection_name)
+                self._collection_initialized = False
+            except Exception:
+                pass
+
+        # Reload tracks
+        for td in tracks:
+            try:
+                track = Track.model_validate(td)
+                await self.save_track(track)
+            except Exception as e:
+                get_logger().warning(f"Error loading track: {e}")
+                continue
+
+        get_logger().info(f"Loaded {len(self._tracks)} tracks from dump")

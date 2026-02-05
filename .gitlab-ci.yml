@@ -13,19 +13,19 @@ build-docker-image:
   - dind
   stage: build
   only:
-  - main
+  - v2-env
 
   before_script:
   - docker login -u ${CI_REGISTRY_USER} -p ${CI_REGISTRY_PASSWORD} ${CI_REGISTRY}
   - docker login -u cn-north-4@${HW_AK} -p ${HW_PASSWORD} ${HW_REGISTRY}
   script:
   - export TIME=$(date +%s)
-  - docker build -t ${CI_REGISTRY_IMAGE}:main-${CI_COMMIT_SHORT_SHA}-${TIME} -t ${CI_REGISTRY_IMAGE}:main -t ${HW_REGISTRY_IMAGE}:main-${CI_COMMIT_SHORT_SHA}-${TIME} -t ${HW_REGISTRY_IMAGE}:main .
+  - docker build -t ${CI_REGISTRY_IMAGE}:v2-${CI_COMMIT_SHORT_SHA}-${TIME} -t ${CI_REGISTRY_IMAGE}:v2 -t ${HW_REGISTRY_IMAGE}:v2-${CI_COMMIT_SHORT_SHA}-${TIME} -t ${HW_REGISTRY_IMAGE}:v2 .
 
   # 推送到GitLab容器注册表
-  - docker push ${CI_REGISTRY_IMAGE}:main-${CI_COMMIT_SHORT_SHA}-${TIME}
-  - docker push ${CI_REGISTRY_IMAGE}:main
+  - docker push ${CI_REGISTRY_IMAGE}:v2-${CI_COMMIT_SHORT_SHA}-${TIME}
+  - docker push ${CI_REGISTRY_IMAGE}:v2
 
   # 推送到华为云SWR
-  - docker push ${HW_REGISTRY_IMAGE}:main-${CI_COMMIT_SHORT_SHA}-${TIME}
-  - docker push ${HW_REGISTRY_IMAGE}:main
+  - docker push ${HW_REGISTRY_IMAGE}:v2-${CI_COMMIT_SHORT_SHA}-${TIME}
+  - docker push ${HW_REGISTRY_IMAGE}:v2
