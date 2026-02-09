@@ -947,9 +947,9 @@ Please generate the corrected code:"""
         get_logger().debug(
             f"{_get_debug_info('准备调用LLM生成代码')} - model: {self.codegen_model_name}, dialog_history length: {len(dialog_history)}"
         )
-        get_logger().debug(
-            f"{_get_debug_info('发送给LLM的对话历史')}:\n{dialog_history}"
-        )
+        # get_logger().debug(
+        #     f"{_get_debug_info('发送给LLM的对话历史')}:\n{dialog_history}"
+        # )
 
         try:
             response = await self.acompletion_with_system_prompt(

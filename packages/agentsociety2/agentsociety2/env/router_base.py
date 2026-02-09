@@ -983,7 +983,7 @@ Your generated world description:"""
         lines: List[str] = []
         lines.append("# Type definitions for environment modules")
         lines.append("from pydantic import BaseModel, Field")
-        lines.append("from typing import Any, Optional, Union, List, Dict, Literal")
+        lines.append("from typing import Any, Optional, Union, List, Dict, Literal, Tuple")
         lines.append("from datetime import datetime")
         lines.append("")
 

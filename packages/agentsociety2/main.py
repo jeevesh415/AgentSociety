@@ -129,50 +129,8 @@ async def main(
 
     agent_args = []
     mobility_persons = []
-    date_time_str = datetime.now().strftime("%Y%m%d%H%M%S")
     for profile in profiles_to_use:
         agent_id = profile["id"]
-
-        # 为每个 agent 创建独立的 chroma 路径
-        agent_chroma_path = os.path.join(
-            chroma_base_dir, f"agent_{agent_id}_{date_time_str}"
-        )
-        os.makedirs(agent_chroma_path, exist_ok=True)
-        agent_sqlite_path = os.path.join(chroma_base_dir, f"agent_{agent_id}.db")
-        # 只确保父目录存在（chroma_base_dir 已存在，其实可省略）
-        os.makedirs(os.path.dirname(agent_sqlite_path), exist_ok=True)
-
-        # 创建 Agent 特定的 memory 配置
-        agent_memory_config = {
-            "vector_store": {
-                "provider": "chroma",
-                "config": {
-                    "collection_name": f"agent_{agent_id}_memories",
-                    "path": agent_chroma_path,
-                },
-            },
-            "storage_config": {
-                "provider": "sqlite",
-                "path": agent_sqlite_path,
-            },
-            "llm": {
-                "provider": "openai",
-                "config": {
-                    "model": "qwen2.5-14b-instruct",
-                    "api_key": os.getenv("INFINI_API_KEY"),
-                    "openai_base_url": "https://cloud.infini-ai.com/maas/v1",
-                },
-            },
-            "embedder": {
-                "provider": "openai",
-                "config": {
-                    "model": "bge-m3",
-                    "api_key": os.getenv("INFINI_API_KEY"),
-                    "openai_base_url": "https://cloud.infini-ai.com/maas/v1",
-                    "embedding_dims": 1024,
-                },
-            },
-        }
 
         # 创建 agent（使用 profile 中的详细信息）
         # 构建个人资料字符串
@@ -182,8 +140,6 @@ async def main(
             {
                 "id": agent_id,
                 "profile": profile_text,
-                "memory_config": agent_memory_config,
-                "world_description": "",
             }
         )
         mobility_persons.append(
@@ -213,21 +169,6 @@ async def main(
         env_modules=[mobility_env, event_space],
         log_path=f"logs/instruction_log_{datetime.now().strftime('%Y%m%d%H%M%S')}.pkl",
     )
-
-    # 保存 pyi 代码
-    with open("tools_pyi.pyi", "w") as f:
-        f.write(env_router._tools_pyi_dict[(False, None)])
-
-    # 生成世界描述
-    world_description = await env_router.generate_world_description_from_tools()
-
-    print("--------------------------------")
-    print(world_description)
-    print("--------------------------------")
-
-    # 更新 agent_args 中的 world_description
-    for args in agent_args:
-        args["world_description"] = world_description
 
     # 实际初始化agents
     agents = [PersonAgent(**args) for args in agent_args]
@@ -418,44 +359,6 @@ async def main_social(
     for profile in profiles_to_use:
         agent_id = profile["id"]
 
-        # 为每个 agent 创建独立的 chroma 路径
-        agent_chroma_path = os.path.join(chroma_base_dir, f"agent_{agent_id}")
-        agent_sqlite_path = os.path.join(chroma_base_dir, f"agent_{agent_id}.db")
-        os.makedirs(agent_chroma_path, exist_ok=True)
-
-        # 创建 Agent 特定的 memory 配置
-        agent_memory_config = {
-            "vector_store": {
-                "provider": "chroma",
-                "config": {
-                    "collection_name": f"agent_{agent_id}_memories",
-                    "path": agent_chroma_path,
-                    "embedding_model_dims": 1024,
-                },
-            },
-             "storage_config": {
-                "provider": "sqlite",
-                "path": agent_sqlite_path,
-            },
-            "llm": {
-                "provider": "openai",
-                "config": {
-                    "model": "qwen2.5-14b-instruct",
-                    "api_key": os.getenv("INFINI_API_KEY"),
-                    "openai_base_url": "https://cloud.infini-ai.com/maas/v1",
-                },
-            },
-            "embedder": {
-                "provider": "openai",
-                "config": {
-                    "model": "bge-m3",
-                    "api_key": os.getenv("INFINI_API_KEY"),
-                    "openai_base_url": "https://cloud.infini-ai.com/maas/v1",
-                    "embedding_dims": 1024,
-                },
-            },
-        }
-
         # 创建 agent（使用 profile 中的详细信息）
         # 构建个人资料字符串
         profile_text = f"My name is Agent-{agent_id}, age {profile.get('age', 30)}, gender {profile.get('gender', 'Unknown')}, education {profile.get('education', 'Unknown')}, occupation {profile.get('occupation', 'Unknown')}, home at {profile['home']}, work at {profile['work']}"
@@ -464,8 +367,6 @@ async def main_social(
             {
                 "id": agent_id,
                 "profile": profile_text,
-                "memory_config": agent_memory_config,
-                "world_description": "",
             }
         )
         mobility_persons.append(
@@ -484,6 +385,12 @@ async def main_social(
     map_path = os.path.join(home_dir, "beijing.pb")
     os.makedirs(home_dir, exist_ok=True)
 
+    mobility_env = MobilitySpace(map_path, home_dir, persons=mobility_persons)
+    # person = await mobility_env.get_person(1)
+    # print(person)
+    # input("Press Enter to continue...")
+    event_space = EventSpace()
+
     social_env = SimpleSocialSpace(
         agent_id_name_pairs=[
             (agent_id, profile.get("name", f"Agent-{agent_id}"))
@@ -494,18 +401,7 @@ async def main_social(
     # daily_env = DailySpace(person_ids=actual_agent_ids)
 
     # 创建 CodeGenRouter
-    env_router = CodeGenRouter(env_modules=[social_env])
-
-    # 生成世界描述
-    world_description = await env_router.generate_world_description_from_tools()
-
-    print("--------------------------------")
-    print(world_description)
-    print("--------------------------------")
-
-    # 更新 agent_args 中的 world_description
-    for args in agent_args:
-        args["world_description"] = world_description
+    env_router = CodeGenRouter(env_modules=[social_env, mobility_env, event_space])
 
     # 实际初始化agents
     agents = [PersonAgent(**args) for args in agent_args]
@@ -527,4 +423,4 @@ if __name__ == "__main__":
         log_file=f"logs/daily_mobility_benchmark-{datetime.now().strftime('%Y%m%d%H%M%S')}.log",
         log_level=logging.DEBUG,
     )
-    asyncio.run(main(logger=get_logger()))
+    asyncio.run(main(logger=get_logger(), num_agents=100, profile_start_idx=0))
