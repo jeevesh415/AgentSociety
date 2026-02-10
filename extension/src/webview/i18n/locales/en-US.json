@@ -43,6 +43,8 @@
     "title": "AI Assistant",
     "placeholder": "Enter your question or request... (Shift+Enter for new line)",
     "send": "Send",
+    "stop": "Stop",
+    "interrupted": "(Interrupted)",
     "clear": "Clear Chat",
     "checkHealth": "Check Connection Status",
     "connected": "Connected",

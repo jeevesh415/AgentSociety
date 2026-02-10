@@ -1,6 +1,6 @@
 import * as React from 'react';
 import { ConfigProvider, theme, Input, Button, Spin, Avatar, Typography } from 'antd';
-import { SendOutlined, UserOutlined, RobotOutlined, DownOutlined, UpOutlined, CheckCircleOutlined, LoadingOutlined } from '@ant-design/icons';
+import { SendOutlined, StopOutlined, UserOutlined, RobotOutlined, DownOutlined, UpOutlined, CheckCircleOutlined, LoadingOutlined } from '@ant-design/icons';
 import { useTranslation } from 'react-i18next';
 import { Header } from './Header';
 import { MarkdownRenderer } from '../components/MarkdownRenderer';
@@ -132,6 +132,53 @@ export const ChatApp: React.FC<ChatAppProps> = ({ vscode }: ChatAppProps) => {
     });
   }, [vscode]);
 
+  const handleSSEEvent = React.useCallback((event: SSEEvent) => {
+    setConversations(prev => {
+      const updated = [...prev];
+
+      // 找到最后一个未完成的对话
+      let currentIndex = -1;
+      for (let i = updated.length - 1; i >= 0; i--) {
+        if (!updated[i].isComplete) {
+          currentIndex = i;
+          break;
+        }
+      }
+
+      if (currentIndex === -1) {
+        // 如果没有找到未完成的对话，可能是事件顺序问题，跳过
+        return prev;
+      }
+
+      const conversation = updated[currentIndex];
+
+      // 处理complete事件
+      if (event.type === 'complete') {
+        const completeEvent = event as CompleteSSEEvent;
+        conversation.isComplete = true;
+        conversation.finalContent = completeEvent.content;
+        conversation.isExpanded = false; // 完成后默认收起
+        setLoading(false);
+        setCurrentConversationId(null);
+      } else {
+        // 添加事件到处理过程
+        conversation.events.push({
+          event: event,
+          timestamp: Date.now(),
+        });
+
+        // 如果是错误事件，也停止loading
+        if (event.type === 'message' && (event as MessageSSEEvent).is_error) {
+          setLoading(false);
+          setCurrentConversationId(null);
+        }
+      }
+
+      updated[currentIndex] = { ...conversation };
+      return updated;
+    });
+  }, []);
+
   // 初始化时请求历史记录列表
   React.useEffect(() => {
     handleListHistories();
@@ -246,12 +293,27 @@ export const ChatApp: React.FC<ChatAppProps> = ({ vscode }: ChatAppProps) => {
           // 历史记录加载失败
           console.error('Failed to load history:', message.error);
           break;
+
+        case 'streamInterrupted':
+          // 流式对话被用户中断
+          setLoading(false);
+          setCurrentConversationId(null);
+          setConversations(prev =>
+            prev.length > 0
+              ? prev.map((conv, i) =>
+                  i === prev.length - 1 && !conv.isComplete
+                    ? { ...conv, isComplete: true, finalContent: t('chat.interrupted') }
+                    : conv
+                )
+              : prev
+          );
+          break;
       }
     };
 
     window.addEventListener('message', handleMessage);
     return () => window.removeEventListener('message', handleMessage);
-  }, []);
+  }, [handleSSEEvent, t]);
 
   const handleCheckHealth = React.useCallback((): void => {
     setCheckingHealth(true);
@@ -275,53 +337,6 @@ export const ChatApp: React.FC<ChatAppProps> = ({ vscode }: ChatAppProps) => {
       clearInterval(intervalId);
     };
   }, [handleCheckHealth]); // 依赖handleCheckHealth
-
-  const handleSSEEvent = React.useCallback((event: SSEEvent) => {
-    setConversations(prev => {
-      const updated = [...prev];
-
-      // 找到最后一个未完成的对话
-      let currentIndex = -1;
-      for (let i = updated.length - 1; i >= 0; i--) {
-        if (!updated[i].isComplete) {
-          currentIndex = i;
-          break;
-        }
-      }
-
-      if (currentIndex === -1) {
-        // 如果没有找到未完成的对话，可能是事件顺序问题，跳过
-        return prev;
-      }
-
-      const conversation = updated[currentIndex];
-
-      // 处理complete事件
-      if (event.type === 'complete') {
-        const completeEvent = event as CompleteSSEEvent;
-        conversation.isComplete = true;
-        conversation.finalContent = completeEvent.content;
-        conversation.isExpanded = false; // 完成后默认收起
-        setLoading(false);
-        setCurrentConversationId(null);
-      } else {
-        // 添加事件到处理过程
-        conversation.events.push({
-          event: event,
-          timestamp: Date.now(),
-        });
-
-        // 如果是错误事件，也停止loading
-        if (event.type === 'message' && (event as MessageSSEEvent).is_error) {
-          setLoading(false);
-          setCurrentConversationId(null);
-        }
-      }
-
-      updated[currentIndex] = { ...conversation };
-      return updated;
-    });
-  }, []);
 
   const handleSendMessage = async (): Promise<void> => {
     if (!inputValue.trim() || loading) {
@@ -361,6 +376,12 @@ export const ChatApp: React.FC<ChatAppProps> = ({ vscode }: ChatAppProps) => {
   const handleClearChat = (): void => {
     vscode.postMessage({
       command: 'clearChat',
+    });
+  };
+
+  const handleInterrupt = (): void => {
+    vscode.postMessage({
+      command: 'interrupt',
     });
   };
 
@@ -816,21 +837,38 @@ export const ChatApp: React.FC<ChatAppProps> = ({ vscode }: ChatAppProps) => {
                 resize: 'none',
               }}
             />
-            <Button
-              type="primary"
-              icon={<SendOutlined />}
-              onClick={handleSendMessage}
-              disabled={!inputValue.trim() || loading}
-              style={{
-                backgroundColor: 'var(--vscode-button-background)',
-                borderColor: 'var(--vscode-button-background)',
-                color: 'var(--vscode-button-foreground)',
-                flexShrink: 0,
-                height: '32px',
-              }}
-            >
-              {t('chat.send')}
-            </Button>
+            {loading ? (
+              <Button
+                type="default"
+                danger
+                icon={<StopOutlined />}
+                onClick={handleInterrupt}
+                style={{
+                  borderColor: 'var(--vscode-errorForeground)',
+                  color: 'var(--vscode-errorForeground)',
+                  flexShrink: 0,
+                  height: '32px',
+                }}
+              >
+                {t('chat.stop')}
+              </Button>
+            ) : (
+              <Button
+                type="primary"
+                icon={<SendOutlined />}
+                onClick={handleSendMessage}
+                disabled={!inputValue.trim()}
+                style={{
+                  backgroundColor: 'var(--vscode-button-background)',
+                  borderColor: 'var(--vscode-button-background)',
+                  color: 'var(--vscode-button-foreground)',
+                  flexShrink: 0,
+                  height: '32px',
+                }}
+              >
+                {t('chat.send')}
+              </Button>
+            )}
           </div>
         </div>
       </div>

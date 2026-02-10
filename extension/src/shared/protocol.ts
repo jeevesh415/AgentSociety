@@ -19,6 +19,7 @@ export const Commands = {
 
   // Extension → WebView
   SSE_EVENT: 'sseEvent',
+  STREAM_INTERRUPTED: 'streamInterrupted',
   CLEAR_MESSAGES: 'clearMessages',
   BACKEND_STATUS: 'backendStatus',
   HISTORY_LOADED: 'historyLoaded',

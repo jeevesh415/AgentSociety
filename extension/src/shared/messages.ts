@@ -205,6 +205,11 @@ export interface ExperimentStatusMessage {
   message?: string;
 }
 
+/** 流式对话已中断 */
+export interface StreamInterruptedMessage {
+  command: 'streamInterrupted';
+}
+
 /** Extension → WebView 所有消息类型 */
 export type ExtensionToWebViewMessage =
   | SSEEventMessage
@@ -215,4 +220,5 @@ export type ExtensionToWebViewMessage =
   | HistoryListMessage
   | HistoryLoadErrorMessage
   | ToolPermissionRequestMessage
-  | ExperimentStatusMessage;
+  | ExperimentStatusMessage
+  | StreamInterruptedMessage;

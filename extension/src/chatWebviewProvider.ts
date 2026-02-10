@@ -155,6 +155,7 @@ export class ChatWebviewProvider {
 
       case 'interrupt':
         this.conversationService.interrupt();
+        this.postMessage({ command: 'streamInterrupted' });
         break;
     }
   }

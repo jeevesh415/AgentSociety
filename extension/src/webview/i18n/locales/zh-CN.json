@@ -43,6 +43,8 @@
     "title": "AI 助手",
     "placeholder": "输入您的问题或请求... (Shift+Enter 换行)",
     "send": "发送",
+    "stop": "停止",
+    "interrupted": "(已中断)",
     "clear": "清除对话",
     "checkHealth": "检查连接状态",
     "connected": "已连接",
