@@ -307,6 +307,25 @@
           "default": "mirothinker_v1.5_keep5_max200",
           "description": "MiroFlow MCP任务使用的默认Agent配置名称",
           "markdownDescription": "MiroFlow MCP任务使用的默认Agent配置名称。默认为 `mirothinker_v1.5_keep5_max200`。对应环境变量 `MIROFLOW_DEFAULT_AGENT`。"
+        },
+        "aiSocialScientist.chat.viewColumn": {
+          "type": "string",
+          "default": "beside",
+          "enum": ["beside", "one", "two", "three", "four", "five", "six", "seven", "eight", "nine"],
+          "enumDescriptions": [
+            "在当前编辑器旁边打开（默认）",
+            "在第一列打开",
+            "在第二列打开",
+            "在第三列打开",
+            "在第四列打开",
+            "在第五列打开",
+            "在第六列打开",
+            "在第七列打开",
+            "在第八列打开",
+            "在第九列打开"
+          ],
+          "description": "Chat面板打开的视图列位置",
+          "markdownDescription": "指定 Chat 面板打开时使用的视图列位置。选择固定的列（如 `two`、`three`）可以避免在打开其他页面（如 Replay）时 Chat 页面被替换或消失。默认为 `beside`（在当前编辑器旁边）。"
         }
       }
     }

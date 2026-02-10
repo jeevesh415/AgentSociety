@@ -2380,14 +2380,14 @@ async def run_all_games():
             if game_info["num"] == 1:
                 # Commons Tragedy: 4 agents
                 setup_logging(
-                    log_file=f"logs/commons_tragedy_with_person_agent-{datetime.now().strftime('%Y%m%d%H%M%S')}.log",
+                    log_file=f"game_logs/commons_tragedy_with_person_agent-{datetime.now().strftime('%Y%m%d%H%M%S')}.log",
                     log_level=logging.DEBUG,
                 )
                 await main_commons_tragedy_with_person_agent(
                     logger=get_logger(),
                     num_agents=4,
-                    num_games=2,
-                    num_rounds=3,
+                    num_games=5,
+                    num_rounds=10,
                     initial_pool_resources=100,
                     max_extraction_per_agent=10,
                     profile_start_idx=0
@@ -2396,7 +2396,7 @@ async def run_all_games():
             elif game_info["num"] == 2:
                 # Prisoner's Dilemma: 2 agents
                 setup_logging(
-                    log_file=f"logs/prisoners_dilemma_with_person_agent-{datetime.now().strftime('%Y%m%d%H%M%S')}.log",
+                    log_file=f"game_logs/prisoners_dilemma_with_person_agent-{datetime.now().strftime('%Y%m%d%H%M%S')}.log",
                     log_level=logging.DEBUG,
                 )
                 await main_prisoners_dilemma_with_person_agent(
@@ -2413,13 +2413,13 @@ async def run_all_games():
             elif game_info["num"] == 3:
                 # Public Goods Game: 4 agents
                 setup_logging(
-                    log_file=f"logs/public_goods_with_person_agent-{datetime.now().strftime('%Y%m%d%H%M%S')}.log",
+                    log_file=f"game_logs/public_goods_with_person_agent-{datetime.now().strftime('%Y%m%d%H%M%S')}.log",
                     log_level=logging.DEBUG,
                 )
                 await main_public_goods_with_person_agent(
                     logger=get_logger(),
                     num_agents=4,
-                    num_games=2,
+                    num_games=5,
                     num_rounds=10,
                     initial_endowment=20,
                     public_pool_multiplier=1.6,
@@ -2429,13 +2429,13 @@ async def run_all_games():
             elif game_info["num"] == 4:
                 # Trust Game: 2 pairs (4 agents)
                 setup_logging(
-                    log_file=f"logs/trust_game_with_person_agent-{datetime.now().strftime('%Y%m%d%H%M%S')}.log",
+                    log_file=f"game_logs/trust_game_with_person_agent-{datetime.now().strftime('%Y%m%d%H%M%S')}.log",
                     log_level=logging.DEBUG,
                 )
                 await main_trust_game_with_person_agent(
                     logger=get_logger(),
                     num_pairs=2,
-                    num_games=2,
+                    num_games=5,
                     num_rounds=10,
                     initial_funds=10,
                     multiplication_factor=3.0,
@@ -2445,13 +2445,13 @@ async def run_all_games():
             elif game_info["num"] == 5:
                 # Volunteer's Dilemma: 4 agents
                 setup_logging(
-                    log_file=f"logs/volunteer_dilemma_with_person_agent-{datetime.now().strftime('%Y%m%d%H%M%S')}.log",
+                    log_file=f"game_logs/volunteer_dilemma_with_person_agent-{datetime.now().strftime('%Y%m%d%H%M%S')}.log",
                     log_level=logging.DEBUG,
                 )
                 await main_volunteer_dilemma_with_person_agent(
                     logger=get_logger(),
                     num_agents=4,
-                    num_games=2,
+                    num_games=5,
                     num_rounds=10,
                     benefit_b=100,
                     cost_c=40,
@@ -2497,21 +2497,21 @@ if __name__ == "__main__":
     
     if choice == "1":
         setup_logging(
-            log_file=f"logs/commons_tragedy_with_person_agent-{datetime.now().strftime('%Y%m%d%H%M%S')}.log",
+            log_file=f"game_logs/commons_tragedy_with_person_agent-{datetime.now().strftime('%Y%m%d%H%M%S')}.log",
             log_level=logging.DEBUG,
         )
         
         asyncio.run(main_commons_tragedy_with_person_agent(
             logger=get_logger(),
             num_agents=4,
-            num_games=2,
-            num_rounds=3,
+            num_games=5,
+            num_rounds=10,
             initial_pool_resources=100,
             max_extraction_per_agent=10
         ))
     elif choice == "2":
         setup_logging(
-            log_file=f"logs/prisoners_dilemma_with_person_agent-{datetime.now().strftime('%Y%m%d%H%M%S')}.log",
+            log_file=f"game_logs/prisoners_dilemma_with_person_agent-{datetime.now().strftime('%Y%m%d%H%M%S')}.log",
             log_level=logging.DEBUG,
         )
         
@@ -2526,42 +2526,42 @@ if __name__ == "__main__":
         ))
     elif choice == "3":
         setup_logging(
-            log_file=f"logs/public_goods_with_person_agent-{datetime.now().strftime('%Y%m%d%H%M%S')}.log",
+            log_file=f"game_logs/public_goods_with_person_agent-{datetime.now().strftime('%Y%m%d%H%M%S')}.log",
             log_level=logging.DEBUG,
         )
         
         asyncio.run(main_public_goods_with_person_agent(
             logger=get_logger(),
             num_agents=4,
-            num_games=2,
+            num_games=5,
             num_rounds=10,
             initial_endowment=20,
             public_pool_multiplier=1.6
         ))
     elif choice == "4":
         setup_logging(
-            log_file=f"logs/trust_game_with_person_agent-{datetime.now().strftime('%Y%m%d%H%M%S')}.log",
+            log_file=f"game_logs/trust_game_with_person_agent-{datetime.now().strftime('%Y%m%d%H%M%S')}.log",
             log_level=logging.DEBUG,
         )
         
         asyncio.run(main_trust_game_with_person_agent(
             logger=get_logger(),
             num_pairs=2,
-            num_games=2,
+            num_games=5,
             num_rounds=10,
             initial_funds=10,
             multiplication_factor=3.0
         ))
     elif choice == "5":
         setup_logging(
-            log_file=f"logs/volunteer_dilemma_with_person_agent-{datetime.now().strftime('%Y%m%d%H%M%S')}.log",
+            log_file=f"game_logs/volunteer_dilemma_with_person_agent-{datetime.now().strftime('%Y%m%d%H%M%S')}.log",
             log_level=logging.DEBUG,
         )
         
         asyncio.run(main_volunteer_dilemma_with_person_agent(
             logger=get_logger(),
             num_agents=4,
-            num_games=2,
+            num_games=5,
             num_rounds=10,
             benefit_b=100,
             cost_c=40

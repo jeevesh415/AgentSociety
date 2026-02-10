@@ -5,7 +5,7 @@ import os
 import pickle
 import shutil
 import numpy as np
-from datetime import datetime
+from datetime import datetime, timedelta
 from dotenv import load_dotenv
 
 # load_dotenv(".env.openrouter")
@@ -14,10 +14,12 @@ load_dotenv()
 from agentsociety2.contrib.env.mobility_space import MobilitySpace
 from agentsociety2.contrib.env.event_space import EventSpace
 from agentsociety2.contrib.env.simple_social_space import SimpleSocialSpace
+from agentsociety2.contrib.env.social_media import SocialMediaSpace
 from agentsociety2.agent import PersonAgent
-from agentsociety2.env import CodeGenRouter
+from agentsociety2.env import CodeGenRouter, EnvBase
 from agentsociety2.society import AgentSociety
 from agentsociety2.logger import setup_logging, get_logger
+from typing import cast
 
 
 def _calculate_gyration_radius(trajectories: list) -> float:
@@ -50,16 +52,21 @@ def _calculate_gyration_radius(trajectories: list) -> float:
 
 async def main(
     logger,
-    num_agents: int = 40,
-    profile_start_idx: int = 60,
+    num_agents: int = 100,
+    profile_start_idx: int = 0,
 ):
     """
-    运行 DailyMobility Benchmark
+    运行集成多个环境模块的 Benchmark
 
     实验设置：
     - 模拟起点：当日早上 00:00:00 (UTC)
     - 时间步长：15 分钟 = 900 秒
     - 总步数：97 步（覆盖 24+ 小时）
+    
+    环境模块：
+    1. 移动模块（MobilitySpace）：管理 agent 的地理位置和轨迹
+    2. 事件模块（EventSpace）：处理环境中的事件
+    3. 社交媒体模块（SocialMediaSpace）：处理社交交互和媒体内容
     
     数据统计：
     - 轨迹数据：每个agent的移动轨迹（(x, y) 坐标列表）
@@ -68,13 +75,17 @@ async def main(
     - 日均访问地点数：每个agent访问的唯一地点数
     """
     logger.info("\n" + "=" * 80)
-    logger.info("【DailyMobility Benchmark】")
+    logger.info("【集成多模块 Benchmark】")
     logger.info("=" * 80)
     logger.info("实验设置：")
     logger.info("  - 起始时间: 当日早上 00:00:00 (UTC)")
     logger.info("  - 时间步长: 15 分钟 (900 秒)")
     logger.info("  - 总步数: 97 步")
     logger.info(f"  - Agent 数量: {num_agents}")
+    logger.info("【环境模块】:")
+    logger.info("  1. 移动模块 (MobilitySpace)")
+    logger.info("  2. 事件模块 (EventSpace)")
+    logger.info("  3. 社交媒体模块 (SocialMediaSpace)")
     logger.info("=" * 80)
 
     # 实验参数
@@ -87,6 +98,7 @@ async def main(
     # 用于存储需要清理的环境
     mobility_env = None
     event_space = None
+    social_media_env = None
     env_router = None
     agents = []
 
@@ -119,11 +131,6 @@ async def main(
     # ==================== 初始化环境 ====================
     logger.info("\n【步骤2/4】初始化环境...")
 
-    import tempfile
-    # 使用 tempfile 创建临时目录
-    chroma_base_dir = tempfile.mkdtemp(prefix="chroma_memories_")
-    logger.info(f"  ✓ 创建临时chroma目录: {chroma_base_dir}")
-
     # ==================== 创建 Agents ====================
     logger.info(f"\n【步骤3/4】创建 {num_agents} 个 Agents...")
 
@@ -140,6 +147,7 @@ async def main(
             {
                 "id": agent_id,
                 "profile": profile_text,
+                "template_mode_enabled": True,
             }
         )
         mobility_persons.append(
@@ -163,12 +171,31 @@ async def main(
     # print(person)
     # input("Press Enter to continue...")
     event_space = EventSpace()
+    
+    # 创建社交媒体环境
+    logger.info("\n【初始化社交媒体模块】")
+    social_media_data_dir = os.getenv(
+        "SOCIAL_MEDIA_DATA_DIR",
+        os.path.join(os.path.expanduser("~/.agentsociety"), "social_media_data")
+    )
+    logger.info(f"  ✓ 社交媒体数据目录: {social_media_data_dir}")
+    social_media_env = SocialMediaSpace(data_dir=social_media_data_dir)
 
     # 创建 CodeGenRouter
     env_router = CodeGenRouter(
-        env_modules=[mobility_env, event_space],
+        env_modules=[mobility_env, event_space, social_media_env],
         log_path=f"logs/instruction_log_{datetime.now().strftime('%Y%m%d%H%M%S')}.pkl",
     )
+
+    # 保存 pyi 代码
+    with open("tools_pyi.pyi", "w") as f:
+        f.write(env_router._tools_pyi_dict[(False, None)])
+
+    # 生成世界描述（使用缓存）
+    world_description = await env_router.get_world_description()
+    print("--------------------------------")
+    print(world_description)
+    print("--------------------------------")
 
     # 实际初始化agents
     agents = [PersonAgent(**args) for args in agent_args]
@@ -345,12 +372,6 @@ async def main_social(
     # ==================== 初始化环境 ====================
     logger.info("\n【步骤2/4】初始化环境...")
 
-    # 清空并创建 Agent 特定的chroma_memories目录
-    chroma_base_dir = "/tmp/chroma_memories"
-    if os.path.exists(chroma_base_dir):
-        shutil.rmtree(chroma_base_dir)
-    os.makedirs(chroma_base_dir, exist_ok=True)
-
     # ==================== 创建 Agents ====================
     logger.info(f"\n【步骤3/4】创建 {num_agents} 个 Agents...")
 
@@ -385,12 +406,6 @@ async def main_social(
     map_path = os.path.join(home_dir, "beijing.pb")
     os.makedirs(home_dir, exist_ok=True)
 
-    mobility_env = MobilitySpace(map_path, home_dir, persons=mobility_persons)
-    # person = await mobility_env.get_person(1)
-    # print(person)
-    # input("Press Enter to continue...")
-    event_space = EventSpace()
-
     social_env = SimpleSocialSpace(
         agent_id_name_pairs=[
             (agent_id, profile.get("name", f"Agent-{agent_id}"))
@@ -401,7 +416,13 @@ async def main_social(
     # daily_env = DailySpace(person_ids=actual_agent_ids)
 
     # 创建 CodeGenRouter
-    env_router = CodeGenRouter(env_modules=[social_env, mobility_env, event_space])
+    env_router = CodeGenRouter(env_modules=[social_env])
+
+    # 生成世界描述（使用缓存）
+    world_description = await env_router.get_world_description()
+    print("--------------------------------")
+    print(world_description)
+    print("--------------------------------")
 
     # 实际初始化agents
     agents = [PersonAgent(**args) for args in agent_args]
@@ -423,4 +444,4 @@ if __name__ == "__main__":
         log_file=f"logs/daily_mobility_benchmark-{datetime.now().strftime('%Y%m%d%H%M%S')}.log",
         log_level=logging.DEBUG,
     )
-    asyncio.run(main(logger=get_logger(), num_agents=100, profile_start_idx=0))
+    asyncio.run(main(logger=get_logger(), num_agents=100))

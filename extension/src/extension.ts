@@ -85,8 +85,8 @@ export function activate(context: vscode.ExtensionContext) {
 
   const openChatCommand = vscode.commands.registerCommand(
     'aiSocialScientist.openChat',
-    () => {
-      ChatWebviewProvider.createOrShow(context);
+    async () => {
+      await ChatWebviewProvider.createOrShow(context);
     }
   );
 

@@ -4,7 +4,7 @@ PersonAgent - 基于SocietyAgent逻辑重新实现的Agent
 """
 
 from datetime import datetime
-from typing import Any, Literal, Optional
+from typing import TYPE_CHECKING, Any, Dict, Literal, Optional
 from enum import Enum
 import inspect
 import os
@@ -19,6 +19,10 @@ from mem0 import AsyncMemory
 from agentsociety2.agent import AgentBase, DIALOG_TYPE_REFLECTION
 from agentsociety2.env import RouterBase
 from agentsociety2.config import Config
+import logging
+
+if TYPE_CHECKING:
+    from agentsociety2.storage import ReplayWriter
 
 
 def _get_debug_info(description: str = "") -> str:
@@ -95,7 +99,7 @@ Your needs are organized by priority, with lower priority numbers indicating hig
 - **Can interrupt other plans**: Yes - This is a basic survival need that can interrupt any ongoing activity
 
 #### 2. **Energy** (Priority 2)
-- **Meaning**: The need to rest or sleep to recover your energy
+- **Meaning**: The need to rest, sleep or do some leisure or relaxing activities to recover your energy
 - **When it becomes urgent**: When `energy` drops below the threshold (typically at night or after prolonged activity)
 - **Can interrupt other plans**: Yes - Fatigue can make it difficult to continue other activities effectively
 
@@ -123,7 +127,7 @@ class Need(BaseModel):
 
     need_type: NeedType = Field(description="需求类型")
     description: str = Field(description="需求描述")
-    reasoning: str = Field(description="选择理由")
+    reasoning: str = Field(default="", description="选择理由")
 
 
 class PlanStepStatus(str, Enum):
@@ -162,7 +166,7 @@ class Plan(BaseModel):
     """计划模型。"""
 
     target: str = Field(description="计划目标")
-    reasoning: str = Field(description="计划推理说明")
+    reasoning: str = Field(default="", description="计划推理说明")
     steps: list[PlanStep] = Field(description="计划步骤列表")
     index: int = Field(default=0, ge=0, description="当前步骤索引")
     completed: bool = Field(default=False, description="是否完成")
@@ -218,14 +222,14 @@ class NeedAdjustment(BaseModel):
         description="调整类型：增加、减少、维持"
     )
     new_value: float = Field(ge=0.0, le=1.0, description="调整后的新值")
-    reasoning: str = Field(description="调整理由")
+    reasoning: str = Field(default="", description="调整理由")
 
 
 class NeedAdjustmentResult(BaseModel):
     """需求调整结果模型。"""
 
     adjustments: list[NeedAdjustment] = Field(description="调整列表")
-    reasoning: str = Field(description="整体调整理由")
+    reasoning: str = Field(default="", description="整体调整理由")
 
 
 class Intention(BaseModel):
@@ -236,20 +240,30 @@ class Intention(BaseModel):
     attitude: float = Field(ge=0.0, le=1.0, description="个人偏好和评价")
     subjective_norm: float = Field(ge=0.0, le=1.0, description="社会环境和他人的看法")
     perceived_control: float = Field(ge=0.0, le=1.0, description="执行难度和可控性")
-    reasoning: str = Field(description="意图存在的理由")
+    reasoning: str = Field(default="", description="意图存在的理由")
 
 
 class IntentionUpdate(BaseModel):
     """意图更新结果模型。"""
 
     intentions: list[Intention] = Field(description="候选意图列表（将选择优先级最高的一个）")
-    reasoning: str = Field(description="更新理由")
+    reasoning: str = Field(default="", description="更新理由")
+
+
+class CognitionIntentionUpdateResult(BaseModel):
+    """合并的认知与意图更新结果模型。"""
+
+    need_adjustment: NeedAdjustmentResult = Field(description="需求调整结果")
+    current_need: Need = Field(description="当前需求结果")
+    cognition_update: CognitionUpdateResult = Field(description="情感与思考更新结果")
+    intention_update: IntentionUpdate = Field(description="意图更新结果")
 
 
 class ReActInstructionResponse(BaseModel):
-    """ReAct Act阶段的指令响应模型。"""
+    """ReAct Act阶段的指令响应模型（非template模式）。"""
 
     reasoning: str = Field(
+        default="",
         description="1.Why you are giving this action instruction. 2.check if the action instruction is available based on the available operations."
     )
     instruction: str = Field(
@@ -258,6 +272,18 @@ class ReActInstructionResponse(BaseModel):
     status: Optional[str] = Field(
         default=None,
         description="Optional status to skip environment call. If provided and not 'in_progress' or 'unknown', the environment router will be skipped. Valid values: 'success', 'fail', 'error', 'in_progress', 'unknown'"
+    )
+
+
+class ReActInstructionResponseWithTemplate(ReActInstructionResponse):
+    """ReAct Act阶段的指令响应模型（template模式，含variables）。"""
+
+    instruction: str = Field(
+        description="A single, clear sentence or short paragraph that tells the router what action to take. This instruction MUST contain variable placeholders like {variable_name} if there are ANY variables in the instruction."
+    )
+    variables: Dict[str, Any] = Field(
+        default_factory=dict,
+        description="Variables to substitute in the instruction template. This is a dictionary where keys are variable names (without curly braces) and values are their corresponding values. For example, if instruction is 'Move to {aoi_id}', variables should be {'aoi_id': 500001234}."
     )
 
 
@@ -293,18 +319,15 @@ class PersonAgent(AgentBase):
 **Initialization Parameters:**
 - id (int): The unique identifier for the agent.
 - profile (dict | Any): The profile of the agent. Can be a dictionary with agent attributes or any other type. Common profile fields include: name, gender, age, education, occupation, marriage_status, persona, background_story, profile_text.
-- alpha_H (float, optional): Hunger decay coefficient. Default: 0.01.
-- alpha_D (float, optional): Energy decay coefficient. Default: 0.005.
-- alpha_P (float, optional): Safety decay coefficient. Default: 0.002.
-- alpha_C (float, optional): Social decay coefficient. Default: 0.003.
-- T_H (float, optional): Hunger threshold. Default: 0.4.
-- T_D (float, optional): Energy threshold. Default: 0.4.
-- T_P (float, optional): Safety threshold. Default: 0.4.
-- T_C (float, optional): Social threshold. Default: 0.6.
+- T_H (float, optional): Hunger threshold. Default: 0.2.
+- T_D (float, optional): Energy threshold. Default: 0.2.
+- T_P (float, optional): Safety threshold. Default: 0.2.
+- T_C (float, optional): Social threshold. Default: 0.3.
 - max_plan_steps (int, optional): Maximum number of plan steps. Default: 6.
 - short_memory_window_size (int, optional): Short-term memory window size for storing recent N message records. Default: 10.
 - max_intentions (int, optional): Maximum number of candidate intentions. Default: 5.
 - max_react_interactions_per_step (int, optional): Maximum number of environment interactions per plan step using ReAct paradigm. Default: 3.
+- template_mode_enabled (bool, optional): Enable template mode for environment interactions. When True, instructions sent to the environment router are treated as template instructions where variables from ctx['variables'] are substituted using {{variable_name}} syntax. The instruction MUST contain variable placeholders like {{variable_name}} if there are ANY variables in the instruction. Default: False.
 
 **Example initialization config:**
 ```json
@@ -320,18 +343,15 @@ class PersonAgent(AgentBase):
     "persona": "helpful",
     "background_story": "A software engineer who loves coding."
   }},
-  "alpha_H": 0.01,
-  "alpha_D": 0.005,
-  "alpha_P": 0.002,
-  "alpha_C": 0.003,
-  "T_H": 0.4,
-  "T_D": 0.4,
-  "T_P": 0.4,
-  "T_C": 0.6,
+  "T_H": 0.2,
+  "T_D": 0.2,
+  "T_P": 0.2,
+  "T_C": 0.3,
   "max_plan_steps": 6,
   "short_memory_window_size": 10,
   "max_intentions": 5,
-  "max_react_interactions_per_step": 3
+  "max_react_interactions_per_step": 3,
+  "template_mode_enabled": false
 }}
 ```
 
@@ -343,20 +363,17 @@ class PersonAgent(AgentBase):
         self,
         id: int,
         profile: Any,
-        name: Optional[str] = None,
-        replay_writer: Optional[Any] = None,
-        alpha_H: float = 0.01,  # 饥饿衰减系数
-        alpha_D: float = 0.005,  # 能量衰减系数
-        alpha_P: float = 0.002,  # 安全衰减系数
-        alpha_C: float = 0.003,  # 社交衰减系数
-        T_H: float = 0.4,  # 饥饿阈值
-        T_D: float = 0.4,  # 能量阈值
-        T_P: float = 0.4,  # 安全阈值
-        T_C: float = 0.6,  # 社交阈值
+        name: Optional[str] = None,  # 可选显示名
+        replay_writer: Optional["ReplayWriter"] = None,  # 可选回放写入器
+        T_H: float = 0.2,  # 饥饿阈值
+        T_D: float = 0.2,  # 能量阈值
+        T_P: float = 0.2,  # 安全阈值
+        T_C: float = 0.3,  # 社交阈值
         max_plan_steps: int = 6,
         short_memory_window_size: int = 10,  # 短期记忆窗口大小
         max_intentions: int = 5,  # 最大意图数量
         max_react_interactions_per_step: int = 3,  # 每个Step最多与环境交互次数
+        template_mode_enabled: bool = False,  # 是否启用template模式
     ):
         """
         初始化PersonAgent。
@@ -364,11 +381,10 @@ class PersonAgent(AgentBase):
         Args:
             id: Agent ID
             profile: Agent的profile（可以是包含profile_text的字典，或直接是字符串）
-            world_description: 对世界的描述，用于指导agent的所有行为
-            alpha_H: 饥饿衰减系数
-            alpha_D: 能量衰减系数
-            alpha_P: 安全衰减系数
-            alpha_C: 社交衰减系数
+            memory_config: 兼容保留（不再使用，memory_config 统一从 Config 读取）
+            world_description: 兼容保留（不再使用，world_description 统一从 env_router 获取）
+            name: 可选显示名（默认从profile或id推断）
+            replay_writer: 可选回放写入器
             T_H: 饥饿阈值
             T_D: 能量阈值
             T_P: 安全阈值
@@ -377,19 +393,16 @@ class PersonAgent(AgentBase):
             short_memory_window_size: 短期记忆窗口大小，用于存储最近的N条消息记录
             max_intentions: 最大意图数量
             max_react_interactions_per_step: 每个Step最多与环境交互次数
+            template_mode_enabled: 是否启用template模式，启用后指令会被视为模板指令，支持{variable_name}语法
         """
         super().__init__(id=id, profile=profile, name=name, replay_writer=replay_writer)
         self._memory_user_id = f"agent-{id}"
         self._world_description = ""
 
-        # Initialize memory from config if provided
+        # memory_config 统一从 Config 获取（兼容入参但不使用）
         self._memory = AsyncMemory(config=Config.get_mem0_config(str(id)))
 
-        # 衰减系数和阈值
-        self.alpha_H = alpha_H
-        self.alpha_D = alpha_D
-        self.alpha_P = alpha_P
-        self.alpha_C = alpha_C
+        # 阈值
         self.T_H = T_H
         self.T_D = T_D
         self.T_P = T_P
@@ -397,11 +410,13 @@ class PersonAgent(AgentBase):
         self.max_plan_steps = max_plan_steps
         self.short_memory_window_size = short_memory_window_size
 
+        # Template模式开关
+        self.template_mode_enabled = template_mode_enabled
+
         # 短期记忆队列（存储最近的N条消息记录，每个元素是包含记忆文本和时间戳的字典）
         self._short_memory: list[dict[str, str]] = []
 
         # 状态跟踪
-        self._last_evaluation_time: Optional[int] = None
         self._step_count = 0
         self._tick: Optional[int] = None
         self._t: Optional[datetime] = None
@@ -421,6 +436,11 @@ class PersonAgent(AgentBase):
 
         # 思考
         self._thought: str = "Currently nothing good or bad is happening"
+
+        # 合并认知/意图更新的结构化输出
+        self._last_cognition_intention_update: Optional[
+            CognitionIntentionUpdateResult
+        ] = None
 
         self._plan: Optional[Plan] = None
         """
@@ -694,36 +714,6 @@ class PersonAgent(AgentBase):
 
     # ==================== 需求管理方法 ====================
 
-    async def _time_decay(self) -> None:
-        """应用时间衰减到需求满意度。"""
-        assert self._tick is not None, "tick is not set"
-        tick_now = self._tick
-
-        if self._last_evaluation_time is None:
-            self._last_evaluation_time = tick_now
-            return
-
-        # 计算时间差（小时）
-        time_diff = (tick_now - self._last_evaluation_time) / 3600
-        self._last_evaluation_time = tick_now
-
-        if time_diff <= 0:
-            return
-
-        # 应用衰减
-        self._satisfactions.satiety = max(
-            0, self._satisfactions.satiety - self.alpha_H * time_diff
-        )
-        self._satisfactions.energy = max(
-            0, self._satisfactions.energy - self.alpha_D * time_diff
-        )
-        self._satisfactions.safety = max(
-            0, self._satisfactions.safety - self.alpha_P * time_diff
-        )
-        self._satisfactions.social = max(
-            0, self._satisfactions.social - self.alpha_C * time_diff
-        )
-
     async def _adjust_needs_from_memory(self) -> NeedAdjustmentResult:
         """根据历史记忆调整需求满意度。
 
@@ -767,7 +757,7 @@ Based on your recent memories, current observation, and experiences, determine i
 
 Adjustment types:
 - "increase": The need satisfaction should increase (e.g., after eating, satiety increases)
-- "decrease": The need satisfaction should decrease (e.g., after time passes, energy decreases)
+- "decrease": The need satisfaction should decrease (e.g., after a tiring activity, energy decreases)
 - "maintain": The need satisfaction should stay the same (e.g., no relevant events occurred)
 </instructions>
 
@@ -793,9 +783,9 @@ Your response is:
 ```json
 """
 
-        self._logger.debug(
-            f"{_get_debug_info('准备调用LLM调整需求满意度')} - prompt length: {len(prompt)}"
-        )
+        # self._logger.debug(
+        #     f"{_get_debug_info('准备调用LLM调整需求满意度')} - prompt length: {len(prompt)}"
+        # )
         # self._logger.debug(
         #     f"{_get_debug_info('发送给LLM的完整prompt（调整需求）')}:\n{prompt}"
         # )
@@ -904,9 +894,9 @@ Your response is:
 ```json
 """
 
-        self._logger.debug(
-            f"{_get_debug_info('准备调用LLM确定当前需求')} - prompt length: {len(prompt)}"
-        )
+        # self._logger.debug(
+        #     f"{_get_debug_info('准备调用LLM确定当前需求')} - prompt length: {len(prompt)}"
+        # )
         # self._logger.debug(
         #     f"{_get_debug_info('发送给LLM的完整prompt（确定需求）')}:\n{prompt}"
         # )
@@ -1003,8 +993,8 @@ If the observation provided related information, you do not need to plan query s
 </explanation>
 
 <IMPORTANT>
-You are operating in the simulated world described above. Please do not attempt any actions that are beyond available operations.
-You're actions are limited by the available operations, it can only be a single or a combination of the available operations.
+You are operating in the simulated world described above. Please do not attempt any actions that are infeasible according to the AVAILABLE ACTIONS in the environment.
+You're actions are limited by the AVAILABLE ACTIONS in the environment, it can only be a single or a combination of the AVAILABLE ACTIONS.
 Ensure that the level of detail in your actions corresponds precisely to the allowed action space.
 </IMPORTANT>
 
@@ -1031,12 +1021,12 @@ Your response is:
 ```json
 """
 
-        self._logger.debug(
-            f"{_get_debug_info('准备调用LLM生成计划')} - intention: {intention.intention}, prompt length: {len(plan_prompt)}"
-        )
-        self._logger.debug(
-            f"{_get_debug_info('发送给LLM的完整prompt（生成计划）')}:\n{plan_prompt}"
-        )
+        # self._logger.debug(
+        #     f"{_get_debug_info('准备调用LLM生成计划')} - intention: {intention.intention}, prompt length: {len(plan_prompt)}"
+        # )
+        # self._logger.debug(
+        #     f"{_get_debug_info('发送给LLM的完整prompt（生成计划）')}:\n{plan_prompt}"
+        # )
 
         plan = await self.acompletion_with_pydantic_validation(
             model_type=Plan,
@@ -1139,12 +1129,12 @@ Return only one of: "completed", "in_progress", "failed", "pending"
 
 Your response (one word only):"""
 
-        self._logger.debug(
-            f"{_get_debug_info('准备调用LLM检查步骤完成情况')} - step intention: {step.intention}, prompt length: {len(prompt)}"
-        )
-        self._logger.debug(
-            f"{_get_debug_info('发送给LLM的完整prompt（检查步骤完成）')}:\n{prompt}"
-        )
+        # self._logger.debug(
+        #     f"{_get_debug_info('准备调用LLM检查步骤完成情况')} - step intention: {step.intention}, prompt length: {len(prompt)}"
+        # )
+        # self._logger.debug(
+        #     f"{_get_debug_info('发送给LLM的完整prompt（检查步骤完成）')}:\n{prompt}"
+        # )
 
         response = await self.acompletion(
             [{"role": "user", "content": prompt}],
@@ -1202,12 +1192,12 @@ Return "yes" if the plan should be interrupted, "no" if it should continue.
 
 Your response (yes/no only):"""
 
-        self._logger.debug(
-            f"{_get_debug_info('准备调用LLM判断是否中断计划')} - prompt length: {len(prompt)}"
-        )
-        self._logger.debug(
-            f"{_get_debug_info('发送给LLM的完整prompt（判断中断计划）')}:\n{prompt}"
-        )
+        # self._logger.debug(
+        #     f"{_get_debug_info('准备调用LLM判断是否中断计划')} - prompt length: {len(prompt)}"
+        # )
+        # self._logger.debug(
+        #     f"{_get_debug_info('发送给LLM的完整prompt（判断中断计划）')}:\n{prompt}"
+        # )
 
         response = await self.acompletion(
             [{"role": "user", "content": prompt}],
@@ -1377,8 +1367,8 @@ Plan step intention: "{intention}"
 </CRITICAL: AVOID REDUNDANT QUERIES>
 
 <IMPORTANT>
-You are operating in the simulated world described above. Please do not attempt any actions that are beyond available operations.
-Your actions are limited by the available operations, it can only be a single or a combination of the available operations.
+You are operating in the simulated world described above. Please do NOT attempt any actions that are infeasible according to the AVAILABLE ACTIONS in the environment.
+Your actions are limited by the AVAILABLE ACTIONS in the environment, it can only be a single or a combination of the AVAILABLE ACTIONS.
 Ensure that the level of detail in your actions corresponds precisely to the allowed action space.
 </IMPORTANT>
 
@@ -1419,6 +1409,45 @@ Now, I will provide you with the initial observation from the environment. Based
         # ReAct循环：最多进行max_react_interactions_per_step次交互
         for interaction_num in range(self.max_react_interactions_per_step):
             # 添加user消息，请求生成instruction
+            # template_mode_enabled=false时，prompt和返回值类型不包含template相关描述和字段
+            template_mode_section = ""
+            if self.template_mode_enabled:
+                template_mode_section = """
+<template_mode enabled>
+**MANDATORY**: When you have variables to pass (e.g., location, item, amount), you MUST use placeholder form {{variable_name}} in the instruction. Plain text with concrete values instead of placeholders will break template caching and is NOT allowed.
+
+Good cases (placeholders in instruction, variables dict with values):
+- instruction: "Move to {{location}}", variables: {{"location": "home"}}
+- instruction: "Buy {{item}} for {{price}} dollars", variables: {{"item": "apple", "price": 5}}
+- instruction: "Send {{amount}} to {{target}}", variables: {{"amount": "100", "target": "Alice"}}
+
+Bad cases (DO NOT do this):
+- instruction: "Move to home", variables: {{"location": "home"}}  # BAD: use {{location}} instead of "home"
+- instruction: "Buy apple for 5 dollars", variables: {{"item": "apple", "price": 5}}  # BAD: use placeholders {{item}}, {{price}}
+- instruction: "Send 100 to Alice", variables: {{"amount": "100", "target": "Alice"}}  # BAD: instruction must use {{amount}}, {{target}}
+
+Only extract variables that are actually used in the instruction (must appear as {{variable_name}} in the instruction).
+Common variables: location, target, amount, item, reason, etc.
+</template_mode>
+
+"""
+            if self.template_mode_enabled:
+                json_format = """```json
+{{
+    "reasoning": "1.Why you are giving this action instruction. 2.check if the action instruction is available based on the available operations.",
+    "instruction": "A single, clear sentence or short paragraph that tells the router what action to take. Can contain {{variable_name}} placeholders.",
+    "variables": {{"variable_name": "value", ...}} (optional, include variables if instruction contains {{variable_name}} placeholders),
+    "status": "success" | "fail" | "error" | "in_progress" | "unknown" | null (optional, only provide if you can determine the step status without calling the environment)
+}}
+```"""
+            else:
+                json_format = """```json
+{{
+    "reasoning": "1.Why you are giving this action instruction. 2.check if the action instruction is available based on the available operations.",
+    "instruction": "A single, clear sentence or short paragraph that tells the router what action to take",
+    "status": "success" | "fail" | "error" | "in_progress" | "unknown" | null (optional, only provide if you can determine the step status without calling the environment)
+}}
+```"""
             user_message_content = f"""Based on the conversation history above, generate a clear and actionable instruction for the environment router to complete the step.
 
 Interaction {interaction_num + 1}/{self.max_react_interactions_per_step}
@@ -1430,8 +1459,7 @@ Generate a clear instruction that:
 4. References the step intention: "{intention}"
 5. You can use continue to do something if you think the step is not complete.
 6. **DO NOT query for information that is already available in the observation or previous interactions**
-
-<optional_status>
+{template_mode_section}<optional_status>
 If you can determine the step status directly from the conversation history (e.g., the step is already completed, or it's impossible to complete), you can provide a "status" field to skip the environment call:
 - "success": The step has been completed successfully (skip environment call)
 - "fail": The step has failed and cannot be completed (skip environment call)
@@ -1442,13 +1470,7 @@ If you can determine the step status directly from the conversation history (e.g
 
 <format>
 You should return the result in JSON format with the following structure:
-```json
-{{
-    "reasoning": "1.Why you are giving this action instruction. 2.check if the action instruction is available based on the available operations.",
-    "instruction": "A single, clear sentence or short paragraph that tells the router what action to take",
-    "status": "success" | "fail" | "error" | "in_progress" | "unknown" | null (optional, only provide if you can determine the step status without calling the environment)
-}}
-```
+{json_format}
 </format>
 Your instruction:"""
 
@@ -1459,8 +1481,9 @@ Your instruction:"""
             )
 
             try:
+                response_model = ReActInstructionResponseWithTemplate if self.template_mode_enabled else ReActInstructionResponse
                 response = await self.acompletion_with_pydantic_validation(
-                    model_type=ReActInstructionResponse,
+                    model_type=response_model,
                     messages=messages,
                     tick=self._tick,
                     t=self._t,
@@ -1468,13 +1491,15 @@ Your instruction:"""
                 instruction = response.instruction.strip()
                 reasoning = response.reasoning.strip()
                 llm_status = response.status
+                variables = getattr(response, "variables", {})  # 仅template模式有variables字段
             except Exception as e:
                 self._logger.warning(
-                    f"{_get_debug_info('ReAct Act阶段Pydantic验证失败')} - {str(e)}, 使用默认指令"
-                )
+                f"{_get_debug_info('ReAct Act阶段Pydantic验证失败')} - {str(e)}, 使用默认指令"
+            )
                 instruction = ""
                 reasoning = ""
                 llm_status = None
+                variables = {}  # 异常时使用空字典
 
             if not instruction:
                 instruction = (
@@ -1483,10 +1508,10 @@ Your instruction:"""
 
             # 生成tool_call_id（在添加assistant消息之前生成，以便在tool_calls中使用）
             tool_call_id = f"call_{interaction_num}_{interaction_count}"
-            
+
             # 添加assistant消息（instruction），包含tool_calls表示调用env_router
             messages.append({
-                "role": "assistant", 
+                "role": "assistant",
                 "content": f"Reasoning: {reasoning}\nInstruction: {instruction}",
                 "tool_calls": [{
                     "id": tool_call_id,
@@ -1499,7 +1524,7 @@ Your instruction:"""
             })
 
             self._logger.debug(
-                f"{_get_debug_info('收到LLM响应（ReAct Act）')} - reasoning: {reasoning}, instruction: {instruction}, status: {llm_status}"
+                f"{_get_debug_info('收到LLM响应（ReAct Act）')} - reasoning: {reasoning}, instruction: {instruction}, status: {llm_status}, variables: {variables}"
             )
 
             # 检查LLM是否直接返回了status，如果是且不是in_progress/unknown，则跳过环境调用
@@ -1549,14 +1574,21 @@ Your instruction:"""
             else:
                 # 正常调用环境
                 self._logger.debug(
-                    f"{_get_debug_info('ReAct Observe阶段')} - 调用环境router执行指令: {instruction}"
+                    f"{_get_debug_info('ReAct Observe阶段')} - 调用环境router执行指令: {instruction}, variables: {variables}"
                 )
 
-                updated_ctx, answer = await self.ask_env(ctx, instruction, readonly=False)
+                # 如果启用了template模式且有variables，使用template模式调用
+                if self.template_mode_enabled:
+                    # 构建包含variables的ctx
+                    template_ctx = ctx.copy()
+                    template_ctx["variables"] = variables
+                    updated_ctx, answer = await self.ask_env(template_ctx, instruction, readonly=False, template_mode=True)
+                else:
+                    updated_ctx, answer = await self.ask_env(ctx, instruction, readonly=False, template_mode=False)
 
-                self._logger.debug(
-                    f"{_get_debug_info('收到环境router响应（ReAct Observe）')} - answer length: {len(answer)}"
-                )
+                # self._logger.debug(
+                #     f"{_get_debug_info('收到环境router响应（ReAct Observe）')} - answer length: {len(answer)}"
+                # )
                 self._logger.debug(
                     f"{_get_debug_info('环境router返回的完整answer')}:\n{answer}"
                 )
@@ -1778,9 +1810,9 @@ Your response is:
 ```json
 """
 
-        self._logger.debug(
-            f"{_get_debug_info('准备调用LLM更新计划相关情感')} - plan target: {plan_target}, completed: {completed}, prompt length: {len(prompt)}"
-        )
+        # self._logger.debug(
+        #     f"{_get_debug_info('准备调用LLM更新计划相关情感')} - plan target: {plan_target}, completed: {completed}, prompt length: {len(prompt)}"
+        # )
         # self._logger.debug(
         #     f"{_get_debug_info('发送给LLM的完整prompt（更新计划情感）')}:\n{prompt}"
         # )
@@ -1806,6 +1838,304 @@ Your response is:
             )
 
     # ==================== 认知更新方法 ====================
+
+    async def _update_cognition_and_intention(self) -> CognitionIntentionUpdateResult:
+        """合并执行需求调整、确定当前需求、更新情感思考、更新意图。"""
+        assert self._tick is not None and self._t is not None, "tick and t are not set"
+        t = self._t
+
+        # 获取agent状态
+        state_text = await self.get_state()
+
+        # 获取当前observation
+        current_observation_text = (
+            self._observation if self._observation else "No current observation."
+        )
+
+        # 当前满意度信息（供模型参考）
+        satiety = self._satisfactions.satiety
+        energy = self._satisfactions.energy
+        safety = self._satisfactions.safety
+        social = self._satisfactions.social
+        current_satisfaction_info = f"""Current Need Satisfaction Status:
+- satiety: {satiety:.2f} (Threshold: {self.T_H}, Below Threshold: {satiety <= self.T_H})
+- energy: {energy:.2f} (Threshold: {self.T_D}, Below Threshold: {energy <= self.T_D})
+- safety: {safety:.2f} (Threshold: {self.T_P}, Below Threshold: {safety <= self.T_P})
+- social: {social:.2f} (Threshold: {self.T_C}, Below Threshold: {social <= self.T_C})"""
+
+        prompt = f"""{state_text}
+
+<task>
+Complete the following steps in order. Later steps MUST use outputs from earlier steps:
+1) Adjust need satisfaction levels based on memories and current observation.
+2) Determine current need using the adjusted satisfaction values from step 1.
+3) Update thoughts and emotions using current need and observation.
+4) Update intentions using TPB, focusing on the most urgent need.
+</task>
+
+<current_observation>
+Here is the current observation from the environment in this time step. You should use this information across all steps.
+{current_observation_text}
+</current_observation>
+
+<need_adjustment>
+<explanation>
+{NEED_DESCRIPTION}
+</explanation>
+
+<instructions>
+Based on your recent memories, current observation, and experiences, determine if any need satisfaction levels should be adjusted:
+1. Consider what happened in your recent memories (e.g., did you eat? did you rest? did you socialize?)
+2. Consider what you observed in the current environment (e.g., available food, current location, time of day, etc.)
+3. For each need type, decide if it should be increased, decreased, or maintained
+4. Provide specific reasoning for each adjustment based on your memories and observation
+5. Only adjust needs that have been affected by recent events or current observation
+6. DO NOT change the the word of the need type in the adjustments.
+
+Adjustment types:
+- "increase": The need satisfaction should increase (e.g., after eating, satiety increases)
+- "decrease": The need satisfaction should decrease (e.g., after a tiring activity, energy decreases)
+- "maintain": The need satisfaction should stay the same (e.g., no relevant events occurred)
+</instructions>
+
+<format>
+You should return the result in JSON format with the following structure:
+```json
+{{
+    "adjustments": [
+        {{
+            "reasoning": "Why this adjustment is needed based on memories"
+            "need_type": "satiety" | "energy" | "safety" | "social",
+            "adjustment_type": "increase" | "decrease" | "maintain",
+            "new_value": 0.0-1.0,
+        }},
+        ...
+    ],
+    "reasoning": "Overall reasoning for all adjustments"
+}}
+```
+</format>
+</need_adjustment>
+
+<current_need>
+<profile>
+{self.profile_text}
+</profile>
+
+<explanation>
+{NEED_DESCRIPTION}
+</explanation>
+
+<decision_rules>
+When determining your current need, follow these principles:
+1. **Priority matters**: Lower priority numbers mean higher urgency. Always consider needs in priority order (1 → 2 → 3 → 4 → 5).
+2. **Urgency threshold**: A need is considered urgent when its satisfaction value is **below or equal to** its threshold. Only urgent needs should be prioritized.
+3. **Default state**: If no needs are urgent (all satisfaction levels are above their thresholds), return "whatever" to indicate you have no specific urgent needs.
+
+Remember: Your needs reflect your current state of well-being. Pay attention to satisfaction levels and thresholds to make appropriate decisions about what you need most right now.
+Use the adjusted satisfaction values from the need adjustment step above.
+</decision_rules>
+
+<current_satisfaction_status>
+{current_satisfaction_info}
+</current_satisfaction_status>
+
+<format>
+You should return the result in JSON format with the following structure:
+```json
+{{
+    "reasoning": "Brief explanation of your decision",
+    "need_type": "satiety" | "energy" | "safety" | "social" | "whatever",
+    "description": "A brief description of why you chose this need (e.g., 'I feel hungry' or 'I have no specific needs right now')"
+}}
+```
+</format>
+</current_need>
+
+<cognition_update>
+<instructions>
+Review your recent memories, current observation, current need satisfaction levels, and current state, then:
+
+1. **Thought Update**:
+   - Reflect on what has happened recently and how it relates to your goals, values, and personality
+   - Consider how your current need satisfaction levels affect your thoughts
+   - Formulate a natural, coherent thought that captures your current mental state
+   - The thought should be a complete sentence or short paragraph that reflects your genuine reflection
+
+2. **Emotion Intensity Update**:
+   - Consider how recent events AND your current need satisfaction levels have affected your emotional state
+   - Low need satisfaction (especially for urgent needs) may cause negative emotions
+   - High need satisfaction may cause positive emotions
+   - Update emotion intensities to accurately reflect your current feelings
+   - Values should be integers between 0-10, where:
+     * 0-2: Very low intensity
+     * 3-4: Low intensity
+     * 5-6: Moderate intensity
+     * 7-8: High intensity
+     * 9-10: Very high intensity
+   - Only update if there has been a meaningful change; otherwise, keep values similar to current state
+
+3. **Emotion Type Selection**:
+   - Choose the single emotion type that best describes your overall current emotional state
+   - Consider the dominant emotion you're experiencing right now, influenced by both recent memories and need satisfaction
+   - Select from: Joy, Distress, Resentment, Pity, Hope, Fear, Satisfaction, Relief, Disappointment, Pride, Admiration, Shame, Reproach, Liking, Disliking, Gratitude, Anger, Gratification, Remorse, Love, Hate
+   - The value of "emotion_types" MUST be exactly one of the above words, case-sensitive, in English only. Do not translate or add any extra text.
+
+Your response should reflect genuine introspection and emotional awareness based on your personality, recent experiences, and current need satisfaction levels.
+</instructions>
+
+<format>
+You should return the result in JSON format with the following structure:
+```json
+{{
+    "thought": "Your updated thoughts - a natural, reflective statement about your current mental state and recent experiences",
+    "emotion": {{
+        "sadness": int (0-10),
+        "joy": int (0-10),
+        "fear": int (0-10),
+        "disgust": int (0-10),
+        "anger": int (0-10),
+        "surprise": int (0-10)
+    }},
+    "emotion_types": "One word from: Joy, Distress, Resentment, Pity, Hope, Fear, Satisfaction, Relief, Disappointment, Pride, Admiration, Shame, Reproach, Liking, Disliking, Gratitude, Anger, Gratification, Remorse, Love, Hate"
+}}
+```
+</format>
+</cognition_update>
+
+<intention_update>
+<explanation>
+Theory of Planned Behavior (TPB) evaluates intentions based on three factors:
+1. **Attitude**: Personal preference and evaluation of the behavior (0.0-1.0)
+2. **Subjective Norm**: Social environment and others' views on this behavior (0.0-1.0)
+3. **Perceived Control**: Difficulty and controllability of executing this behavior (0.0-1.0)
+
+An intention with higher scores in these three dimensions is more likely to be executed.
+</explanation>
+
+<instructions>
+Based on your current situation, current observation, especially focusing on the most urgent need, generate candidate intentions:
+
+1. **Generate candidate intentions**:
+   - Consider what intentions would help satisfy your current urgent need
+   - Generate intentions that are relevant to your current situation
+   - Evaluate each intention using TPB (attitude, subjective_norm, perceived_control)
+   - Assign appropriate priority (lower number = higher priority)
+
+2. **Total control**:
+   - Keep the total number of candidate intentions within {self.max_intentions} (you can have fewer)
+   - Prioritize intentions that address your most urgent need
+   - Ensure intentions are realistic and actionable based on the AVAILABLE ACTIONS in the environment
+   - You can include the current intention if it is still relevant, or create entirely new ones
+   - Your intention should not include too many details, it's a intention, not a plan or movement
+
+3. **Reasoning**: Provide overall reasoning for the intention update.
+</instructions>
+
+<format>
+You should return the result in JSON format with the following structure:
+```json
+{{
+    "reasoning": "Overall reasoning for the intention update",
+    "intentions": [
+        {{
+            "intention": "Description of the intention",
+            "priority": int (lower = higher priority),
+            "attitude": 0.0-1.0,
+            "subjective_norm": 0.0-1.0,
+            "perceived_control": 0.0-1.0,
+            "reasoning": "Why this intention is included"
+        }},
+        ...
+    ]
+}}
+```
+</format>
+</intention_update>
+
+<output_format>
+Return a single JSON object with keys in this exact order:
+1. "need_adjustment"
+2. "current_need"
+3. "cognition_update"
+4. "intention_update"
+Each value must follow its own format above. Do not add or rename fields.
+</output_format>
+
+Your response is:
+```json
+"""
+
+        response = await self.acompletion_with_pydantic_validation(
+            model_type=CognitionIntentionUpdateResult,
+            messages=[{"role": "user", "content": prompt}],
+            tick=self._tick,
+            t=t,
+        )
+
+        self._last_cognition_intention_update = response
+
+        self._logger.debug(
+            f"{_get_debug_info('收到LLM响应（合并认知与意图）')} - "
+            f"need_adjustments: {response.need_adjustment.adjustments}, "
+            f"current_need: {response.current_need.need_type}, "
+            f"emotion_type: {response.cognition_update.emotion_types.value}, "
+            f"intentions: {response.intention_update.intentions}"
+        )
+
+        # 应用需求调整
+        for adjustment in response.need_adjustment.adjustments:
+            if adjustment.need_type == "satiety":
+                self._satisfactions.satiety = adjustment.new_value
+            elif adjustment.need_type == "energy":
+                self._satisfactions.energy = adjustment.new_value
+            elif adjustment.need_type == "safety":
+                self._satisfactions.safety = adjustment.new_value
+            elif adjustment.need_type == "social":
+                self._satisfactions.social = adjustment.new_value
+
+        # 记录调整记忆到cognition_memory（不立即加入mem0）
+        self._add_cognition_memory(
+            f"Adjusted needs based on memories: {response.need_adjustment.reasoning}",
+            memory_type="need",
+        )
+
+        # 更新当前需求
+        self._need = response.current_need.need_type
+
+        # 更新情感和思考
+        self._thought = response.cognition_update.thought
+        self._emotion = response.cognition_update.emotion
+        self._emotion_types = response.cognition_update.emotion_types
+
+        # 记录情感和思考更新记忆到cognition_memory（不立即加入mem0）
+        self._add_cognition_memory(
+            f"Updated thought: {response.cognition_update.thought}\n"
+            f"Updated emotion: {response.cognition_update.emotion_types.value}",
+            memory_type="cognition",
+        )
+
+        # 更新意图
+        response.intention_update.intentions.sort(key=lambda x: x.priority)
+        self._intention = (
+            response.intention_update.intentions[0]
+            if response.intention_update.intentions
+            else None
+        )
+
+        # 记录更新记忆到cognition_memory（不立即加入mem0）
+        intention_text = ""
+        if self._intention:
+            intention_text = (
+                f"Selected intention: {self._intention.intention} "
+                f"(Priority: {self._intention.priority})"
+            )
+        self._add_cognition_memory(
+            f"Updated intention: {response.intention_update.reasoning}\n{intention_text}",
+            memory_type="intention",
+        )
+
+        return response
 
     async def _update_emotion_and_thought(self) -> None:
         """根据历史记忆和当前Need满足度更新Emotion和thought。"""
@@ -1883,9 +2213,9 @@ Your response is:
 ```json
 """
 
-        self._logger.debug(
-            f"{_get_debug_info('准备调用LLM更新情感和思考')} - prompt length: {len(prompt)}"
-        )
+        # self._logger.debug(
+        #     f"{_get_debug_info('准备调用LLM更新情感和思考')} - prompt length: {len(prompt)}"
+        # )
         # self._logger.debug(
         #     f"{_get_debug_info('发送给LLM的完整prompt（更新情感和思考）')}:\n{prompt}"
         # )
@@ -1961,8 +2291,9 @@ Based on your current situation, current observation, especially focusing on the
 2. **Total control**: 
    - Keep the total number of candidate intentions within {self.max_intentions} (you can have fewer)
    - Prioritize intentions that address your most urgent need
-   - Ensure intentions are realistic and actionable
+   - Ensure intentions are realistic and actionable based on the AVAILABLE ACTIONS in the environment
    - You can include the current intention if it is still relevant, or create entirely new ones
+   - Your intention should not include too many details, it's a intention, not a plan or movement
 
 3. **Reasoning**: Provide overall reasoning for the intention update.
 </instructions>
@@ -1991,9 +2322,9 @@ Your response is:
 ```json
 """
 
-        self._logger.debug(
-            f"{_get_debug_info('准备调用LLM更新意图')} - prompt length: {len(prompt)}"
-        )
+        # self._logger.debug(
+        #     f"{_get_debug_info('准备调用LLM更新意图')} - prompt length: {len(prompt)}"
+        # )
         # self._logger.debug(
         #     f"{_get_debug_info('发送给LLM的完整prompt（更新意图）')}:\n{prompt}"
         # )
@@ -2085,9 +2416,9 @@ Your response is:
             {"id": self._id}, "<observe>", readonly=True
         )
 
-        self._logger.debug(
-            f"{_get_debug_info('收到环境router观察响应')} - observation length: {len(observation) if observation else 0}"
-        )
+        # self._logger.debug(
+        #     f"{_get_debug_info('收到环境router观察响应')} - observation length: {len(observation) if observation else 0}"
+        # )
         self._logger.debug(
             f"{_get_debug_info('环境router返回的完整observation')}:\n{observation if observation else 'None'}"
         )
@@ -2115,25 +2446,14 @@ Your response is:
             step_log.append(f"Observe: InProgress (status={observe_status})")
             return "Skipped (observe in progress)"
 
-        # 应用时间衰减
-        await self._time_decay()
-
-        # 2. 根据历史记忆，对需求（Need）进行调整
-        need_adjustment_result = await self._adjust_needs_from_memory()
+        # 2-4. 合并执行需求调整、确定当前需求、更新情感思考、更新意图
+        cognition_result = await self._update_cognition_and_intention()
+        need_adjustment_result = cognition_result.need_adjustment
         step_log.append(
             f"NeedAdjust: {len(need_adjustment_result.adjustments)} adjustments"
         )
-
-        # 2.5. 确定当前需求
-        await self._determine_current_need()
         step_log.append(f"Need: {self._need}")
-
-        # 3. 根据历史记忆、当前Need满足度，更新Emotion和thought
-        await self._update_emotion_and_thought()
         step_log.append(f"Emotion: {self._emotion_types.value}")
-
-        # 4. 根据历史记忆、当前Need需求满足度以及最紧迫的need、当前Emotion和thought，使用计划行为理论更新意图
-        await self._update_intention()
         step_log.append(
             f"Intention: {self._intention.intention if self._intention else 'None'}"
         )
@@ -2517,9 +2837,9 @@ Your answer:"""
         )
         content = response.choices[0].message.content  # type: ignore
 
-        self._logger.debug(
-            f"{_get_debug_info('收到LLM响应（回答用户问题）')} - answer length: {len(str(content)) if content else 0}"
-        )
+        # self._logger.debug(
+        #     f"{_get_debug_info('收到LLM响应（回答用户问题）')} - answer length: {len(str(content)) if content else 0}"
+        # )
         self._logger.debug(
             f"{_get_debug_info('LLM返回的完整answer')}:\n{content if content else 'None'}"
         )
@@ -2594,9 +2914,14 @@ Your answer:"""
                 ),
             }
 
+        cognition_intention_update = None
+        if self._last_cognition_intention_update:
+            cognition_intention_update = (
+                self._last_cognition_intention_update.model_dump(mode="json")
+            )
+
         # 构建记录
         step_record = {
-            "tick": self._tick,
             "timestamp": self._t.isoformat(),
             "step_count": self._step_count,
             "observation": observation_info,
@@ -2607,6 +2932,7 @@ Your answer:"""
                 "social": self._satisfactions.social,
                 "current_need": self._need,
             },
+            "cognition_intention_update": cognition_intention_update,
             "intentions": intentions_info,
             "plan": plan_info,
             "acts": current_acts,
@@ -2708,9 +3034,9 @@ Respond with ONLY the intention name from the list above. Do not include any exp
 
 Your response:"""
 
-        self._logger.debug(
-            f"{_get_debug_info('准备查询当前意图')} - step: {self._step_count}, t: {self._t.isoformat()}"
-        )
+        # self._logger.debug(
+        #     f"{_get_debug_info('准备查询当前意图')} - step: {self._step_count}, t: {self._t.isoformat()}"
+        # )
 
         # Query using LLM
         response = await self.acompletion(

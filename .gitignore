@@ -37,5 +37,11 @@ benchmark_results/
 .agentsociety/
 groundtruth/
 .env.*
+result_commons_tragedy_person_agent/
+result_prisoners_dilemma_person_agent/
+result_public_goods_person_agent/
+result_trust_game_person_agent/
+result_volunteer_dilemma_person_agent/
+game_log/
 *.json
 .vscode/

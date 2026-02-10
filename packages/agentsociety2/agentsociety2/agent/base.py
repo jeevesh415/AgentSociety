@@ -11,7 +11,7 @@ if TYPE_CHECKING:
 
 import json_repair
 from agentsociety2.config import extract_json
-from agentsociety2.env.router_base import RouterBase
+from agentsociety2.env.router_base import RouterBase, TokenUsageStats
 from agentsociety2.logger import get_logger
 from agentsociety2.config import get_llm_router_and_model
 from litellm import AllMessageValues
@@ -90,6 +90,7 @@ class AgentBase(ABC):
         self._env: RouterBase | None = None
         self._logger = get_logger()
         self._llm_interaction_history: list[LLMInteractionHistory] = []
+        self._token_usage_stats: dict[str, TokenUsageStats] = {}
         self._replay_writer = replay_writer
 
     @classmethod
@@ -173,6 +174,37 @@ class AgentBase(ABC):
         )
         self._llm_interaction_history.append(history_record)
 
+    def _record_token_usage(self, response: Any) -> None:
+        """
+        Record token usage statistics for the agent's LLM calls.
+        """
+        if not isinstance(response, ModelResponse):
+            return
+        usage = getattr(response, "usage", None)
+        if usage is None:
+            return
+        model_name = self._model_name or "unknown"
+        if model_name not in self._token_usage_stats:
+            self._token_usage_stats[model_name] = TokenUsageStats()
+        stats = self._token_usage_stats[model_name]
+        stats.call_count += 1
+        stats.input_tokens += getattr(usage, "prompt_tokens", 0)
+        stats.output_tokens += getattr(usage, "completion_tokens", 0)
+        self._log_token_usage_stats(model_name, stats)
+
+    def _log_token_usage_stats(self, model_name: str, stats: TokenUsageStats) -> None:
+        """
+        Log current token usage stats for this agent (agent-only output).
+        """
+        self._logger.info(
+            "Agent %s token usage - model=%s calls=%s input=%s output=%s",
+            self._id,
+            model_name,
+            stats.call_count,
+            stats.input_tokens,
+            stats.output_tokens,
+        )
+
     def get_llm_interaction_history(self) -> list[LLMInteractionHistory]:
         """
         Get the list of all LLM interaction history records for this agent.
@@ -187,6 +219,12 @@ class AgentBase(ABC):
         Clear all LLM interaction history records for this agent.
         """
         self._llm_interaction_history.clear()
+
+    def get_token_usages(self) -> dict[str, TokenUsageStats]:
+        return self._token_usage_stats.copy()
+
+    def reset_token_usages(self):
+        self._token_usage_stats.clear()
 
     @overload
     async def acompletion(
@@ -220,6 +258,7 @@ class AgentBase(ABC):
         )
         # Record interaction history (only for non-streaming responses)
         if not stream:
+            self._record_token_usage(response)
             self._record_llm_interaction(
                 messages=messages,
                 response=response,
@@ -251,6 +290,7 @@ class AgentBase(ABC):
             messages=request_messages,
             stream=False,
         )
+        self._record_token_usage(response)
         # Record interaction history
         self._record_llm_interaction(
             messages=request_messages,
@@ -333,14 +373,17 @@ You interact with the world built by multiple environment modules through an env
 
 Remember: You are simulating a real person living in a simulated world. Your behavior should be natural, time-appropriate, and consistent with human psychology and social norms."""
 
-    async def ask_env(self, ctx: dict, message: str, readonly: bool):
+    async def ask_env(self, ctx: dict, message: str, readonly: bool, template_mode: bool = False):
         """
         Ask the agent a question from the environment.
 
         Args:
-            ctx: The context of the agent.
-            message: The message to ask the agent.
+            ctx: The context of the agent. Can contain 'variables' key for template mode.
+            message: The message to ask the agent. In template mode, this is treated as a template instruction.
             readonly: The readonly flag to pass to the environment.
+            template_mode: Whether to enable template mode. When True, the message is treated as a
+                          template instruction where variables from ctx['variables'] are substituted
+                          using {variable_name} syntax (similar to Python f-strings).
 
         Returns:
             A tuple of (ctx, answer)
@@ -350,7 +393,7 @@ Remember: You are simulating a real person living in a simulated world. Your beh
         assert self._env is not None, "Environment is not initialized"
         if "id" not in ctx:
             ctx["id"] = self._id
-        ctx, answer = await self._env.ask(ctx, message, readonly=readonly)
+        ctx, answer = await self._env.ask(ctx, message, readonly=readonly, template_mode=template_mode)
         return ctx, answer
 
     async def init(
@@ -623,6 +666,7 @@ Your corrected response:
                     stream=False,
                 )
 
+                self._record_token_usage(response)
                 # Record interaction history
                 self._record_llm_interaction(
                     messages=request_messages,

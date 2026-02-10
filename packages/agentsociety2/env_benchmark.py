@@ -78,6 +78,7 @@ import json
 import logging
 import os
 import pickle
+import re
 import time
 import yaml
 from datetime import datetime
@@ -88,6 +89,7 @@ load_dotenv(".env.openrouter")
 
 from agentsociety2.contrib.env.event_space import EventSpace
 from agentsociety2.contrib.env.mobility_space import MobilitySpace
+from agentsociety2.contrib.env.social_media import SocialMediaSpace
 from agentsociety2.env import (
     CodeGenRouter,
     PlanExecuteRouter,
@@ -412,6 +414,32 @@ def compute_metrics(
     }
 
 
+def parse_instruction_types(yaml_data_path: str) -> List[str]:
+    """
+    从 YAML 文件的注释分段中解析指令类型（按顺序返回）。
+
+    规则：
+    - 以注释行 "# 1. xxx" / "# 2. xxx" 等作为类型标题
+    - 每遇到一条 "- instruction:" 记录当前类型
+    """
+    instruction_types: List[str] = []
+    current_type = "未知类型"
+
+    with open(yaml_data_path, "r", encoding="utf-8") as f:
+        for line in f:
+            stripped = line.strip()
+            if stripped.startswith("#"):
+                match = re.match(r"#\s*\d+\.\s*(.+)", stripped)
+                if match:
+                    current_type = match.group(1).strip()
+                continue
+
+            if stripped.startswith("- instruction:"):
+                instruction_types.append(current_type)
+
+    return instruction_types
+
+
 async def initialize_environment(
     profiles_to_use: List[Dict],
     router_class,
@@ -465,8 +493,19 @@ async def initialize_environment(
     ]
     event_space = EventSpace(allowed_event_types)
 
+    # 创建社交媒体环境
+    logger.info("\n【初始化社交媒体模块】")
+    social_media_data_dir = os.getenv(
+        "SOCIAL_MEDIA_DATA_DIR",
+        os.path.join(os.path.expanduser("~/.agentsociety"), "social_media_data"),
+    )
+    logger.info(f"  ✓ 社交媒体数据目录: {social_media_data_dir}")
+    social_media_env = SocialMediaSpace(data_dir=social_media_data_dir)
+
     # 创建路由器（路由器将使用环境变量中的默认 LLM 配置）
-    env_router = router_class(env_modules=[mobility_env, event_space])
+    env_router = router_class(
+        env_modules=[mobility_env, event_space, social_media_env]
+    )
     await env_router.init(START_TIME)
 
     actual_agent_ids = [p["id"] for p in profiles_to_use]
@@ -533,6 +572,14 @@ async def main(
         test_data = yaml.safe_load(f)
 
     instructions = test_data.get("instructions", [])
+    instruction_types = parse_instruction_types(yaml_data_path)
+    if instruction_types and len(instruction_types) == len(instructions):
+        for idx, test_case in enumerate(instructions):
+            test_case["instruction_type"] = instruction_types[idx]
+    else:
+        logger.warning(
+            "  ⚠ 指令类型解析失败或数量不匹配，按类型统计可能不准确"
+        )
     logger.info(f"  ✓ 加载了 {len(instructions)} 条测试指令")
 
     # ==================== Initialize Environment ====================
@@ -715,6 +762,30 @@ async def main(
         pickle.dump(results, f)
     logger.info(f"\n  ✓ 结果已保存到: {output_path}")
 
+    # 按类型统计正确调用（successful_call）
+    type_stats: Dict[str, Dict[str, Any]] = {}
+    for r in all_results:
+        instruction_type = r.get("test_case", {}).get("instruction_type") or "未知类型"
+        stats = type_stats.setdefault(
+            instruction_type, {"count": 0, "successful_calls": 0, "success_rate": 0.0}
+        )
+        stats["count"] += 1
+        if r.get("metrics", {}).get("successful_call", False):
+            stats["successful_calls"] += 1
+
+    for stats in type_stats.values():
+        stats["success_rate"] = (
+            stats["successful_calls"] / stats["count"] if stats["count"] else 0.0
+        )
+
+    if type_stats:
+        logger.info("\n按类型统计正确调用（successful_call）:")
+        for instruction_type, stats in type_stats.items():
+            logger.info(
+                f"  {instruction_type}: {stats['successful_calls']} / {stats['count']} "
+                f"({stats['success_rate']*100:.2f}%)"
+            )
+
     # 同时保存摘要为 JSON 格式（汇总所有日志中打印的统计信息）
     summary = {
         "router": router_class.__name__,
@@ -737,27 +808,34 @@ async def main(
             "avg_input_tokens_per_test": avg_input_tokens_per_test,
             "avg_output_tokens_per_test": avg_output_tokens_per_test,
         },
-        "by_category": {},
+        "by_type": type_stats,
     }
-
-    # 按类别计算指标
-    for category in range(1, 7):
-        category_results = [
-            r for r in successful_results if r["test_case"].get("category") == category
-        ]
-        if category_results:
-            n_cat = len(category_results)
-            summary["by_category"][category] = {
-                "count": n_cat,
-                "avg_tool_selection_iou": sum(r["metrics"]["tool_selection_iou"] for r in category_results) / n_cat,
-                "avg_sequence_lcs": sum(r["metrics"]["sequence_lcs_score"] for r in category_results) / n_cat,
-                "avg_param_accuracy": sum(r["metrics"]["param_accuracy"] for r in category_results) / n_cat,
-            }
 
     summary_path = output_path.replace(".pkl", "_summary.json")
     with open(summary_path, "w", encoding="utf-8") as f:
         json.dump(summary, f, indent=2, ensure_ascii=False)
     logger.info(f"  ✓ 摘要已保存到: {summary_path}")
+
+    # 仅为 CodeGenRouter 输出每条指令的真值-生成结果对比
+    if router_class is CodeGenRouter:
+        comparison = []
+        for idx, r in enumerate(results):
+            test_case = r.get("test_case", {})
+            metrics = r.get("metrics", {})
+            comparison.append(
+                {
+                    "index": idx,
+                    "instruction": test_case.get("instruction"),
+                    "instruction_type": test_case.get("instruction_type"),
+                    "expected_calls": test_case.get("expected_calls", []),
+                    "actual_calls": metrics.get("actual_calls", [])
+                }
+            )
+
+        compare_path = output_path.replace(".pkl", "_codegen_compare.json")
+        with open(compare_path, "w", encoding="utf-8") as f:
+            json.dump(comparison, f, indent=2, ensure_ascii=False)
+        logger.info(f"  ✓ CodeGen 对比已保存到: {compare_path}")
 
 
 async def _main():
@@ -774,7 +852,7 @@ async def _main():
         "two_tier_plan_execute": TwoTierPlanExecuteRouter,
     }
 
-    yaml_data_path = os.path.join(os.path.dirname(__file__), "instruction_test.yaml")
+    yaml_data_path = os.path.join(os.path.dirname(__file__), "instructions_complete.yaml")
 
     for name, router_class in router_classes.items():
         logger = get_logger()

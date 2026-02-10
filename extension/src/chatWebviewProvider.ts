@@ -27,18 +27,66 @@ export class ChatWebviewProvider {
   private disposables: vscode.Disposable[] = [];
 
   /**
+   * Get the configured view column for the chat panel
+   */
+  private static getViewColumn(): vscode.ViewColumn {
+    const config = vscode.workspace.getConfiguration('aiSocialScientist.chat');
+    const viewColumnStr = config.get<string>('viewColumn', 'beside');
+
+    // Map string to ViewColumn enum
+    switch (viewColumnStr.toLowerCase()) {
+      case 'one':
+        return vscode.ViewColumn.One;
+      case 'two':
+        return vscode.ViewColumn.Two;
+      case 'three':
+        return vscode.ViewColumn.Three;
+      case 'four':
+        return vscode.ViewColumn.Four;
+      case 'five':
+        return vscode.ViewColumn.Five;
+      case 'six':
+        return vscode.ViewColumn.Six;
+      case 'seven':
+        return vscode.ViewColumn.Seven;
+      case 'eight':
+        return vscode.ViewColumn.Eight;
+      case 'nine':
+        return vscode.ViewColumn.Nine;
+      case 'beside':
+      default:
+        return vscode.ViewColumn.Beside;
+    }
+  }
+
+  /**
+   * Lock the editor group containing the chat panel (VS Code 1.61+).
+   * Prevents other editors from replacing the chat when opening new files.
+   */
+  private static async lockEditorGroup(): Promise<void> {
+    try {
+      await vscode.commands.executeCommand('workbench.action.lockEditorGroup');
+    } catch {
+      // Command may not exist in older VS Code versions; ignore
+    }
+  }
+
+  /**
    * Create or show the chat panel (singleton pattern)
    */
-  public static createOrShow(context: vscode.ExtensionContext) {
+  public static async createOrShow(context: vscode.ExtensionContext): Promise<void> {
     if (ChatWebviewProvider.currentPanel) {
-      ChatWebviewProvider.currentPanel.panel.reveal(vscode.ViewColumn.Beside);
+      const viewColumn = ChatWebviewProvider.getViewColumn();
+      ChatWebviewProvider.currentPanel.panel.reveal(viewColumn);
+      await ChatWebviewProvider.lockEditorGroup();
       return;
     }
 
+    const viewColumn = ChatWebviewProvider.getViewColumn();
     const panel = vscode.window.createWebviewPanel(
       ChatWebviewProvider.viewType,
       'AI Social Scientist Chat',
-      vscode.ViewColumn.Beside,
+      viewColumn,
       {
         enableScripts: true,
         retainContextWhenHidden: true,
@@ -47,6 +95,7 @@ export class ChatWebviewProvider {
     );
 
     ChatWebviewProvider.currentPanel = new ChatWebviewProvider(panel, context);
+    await ChatWebviewProvider.lockEditorGroup();
   }
 
   private constructor(panel: vscode.WebviewPanel, context: vscode.ExtensionContext) {

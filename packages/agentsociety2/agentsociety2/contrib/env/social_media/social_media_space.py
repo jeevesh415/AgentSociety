@@ -538,7 +538,7 @@ Use the available tools based on the agent's request."""
             ObserveUserResponse 响应模型，包含用户状态和可用行为
         """
         user_id = person_id
-        self._ensure_user_exists(user_id)
+        await self._ensure_user_exists(user_id)
         user = self._users[user_id]
 
         # 获取最近的 Feed（使用 chronological 算法）
@@ -614,7 +614,7 @@ Use the available tools based on the agent's request."""
             CreatePostResponse with post details
         """
         async with self._lock:
-            self._ensure_user_exists(author_id)
+            await self._ensure_user_exists(author_id)
 
             post_id = self._get_next_post_id()
             post = Post(
@@ -663,7 +663,7 @@ Use the available tools based on the agent's request."""
             LikePostResponse with like details
         """
         async with self._lock:
-            self._ensure_user_exists(user_id)
+            await self._ensure_user_exists(user_id)
 
             if post_id not in self._posts:
                 raise ValueError(f"Post {post_id} does not exist")
@@ -707,7 +707,7 @@ Use the available tools based on the agent's request."""
             UnlikePostResponse with unlike details
         """
         async with self._lock:
-            self._ensure_user_exists(user_id)
+            await self._ensure_user_exists(user_id)
 
             if post_id not in self._posts:
                 raise ValueError(f"Post {post_id} does not exist")
@@ -751,8 +751,8 @@ Use the available tools based on the agent's request."""
             FollowUserResponse with follow details
         """
         async with self._lock:
-            self._ensure_user_exists(follower_id)
-            self._ensure_user_exists(followee_id)
+            await self._ensure_user_exists(follower_id)
+            await self._ensure_user_exists(followee_id)
 
             if follower_id == followee_id:
                 raise ValueError(f"Failed to follow: user {follower_id} cannot follow themselves")
@@ -799,8 +799,8 @@ Use the available tools based on the agent's request."""
             UnfollowUserResponse with unfollow details
         """
         async with self._lock:
-            self._ensure_user_exists(follower_id)
-            self._ensure_user_exists(followee_id)
+            await self._ensure_user_exists(follower_id)
+            await self._ensure_user_exists(followee_id)
 
             if followee_id not in self._follows[follower_id]:
                 raise ValueError(f"User {follower_id} is not following user {followee_id}")
@@ -844,7 +844,7 @@ Use the available tools based on the agent's request."""
             ViewPostResponse with post details
         """
         async with self._lock:
-            self._ensure_user_exists(user_id)
+            await self._ensure_user_exists(user_id)
 
             if post_id not in self._posts:
                 raise ValueError(f"Failed to view: post {post_id} does not exist")
@@ -961,7 +961,7 @@ Use the available tools based on the agent's request."""
             CommentOnPostResponse with comment details
         """
         async with self._lock:
-            self._ensure_user_exists(user_id)
+            await self._ensure_user_exists(user_id)
 
             if post_id not in self._posts:
                 raise ValueError(f"Failed to comment: post {post_id} does not exist")
@@ -1012,7 +1012,7 @@ Use the available tools based on the agent's request."""
             ReplyToCommentResponse with reply details
         """
         async with self._lock:
-            self._ensure_user_exists(user_id)
+            await self._ensure_user_exists(user_id)
 
             parent_comment = None
             parent_post_id = None
@@ -1075,7 +1075,7 @@ Use the available tools based on the agent's request."""
             RepostResponse with repost details
         """
         async with self._lock:
-            self._ensure_user_exists(user_id)
+            await self._ensure_user_exists(user_id)
 
             if post_id not in self._posts:
                 raise ValueError(f"Failed to repost: post {post_id} does not exist")
@@ -1130,8 +1130,8 @@ Use the available tools based on the agent's request."""
             SendDirectMessageResponse with message details
         """
         async with self._lock:
-            self._ensure_user_exists(from_user_id)
-            self._ensure_user_exists(to_user_id)
+            await self._ensure_user_exists(from_user_id)
+            await self._ensure_user_exists(to_user_id)
 
             if from_user_id == to_user_id:
                 raise ValueError(
@@ -1186,8 +1186,8 @@ Use the available tools based on the agent's request."""
         Returns:
             Tuple of (context_dict, answer_string)
         """
-        self._ensure_user_exists(user1_id)
-        self._ensure_user_exists(user2_id)
+        await self._ensure_user_exists(user1_id)
+        await self._ensure_user_exists(user2_id)
         
         conv_key = self._get_dm_key(user1_id, user2_id)
         
@@ -1238,10 +1238,10 @@ Use the available tools based on the agent's request."""
             CreateGroupChatResponse with group details
         """
         async with self._lock:
-            self._ensure_user_exists(owner_id)
+            await self._ensure_user_exists(owner_id)
 
             for member_id in member_ids:
-                self._ensure_user_exists(member_id)
+                await self._ensure_user_exists(member_id)
 
             if owner_id not in member_ids:
                 member_ids.append(owner_id)
@@ -1290,7 +1290,7 @@ Use the available tools based on the agent's request."""
             SendGroupMessageResponse with message details
         """
         async with self._lock:
-            self._ensure_user_exists(from_user_id)
+            await self._ensure_user_exists(from_user_id)
 
             if group_id not in self._groups:
                 raise ValueError(f"Failed to send message: group {group_id} does not exist")
@@ -1386,7 +1386,7 @@ Use the available tools based on the agent's request."""
         Returns:
             (context_dict, answer_string) 元组
         """
-        self._ensure_user_exists(user_id)
+        await self._ensure_user_exists(user_id)
         
         # 获取所有帖子作为候选
         all_posts = list(self._posts.values())
@@ -1739,13 +1739,13 @@ Use the available tools based on the agent's request."""
             user_ids: List of user IDs to initialize
         """
         for user_id in user_ids:
-            self._ensure_user_exists(user_id)
+            await self._ensure_user_exists(user_id)
 
         get_logger().info(f"Initialized {len(user_ids)} users")
 
     # 一些辅助函数
     
-    def _ensure_user_exists(self, user_id: int):
+    async def _ensure_user_exists(self, user_id: int) -> None:
         """Create user if not exists"""
         if user_id not in self._users:
             self._users[user_id] = User(
@@ -1753,7 +1753,7 @@ Use the available tools based on the agent's request."""
                 username=f"user_{user_id}"
             )
             get_logger().info(f"Auto-created user {user_id}")
-            self._schedule_replay_task(self._write_social_user(self._users[user_id]))
+            await self._write_social_user(self._users[user_id])
 
     def _get_next_post_id(self) -> int:
         """Get next available post ID"""

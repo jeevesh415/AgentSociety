@@ -7,6 +7,7 @@ import logging
 import os
 import sys
 import time
+import warnings
 from typing import Any, Dict, List, Optional
 
 __all__ = [
@@ -208,6 +209,14 @@ def setup_litellm_logging():
     This should be called once during application initialization.
     """
     try:
+        # Suppress Pydantic serialization warnings from LiteLLM/OpenAI Message and Choices types.
+        # See: https://github.com/BerriAI/litellm/issues/11759
+        # The fix is in open PR https://github.com/BerriAI/litellm/pull/16299
+        warnings.filterwarnings(
+            "ignore",
+            message=".*PydanticSerializationUnexpectedValue.*",
+            category=UserWarning,
+        )
         import litellm
         
         # Create and register the custom logger
@@ -255,9 +264,13 @@ def setup_logging(
     """
     # Default format
     if log_format is None:
-        file_formatter = logging.Formatter("%(message)s")
+        file_formatter = logging.Formatter(
+            "%(asctime)s - %(levelname)s - %(message)s",
+            datefmt="%Y-%m-%d %H:%M:%S"
+        )
         console_formatter = logging.Formatter(
-            "%(asctime)s - %(name)s - %(levelname)s - %(message)s"
+            "%(asctime)s - %(levelname)s - %(message)s",
+            datefmt="%Y-%m-%d %H:%M:%S"
         )
     else:
         file_formatter = logging.Formatter(log_format)

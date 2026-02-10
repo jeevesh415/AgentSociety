@@ -36,6 +36,7 @@ from agentsociety2.env.pydantic_collector import PydanticModelCollector
 
 import black
 import json_repair
+import logging
 
 T = TypeVar("T", bound=BaseModel)
 
@@ -174,15 +175,19 @@ class RouterBase(ABC):
 
     @abstractmethod
     async def ask(
-        self, ctx: dict, instruction: str, readonly: bool = False
+        self, ctx: dict, instruction: str, readonly: bool = False, template_mode: bool = False
     ) -> Tuple[dict, str]:
         """
         The unified interface for the interaction between the agent and the environment.
 
         Args:
             ctx: A dict-like object that contains the context, the environment can get some variables from it.
-            instruction: The instruction to ask the environment.
+                 In template mode, ctx should contain a 'variables' key with variable values.
+            instruction: The instruction to ask the environment. In template mode, this is treated as a
+                         template instruction where variables are substituted using {variable_name} syntax.
             readonly: The readonly flag to pass to the environment modules.
+            template_mode: Whether to enable template mode. When True, the instruction is treated as a
+                          template instruction where variables from ctx['variables'] are substituted.
 
         Returns:
             A tuple of (ctx, answer)
@@ -339,21 +344,38 @@ class RouterBase(ABC):
         model: Literal["coder", "summary"],
         messages: list[AllMessageValues],
         stream: bool = False,
+        max_retries: int | None = None,
+        base_delay: float = 1.0,
+        max_delay: float = 60.0,
         **kwargs: Any,
     ):
         """
         Wrapper for LLM router acompletion that records token usage statistics.
         System prompt is always prepended to messages.
+        Includes retry logic for handling rate limit errors.
 
         Args:
             model: The model name to use for completion.
             messages: The messages to send to the LLM.
             stream: Whether to stream the response.
+            max_retries: Maximum number of retry attempts. If None, uses self.max_llm_call_retry.
+            base_delay: Base delay in seconds for exponential backoff when 429 error occurs (default: 1.0).
+            max_delay: Maximum delay in seconds for exponential backoff (default: 60.0).
             **kwargs: Additional arguments to pass to the router acompletion.
 
         Returns:
             The response from the LLM router.
+        
+        Raises:
+            ValueError: If the response cannot be retrieved after all retries.
         """
+        logger = get_logger()
+        
+        if max_retries is None:
+            max_retries = self.max_llm_call_retry
+        else:
+            max_retries = max(max_retries, 1)
+        
         if model == "coder":
             router = self.coder_router
             model_name = self.codegen_model_name
@@ -363,28 +385,67 @@ class RouterBase(ABC):
         else:
             raise ValueError(f"Invalid model: {model}")
 
-        response = await router.acompletion(
-            model=model_name,
-            messages=messages,
-            stream=stream,
-            **kwargs,
+        last_error = None
+        
+        for attempt in range(max_retries + 1):
+            try:
+                response = await router.acompletion(
+                    model=model_name,
+                    messages=messages,
+                    stream=stream,
+                    **kwargs,
+                )
+
+                # Record token usage (only for non-streaming responses)
+                if not stream:
+                    # Type check: response should be ModelResponse when stream=False
+                    if isinstance(response, ModelResponse):
+                        usage = getattr(response, "usage", None)
+                        if usage is not None:
+                            if model not in self._token_usage_stats:
+                                self._token_usage_stats[model] = TokenUsageStats()
+
+                            stats = self._token_usage_stats[model]
+                            stats.call_count += 1
+                            stats.input_tokens += getattr(usage, "prompt_tokens", 0)
+                            stats.output_tokens += getattr(usage, "completion_tokens", 0)
+
+                return response
+                
+            except RateLimitError as e:
+                # If this is the last attempt, raise the error
+                if attempt >= max_retries:
+                    raise ValueError(
+                        f"Failed to get valid response after {max_retries + 1} attempts. Last error: {str(e)}"
+                    )
+
+                # For 429 errors, use exponential backoff
+                delay = min(base_delay * (2**attempt), max_delay)
+                logger.warning(
+                    f"Rate limit error (429) detected for model '{model}' (attempt {attempt + 1}/{max_retries + 1}). "
+                    f"Retrying after {delay:.2f} seconds with exponential backoff."
+                )
+                await asyncio.sleep(delay)
+                last_error = e
+                
+            except Exception as e:
+                # If this is the last attempt, raise the error
+                if attempt >= max_retries:
+                    raise ValueError(
+                        f"Failed to get valid response after {max_retries + 1} attempts. Last error: {str(e)}"
+                    )
+
+                # For other errors, retry immediately
+                logger.warning(
+                    f"Request failed for model '{model}' (attempt {attempt + 1}/{max_retries + 1}). "
+                    f"Retrying immediately. Error: {str(e)}"
+                )
+                last_error = e
+
+        # This should never be reached, but just in case
+        raise ValueError(
+            f"Failed to get valid response after {max_retries + 1} attempts. Last error: {str(last_error)}"
         )
-
-        # Record token usage (only for non-streaming responses)
-        if not stream:
-            # Type check: response should be ModelResponse when stream=False
-            if isinstance(response, ModelResponse):
-                usage = getattr(response, "usage", None)
-                if usage is not None:
-                    if model not in self._token_usage_stats:
-                        self._token_usage_stats[model] = TokenUsageStats()
-
-                    stats = self._token_usage_stats[model]
-                    stats.call_count += 1
-                    stats.input_tokens += getattr(usage, "prompt_tokens", 0)
-                    stats.output_tokens += getattr(usage, "completion_tokens", 0)
-
-        return response
 
     async def acompletion_with_system_prompt(
         self,
@@ -818,12 +879,36 @@ Your generated world description:"""
             dialog: list[AllMessageValues] = [{"role": "user", "content": prompt}]
 
             router, model_name = get_llm_router_and_model("coder")
-            response = await router.acompletion(
-                model=model_name,  # 使用coder模型生成描述性文本
-                messages=dialog,
-                stream=False,
-            )
-            world_description = response.choices[0].message.content or ""  # type: ignore
+            last_error = None
+            max_retries = self.max_llm_call_retry
+            
+            for attempt in range(max_retries + 1):
+                try:
+                    response = await router.acompletion(
+                        model=model_name,  # 使用coder模型生成描述性文本
+                        messages=dialog,
+                        stream=False,
+                    )
+                    world_description = response.choices[0].message.content or ""  # type: ignore
+                    break
+                except RateLimitError as e:
+                    if attempt >= max_retries:
+                        raise e
+                    delay = min(1.0 * (2**attempt), 60.0)
+                    logger.warning(
+                        f"Rate limit error (429) detected when generating world description (attempt {attempt + 1}/{max_retries + 1}). "
+                        f"Retrying after {delay:.2f} seconds with exponential backoff."
+                    )
+                    await asyncio.sleep(delay)
+                    last_error = e
+                except Exception as e:
+                    if attempt >= max_retries:
+                        raise e
+                    logger.warning(
+                        f"Request failed when generating world description (attempt {attempt + 1}/{max_retries + 1}). "
+                        f"Retrying immediately. Error: {str(e)}"
+                    )
+                    last_error = e
             logger.info(f"  ✓ 生成世界描述的response: {world_description}")
 
             if not world_description:
@@ -1069,10 +1154,10 @@ Your generated world description:"""
                 - determined_status: 确定的执行状态（success/in_progress/fail/error）
         """
         logger = get_logger()
-        logger.debug(
-            f"RouterBase: Generating final answer - instruction: {instruction[:100]}..., "
-            f"preliminary status: {status}, results keys: {list(results.keys())}"
-        )
+        # logger.debug(
+        #     f"RouterBase: Generating final answer - instruction: {instruction[:100]}..., "
+        #     f"preliminary status: {status}, results keys: {list(results.keys())}"
+        # )
 
         # 构建结果字符串
         error_str = error or "None"
@@ -1152,10 +1237,10 @@ Return ONLY valid JSON, nothing else.
 
 Final Answer:"""
 
-        logger.debug(f"RouterBase: Built final answer prompt - length: {len(prompt)}")
-        logger.info("--------------------------------")
-        logger.info(prompt)
-        logger.info("--------------------------------")
+        # logger.debug(f"RouterBase: Built final answer prompt - length: {len(prompt)}")
+        # logger.info("--------------------------------")
+        # logger.info(prompt)
+        # logger.info("--------------------------------")
 
         dialog: List[AllMessageValues] = [{"role": "user", "content": prompt}]
 
