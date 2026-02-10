@@ -421,6 +421,28 @@ export function activate(context: vscode.ExtensionContext) {
     }
   );
 
+  const backendStatusMenuCommand = vscode.commands.registerCommand(
+    'aiSocialScientist.backendStatusMenu',
+    async () => {
+      const items: vscode.QuickPickItem[] = [
+        { label: `$(refresh) ${localize('backendManager.statusBar.restart')}`, detail: 'aiSocialScientist.restartBackend' },
+        { label: `$(stop) ${localize('backendManager.statusBar.stop')}`, detail: 'aiSocialScientist.stopBackend' },
+        { label: `$(play) ${localize('backendManager.statusBar.start')}`, detail: 'aiSocialScientist.startBackend' },
+        { label: `$(output) ${localize('backendManager.statusBar.logs')}`, detail: 'aiSocialScientist.showBackendLogs' },
+        { label: `$(info) ${localize('backendManager.statusBar.status')}`, detail: 'aiSocialScientist.showBackendStatus' },
+        { label: `$(settings) ${localize('backendManager.statusBar.config')}`, detail: 'aiSocialScientist.openConfigPage' }
+      ];
+      const selected = await vscode.window.showQuickPick(items, {
+        placeHolder: localize('backendManager.statusBar.placeholder'),
+        matchOnDescription: true,
+        matchOnDetail: true
+      });
+      if (selected?.detail) {
+        await vscode.commands.executeCommand(selected.detail);
+      }
+    }
+  );
+
   const showBackendStatusCommand = vscode.commands.registerCommand(
     'aiSocialScientist.showBackendStatus',
     async () => {
@@ -454,6 +476,7 @@ export function activate(context: vscode.ExtensionContext) {
     restartBackendCommand,
     showBackendLogsCommand,
     showBackendStatusCommand,
+    backendStatusMenuCommand,
     openConfigPageCommand
   );
 }

@@ -131,6 +131,14 @@ const translations: Record<string, Record<string, string>> = {
     // backendManager.ts
     'backendManager.openSettings': '打开设置',
     'backendManager.configInsufficient': '配置不足以支持启动后端服务',
+    'backendManager.statusBar.restart': '重启后端',
+    'backendManager.statusBar.stop': '停止后端',
+    'backendManager.statusBar.start': '启动后端',
+    'backendManager.statusBar.logs': '查看日志',
+    'backendManager.statusBar.status': '查看状态',
+    'backendManager.statusBar.config': '打开配置',
+    'backendManager.statusBar.tooltip': '点击展开操作菜单',
+    'backendManager.statusBar.placeholder': '选择操作',
 
     // configPageViewProvider.ts
     'configPage.title': 'AI Social Scientist 配置',
@@ -257,6 +265,14 @@ const translations: Record<string, Record<string, string>> = {
     // backendManager.ts
     'backendManager.openSettings': 'Open Settings',
     'backendManager.configInsufficient': 'Configuration is insufficient to start backend service',
+    'backendManager.statusBar.restart': 'Restart Backend',
+    'backendManager.statusBar.stop': 'Stop Backend',
+    'backendManager.statusBar.start': 'Start Backend',
+    'backendManager.statusBar.logs': 'Show Logs',
+    'backendManager.statusBar.status': 'Show Status',
+    'backendManager.statusBar.config': 'Open Configuration',
+    'backendManager.statusBar.tooltip': 'Click to show action menu',
+    'backendManager.statusBar.placeholder': 'Select action',
 
     // configPageViewProvider.ts
     'configPage.title': 'AI Social Scientist Configuration',

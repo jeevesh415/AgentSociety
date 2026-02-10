@@ -41,8 +41,8 @@ export class BackendManager {
       vscode.StatusBarAlignment.Right,
       100
     );
-    this.statusBarItem.command = 'aiSocialScientist.showBackendLogs';
-    this.statusBarItem.tooltip = 'AI Social Scientist Backend Status';
+    this.statusBarItem.command = 'aiSocialScientist.backendStatusMenu';
+    this.statusBarItem.tooltip = localize('backendManager.statusBar.tooltip');
     this.config = this.loadConfig();
 
     // 监听配置变化
