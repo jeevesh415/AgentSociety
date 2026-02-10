@@ -5,6 +5,7 @@ import { ChatWebviewProvider } from './chatWebviewProvider';
 import { SimSettingsEditorProvider } from './simSettingsEditorProvider';
 import { PrefillParamsViewProvider } from './prefillParamsViewProvider';
 import { ReplayWebviewProvider } from './replayWebviewProvider';
+import { ConfigPageViewProvider } from './configPageViewProvider';
 import { ApiClient } from './apiClient';
 import { PaperWatcher } from './paperWatcher';
 import { ProjectDragAndDropController } from './dragAndDropController';
@@ -28,12 +29,19 @@ export function activate(context: vscode.ExtensionContext) {
     }
   });
 
-  // Auto-start backend if enabled
+  // 首次启动或配置未完成时，打开配置页；否则按设置决定是否自动启动后端
   const config = vscode.workspace.getConfiguration('aiSocialScientist');
   const autoStart = config.get<boolean>('backend.autoStart', true);
+  const hasCompletedInitialSetup = context.globalState.get<boolean>('configPage.hasCompletedInitialSetup');
+  const hasLlmApiKey = !!(config.get<string>('env.llmApiKey', '')?.trim());
 
-  if (autoStart) {
-    // Start backend asynchronously to avoid blocking extension activation
+  if (!hasCompletedInitialSetup || !hasLlmApiKey) {
+    // 首次启动或缺少必填配置时，打开配置页
+    setTimeout(() => {
+      ConfigPageViewProvider.createOrShow(context, vscode.ViewColumn.One);
+    }, 500);
+  } else if (autoStart) {
+    // 配置已完成且启用自动启动，则启动后端
     backendManager.start().catch((error) => {
       console.error('Failed to auto-start backend:', error);
     });
@@ -426,6 +434,13 @@ export function activate(context: vscode.ExtensionContext) {
     }
   );
 
+  const openConfigPageCommand = vscode.commands.registerCommand(
+    'aiSocialScientist.openConfigPage',
+    () => {
+      ConfigPageViewProvider.createOrShow(context, vscode.ViewColumn.Beside);
+    }
+  );
+
   // Register all commands
   context.subscriptions.push(
     initProjectCommand,
@@ -438,7 +453,8 @@ export function activate(context: vscode.ExtensionContext) {
     stopBackendCommand,
     restartBackendCommand,
     showBackendLogsCommand,
-    showBackendStatusCommand
+    showBackendStatusCommand,
+    openConfigPageCommand
   );
 }
 

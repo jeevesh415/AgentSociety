@@ -119,11 +119,10 @@ export class ProjectItem extends vscode.TreeItem {
         arguments: ['agent']
       };
     } else if (type === 'settings') {
-      // 配置设置节点：点击时打开 VS Code 设置页面并过滤到 aiSocialScientist 配置
+      // 配置设置节点：点击时打开配置页（而非 VS Code 设置）
       this.command = {
-        command: 'workbench.action.openSettings',
-        title: localize('projectStructure.settings'),
-        arguments: ['@aiSocialScientist']
+        command: 'aiSocialScientist.openConfigPage',
+        title: localize('projectStructure.settings')
       };
     }
   }

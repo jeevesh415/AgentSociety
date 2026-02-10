@@ -103,6 +103,11 @@
         "command": "aiSocialScientist.showBackendStatus",
         "title": "AI Social Scientist: Show Backend Status",
         "icon": "$(info)"
+      },
+      {
+        "command": "aiSocialScientist.openConfigPage",
+        "title": "AI Social Scientist: Open Configuration",
+        "icon": "$(settings)"
       }
     ],
     "menus": {
@@ -117,6 +122,12 @@
           "command": "aiSocialScientist.initProject",
           "when": "view == projectStructureView",
           "group": "navigation"
+        },
+        {
+          "command": "aiSocialScientist.openConfigPage",
+          "when": "view == projectStructureView",
+          "group": "navigation",
+          "icon": "$(settings)"
         }
       ],
       "view/item/context": [

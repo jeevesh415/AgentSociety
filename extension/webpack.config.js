@@ -7,6 +7,7 @@ module.exports = {
     simSettings: './src/webview/simSettings/index.tsx',
     prefillParams: './src/webview/prefillParams/index.tsx',
     replay: './src/webview/replay/index.tsx',
+    configPage: './src/webview/configPage/index.tsx',
   },
   output: {
     path: path.resolve(__dirname, 'out', 'webview'),

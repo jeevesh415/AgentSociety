@@ -131,6 +131,9 @@ const translations: Record<string, Record<string, string>> = {
     // backendManager.ts
     'backendManager.openSettings': '打开设置',
     'backendManager.configInsufficient': '配置不足以支持启动后端服务',
+
+    // configPageViewProvider.ts
+    'configPage.title': 'AI Social Scientist 配置',
   },
   'en-US': {
     // extension.ts
@@ -254,6 +257,9 @@ const translations: Record<string, Record<string, string>> = {
     // backendManager.ts
     'backendManager.openSettings': 'Open Settings',
     'backendManager.configInsufficient': 'Configuration is insufficient to start backend service',
+
+    // configPageViewProvider.ts
+    'configPage.title': 'AI Social Scientist Configuration',
   },
 };
 
