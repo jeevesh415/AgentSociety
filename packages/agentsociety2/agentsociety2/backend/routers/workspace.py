@@ -151,7 +151,7 @@ async def init_workspace(request: InitWorkspaceRequest) -> Dict[str, Any]:
             # 不抛出异常，允许工作区初始化继续，但记录错误
             # 即使下载失败，也创建预填充参数文件，使用预期的路径
 
-        # 6. 创建预填充参数文件并填充 MobilitySpace 的数据
+        # 6. 创建预填充参数文件
         prefill_file = dot_agentsociety_dir / "prefill_params.json"
 
         prefill_data = {
@@ -159,8 +159,8 @@ async def init_workspace(request: InitWorkspaceRequest) -> Dict[str, Any]:
             "env_modules": {
                 "mobility_space": {
                     "file_path": str(map_file_path.resolve()),
-                    "home_dir": str((dot_agentsociety_dir / "data").resolve()),
-                }
+                    "home_dir": str(data_dir.resolve()),
+                },
             },
             "agents": {},
         }
