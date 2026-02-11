@@ -9,6 +9,10 @@ from agentsociety2.contrib.env.public_goods import PublicGoodsEnv
 from agentsociety2.contrib.env.prisoners_dilemma import PrisonersDilemmaEnv
 from agentsociety2.contrib.env.trust_game import TrustGameEnv
 from agentsociety2.contrib.env.volunteer_dilemma import VolunteerDilemmaEnv
+from agentsociety2.contrib.env.self_enhancement import SelfEnhancementEnv
+from agentsociety2.contrib.env.self_reference_effect import SelfReferenceEffectEnv
+from agentsociety2.contrib.env.endowment_effect import EndowmentEffectEnv
+from agentsociety2.contrib.env.implicit_association_test import ImplicitAssociationTestEnv
 from agentsociety2.contrib.env.social_media import SocialMediaSpace
 
 __all__ = [
@@ -23,5 +27,9 @@ __all__ = [
     "PrisonersDilemmaEnv",
     "TrustGameEnv",
     "VolunteerDilemmaEnv",
+    "SelfEnhancementEnv",
+    "SelfReferenceEffectEnv",
+    "EndowmentEffectEnv",
+    "ImplicitAssociationTestEnv",
     "SocialMediaSpace",
 ]
