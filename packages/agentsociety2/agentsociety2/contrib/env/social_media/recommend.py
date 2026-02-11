@@ -1,17 +1,113 @@
 import random
 import math
 from datetime import datetime
-from typing import List, Dict, Any
+from typing import List, Dict, Any, Optional, Set
 from collections import defaultdict
 
 from .models import Post, User
 
 
+def _get_pretrained_algorithm(algorithm_name: str, model_path: Optional[str]):
+    """
+    根据算法名和模型路径加载预训练推荐模型。
+    预训练方式：使用 recommendation 子模块训练后 save(path)，此处 load(path) 即可接入。
+
+    Args:
+        algorithm_name: 如 "mf", "ncf", "lightgcn" 等，需与 recommendation.algorithms 中实现一致。
+        model_path: 预训练模型文件路径（如 .pkl 或 目录）。
+
+    Returns:
+        已 load 的 RecommenderAlgorithm 实例，若 model_path 为空则返回 None。
+    """
+    if not model_path:
+        return None
+    algo = None
+    if algorithm_name == "mf":
+        from .recommendation.algorithms.mf import MFRecommender, MFConfig
+        algo = MFRecommender(config=MFConfig())
+    # 可在此扩展: "ncf" -> NCFRecommender, "lightgcn" -> LightGCNRecommender 等
+    if algo is None:
+        return None
+    try:
+        algo.load(model_path)
+    except Exception:
+        return None
+    return algo
+
+
 class RecommendationEngine:
     """
-    推荐算法引擎
+    推荐算法引擎。支持规则算法（时间序、热度、Twitter 排序、随机）与预训练模型（如 MF）。
+    预训练模型：在 recommendation 子模块中训练并 save(path)，构造时传入 model_path 与 algorithm 即可接入。
     """
-    
+
+    def __init__(
+        self,
+        model_path: Optional[str] = None,
+        recommendation_algorithm: str = "mf",
+    ):
+        """
+        Args:
+            model_path: 预训练模型路径。非空时加载对应算法并可在 refresh_feed 中通过 algorithm="mf" 使用。
+            recommendation_algorithm: 算法名，如 "mf"。需与 recommendation.algorithms 中实现一致。
+        """
+        self._model_algorithm = _get_pretrained_algorithm(recommendation_algorithm, model_path)
+        self._model_algorithm_name = recommendation_algorithm if self._model_algorithm else None
+
+    def get_model_algorithm_name(self) -> Optional[str]:
+        """若已加载预训练模型，返回算法名（如 'mf'），否则返回 None。"""
+        return self._model_algorithm_name
+
+    def model_recommend(
+        self,
+        posts: List[Post],
+        user_id: int,
+        limit: int = 20,
+        exclude_post_ids: Optional[Set[int]] = None,
+    ) -> List[Post]:
+        """
+        使用预训练模型对候选帖子排序。未加载模型时回退为时间序。
+
+        Args:
+            posts: 候选帖子列表（item_id = post_id）
+            user_id: 用户 ID
+            limit: 返回条数
+            exclude_post_ids: 需要排除的 post_id 集合（如已读）
+
+        Returns:
+            按模型打分排序的帖子列表
+        """
+        if not posts:
+            return []
+        exclude = set(exclude_post_ids or [])
+        post_by_id = {p.post_id: p for p in posts}
+        candidate_ids = [p.post_id for p in posts]
+
+        if self._model_algorithm is None:
+            return self.chronological(posts, user_id, limit)
+
+        try:
+            rec_list = self._model_algorithm.recommend(user_id, limit, exclude)
+        except Exception:
+            return self.chronological(posts, user_id, limit)
+
+        out: List[Post] = []
+        added_ids: Set[int] = set()
+        for item_id, _score in rec_list:
+            if item_id in post_by_id and item_id not in exclude and item_id not in added_ids:
+                out.append(post_by_id[item_id])
+                added_ids.add(item_id)
+            if len(out) >= limit:
+                break
+        # 若模型返回不足或含大量未在候选中的 id，用候选集顺序补足
+        for pid in candidate_ids:
+            if len(out) >= limit:
+                break
+            if pid not in added_ids:
+                out.append(post_by_id[pid])
+                added_ids.add(pid)
+        return out[:limit]
+
     @staticmethod
     def chronological(
         posts: List[Post],

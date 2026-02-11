@@ -1,6 +1,8 @@
 import asyncio
+import json
+import random
 from datetime import datetime, timedelta
-from typing import Dict, List, Optional
+from typing import Any, Dict, List, Optional, Set, Tuple, Union
 from collections import defaultdict
 
 from agentsociety2.env import EnvBase, tool
@@ -17,7 +19,6 @@ from .models import (
     GetTrendingTopicsResponse, GetEnvironmentStatsResponse, GetTopicAnalyticsResponse,
     TrendingTopic, ObserveUserResponse,
 )
-from .storage import StorageManager
 from .recommend import RecommendationEngine
 from .schemas import ALL_SOCIAL_SCHEMAS
 
@@ -25,25 +26,56 @@ from .schemas import ALL_SOCIAL_SCHEMAS
 
 class SocialMediaSpace(EnvBase):
     """
-    Social Media Environment Module maybe like Weibo/Twitter.
+    Social Media Environment Module (e.g. Weibo/Twitter style).
+
+    Agent 与社交媒体用户的对应关系：
+    - 默认（未传 agent_id_name_pairs）：约定 agent_id === user_id。observe_user(person_id) 及
+      各 tool 的 user_id 即仿真中的 agent id；用户来自 users.json 或按需自动创建（_ensure_user_exists）。
+    - 若传入 agent_id_name_pairs：显式列出参与本环境的 (agent_id, name)。
+      此时仅允许这些 id 作为 user_id 使用；init() 时会为列表中尚未在 users 数据里的 id 创建对应用户（username=name）。
     """
-    
+
     def __init__(
         self,
-        data_dir: str = "data/social_media"
+        users: Optional[Dict[int, Any]] = None,
+        posts: Optional[Dict[int, Any]] = None,
+        comments: Optional[Dict[int, List[Any]]] = None,
+        follows: Optional[Dict[int, List[int]]] = None,
+        likes: Optional[Dict[int, List[int]]] = None,
+        agent_id_name_pairs: Optional[
+            List[Tuple[int, str]] | List[List[Union[int, str]]]
+        ] = None,
+        **kwargs: Any,
     ):
         """
-        初始化社交媒体空间环境
+        初始化社交媒体空间环境。
 
         Args:
-            data_dir: 数据存储目录
+            users: 初始用户，key=user_id, value=User 可序列化 dict。
+            posts: 初始帖子，key=post_id, value=Post 可序列化 dict。
+            comments: 初始评论，key=post_id, value=该帖下的 Comment dict 列表。
+            follows: 关注关系，key=user_id, value=被关注者 user_id 列表。
+            likes: 点赞关系，key=user_id, value=被点赞的 post_id 列表。
+            agent_id_name_pairs: 可选。显式 agent–用户映射 [(agent_id, name), ...]。
+            **kwargs: feed_source, polarization_mode 等实验参数。
         """
         super().__init__()
+        self._initial_users = users
+        self._initial_posts = posts
+        self._initial_comments = comments
+        self._initial_follows = follows
+        self._initial_likes = likes
+
+        # 极化实验参数（feed 候选池与同阵营/异阵营比例）
+        self._feed_source: str = str(kwargs.get("feed_source", "global"))
+        self._polarization_mode: str = str(kwargs.get("polarization_mode", "none"))
+        self._within_community_ratio: float = float(kwargs.get("within_community_ratio", 0.5))
+        self._community_detection: str = str(kwargs.get("community_detection", "follow_components"))
+        _seed = kwargs.get("random_seed")
+        self._random_seed: Optional[int] = int(_seed) if _seed is not None else None
 
         # 并发锁，保护状态修改操作
         self._lock = asyncio.Lock()
-
-        self._storage = StorageManager(data_dir)
 
         self._users: Dict[int, User] = {}
         self._posts: Dict[int, Post] = {}
@@ -60,8 +92,11 @@ class SocialMediaSpace(EnvBase):
         self._next_dm_id: int = 1
         self._next_group_msg_id: int = 1
 
-        # 贴文推荐引擎（Feed Recommendation）
-        self._rec_engine = RecommendationEngine()
+        # 贴文推荐引擎（Feed Recommendation）；可选预训练模型路径与算法名
+        self._rec_engine = RecommendationEngine(
+            model_path=kwargs.get("recommendation_model_path"),
+            recommendation_algorithm=kwargs.get("recommendation_algorithm", "mf"),
+        )
 
         # 话题索引：tag -> [post_ids]，用于快速搜索
         self._topic_index: Dict[str, List[int]] = defaultdict(list)
@@ -75,29 +110,174 @@ class SocialMediaSpace(EnvBase):
         self._like_replay_id: int = 0
         self._follow_replay_id: int = 0
 
-        get_logger().info(f"SocialMediaSpace initialized with data_dir={data_dir}")
+        # 显式 agent–用户映射：仅允许这些 id 作为 user_id
+        self._allowed_user_ids: Optional[Set[int]] = None
+        self._agent_names: Dict[int, str] = {}
+        if agent_id_name_pairs:
+            pairs: List[Tuple[int, str]] = []
+            for pair in agent_id_name_pairs:
+                if isinstance(pair, (list, tuple)) and len(pair) == 2:
+                    pairs.append((int(pair[0]), str(pair[1])))
+                else:
+                    raise ValueError(
+                        f"Invalid agent_id_name_pair: {pair}. Expected (int, str) or [int, str]"
+                    )
+            self._allowed_user_ids = {aid for aid, _ in pairs}
+            self._agent_names = {aid: name for aid, name in pairs}
+
+        get_logger().info("SocialMediaSpace initialized (in-memory data only)")
 
     async def _wait_for_tables(self) -> None:
         """Wait for tables to be registered."""
         if self._replay_writer is not None:
             await self._tables_registered.wait()
-    
+
+    def _get_community_labels(self) -> Dict[int, int]:
+        """
+        为每个用户分配社区标签 0 或 1，用于极化实验。
+        """
+        user_ids = set(self._users.keys())
+        if not user_ids:
+            return {}
+        # 若所有用户都有 camp_score，则直接用阵营分数
+        if all(
+            getattr(self._users.get(uid), "camp_score", None) is not None
+            for uid in user_ids
+        ):
+            labels: Dict[int, int] = {}
+            for uid in user_ids:
+                s = getattr(self._users[uid], "camp_score", None)
+                labels[uid] = 0 if s is not None and s < 0.5 else 1
+            return labels
+        # 回退：parity 或 follow_components
+        if self._community_detection == "parity":
+            return {uid: int(uid % 2) for uid in user_ids}
+        adj: Dict[int, List[int]] = defaultdict(list)
+        for uid in user_ids:
+            for followee in self._follows.get(uid, []):
+                if followee in user_ids:
+                    adj[uid].append(followee)
+                    adj[followee].append(uid)
+        visited: Dict[int, bool] = {}
+        components_list: List[List[int]] = []
+        for uid in user_ids:
+            if visited.get(uid):
+                continue
+            comp: List[int] = []
+            stack = [uid]
+            while stack:
+                u = stack.pop()
+                if visited.get(u):
+                    continue
+                visited[u] = True
+                comp.append(u)
+                for v in adj.get(u, []):
+                    if not visited.get(v):
+                        stack.append(v)
+            if comp:
+                components_list.append(comp)
+        components_list.sort(key=len, reverse=True)
+        labels = {}
+        for i, comp in enumerate(components_list):
+            cid = 0 if i == 0 else 1
+            for u in comp:
+                labels[u] = cid
+        return labels
+
+    def _get_candidate_posts(self, user_id: int) -> List[Post]:
+        """按 feed_source 得到候选帖子列表：global=全站，following=仅关注者+自己的帖子。"""
+        all_posts = list(self._posts.values())
+        if self._feed_source != "following":
+            return all_posts
+        followees = set(self._follows.get(user_id, []))
+        allow_authors = followees | {user_id}
+        return [p for p in all_posts if p.author_id in allow_authors]
+
+    def _apply_polarization_mix(
+        self, user_id: int, candidate_posts: List[Post], limit: int
+    ) -> List[Post]:
+        """
+        当 polarization_mode=="follow_community" 时，按 within_community_ratio
+        从同阵营与异阵营作者中混合取样，再按时间倒序；否则直接返回 candidate_posts。
+        """
+        if self._polarization_mode != "follow_community" or not candidate_posts:
+            return candidate_posts
+        labels = self._get_community_labels()
+        viewer_community = labels.get(user_id, 0)
+        same: List[Post] = [p for p in candidate_posts if labels.get(p.author_id, 0) == viewer_community]
+        other: List[Post] = [p for p in candidate_posts if labels.get(p.author_id, 0) != viewer_community]
+        rng = random.Random(self._random_seed if self._random_seed is not None else 0)
+        n_same = max(0, int(round(self._within_community_ratio * limit)))
+        n_other = limit - n_same
+        if n_same >= len(same) and n_other >= len(other):
+            mixed = same + other
+        else:
+            shuffled_same = list(same)
+            shuffled_other = list(other)
+            rng.shuffle(shuffled_same)
+            rng.shuffle(shuffled_other)
+            mixed = shuffled_same[:n_same] + shuffled_other[:n_other]
+        mixed.sort(key=lambda p: p.created_at, reverse=True)
+        return mixed[:limit]
+
     @classmethod
     def mcp_description(cls) -> str:
         """
         Return a description text for MCP environment module candidate list.
+        Used by workspace init to generate .agentsociety/env_modules/social_media.json.
         """
+        user_schema = User.model_json_schema()
+        post_schema = Post.model_json_schema()
+        comment_schema = Comment.model_json_schema()
         description = f"""{cls.__name__}: Social media platform environment module.
 
-**Description:** Provides full-featured social media functionalities including posts, likes, follows, comments, direct messaging, group chats, and personalized feed recommendations.
+**Description:** Full-featured social media: posts, likes, follows, comments, DMs, group chats, feed recommendations.
 
-**Initialization Parameters (excluding llm):**
-- data_dir (str, optional): Directory for data storage. Default: "data/social_media"
+**Initialization – pass initial data in memory:**
+- users (dict, optional): Map user_id (int) -> User-like dict (user_id, username, bio, created_at ISO string, followers_count, following_count, posts_count, optional camp_score).
+- posts (dict, optional): Map post_id (int) -> Post-like dict (post_id, author_id, content, post_type "original"|"repost"|"comment", parent_id, created_at ISO, likes_count, reposts_count, comments_count, view_count, tags, topic_category).
+- comments (dict, optional): Map post_id (int) -> list of Comment-like dicts (comment_id, post_id, author_id, content, parent_comment_id, created_at ISO, likes_count).
+- follows (dict, optional): Map user_id (int) -> list of followed user_id (int).
+- likes (dict, optional): Map user_id (int) -> list of liked post_id (int).
+- feed_source ("global" | "following", optional): "global" = all posts; "following" = only followees + self. Default: "global".
+- polarization_mode ("none" | "follow_community", optional): Default: "none".
+- within_community_ratio (float), community_detection ("follow_components" | "parity"), random_seed (int): Optional.
+- agent_id_name_pairs (list of [agent_id, name]): Explicit agent–user mapping; users not in initial data are created with the given name.
+
+**Initial data (example) :**
+
+User (each key = user_id):
+```json
+{json.dumps(user_schema, indent=2)}
+```
+
+Post (each key = post_id):
+```json
+{json.dumps(post_schema, indent=2)}
+```
+
+Comment (each key = post_id, value = list of comments):
+```json
+{json.dumps(comment_schema, indent=2)}
+```
+
+Example payloads (ISO datetimes, keys may be int or string in JSON; constructor accepts both):
+- users: {{ 1: {{ "user_id": 1, "username": "alice", "bio": null, "created_at": "2024-08-01T00:00:00+00:00", "followers_count": 0, "following_count": 0, "posts_count": 0 }}, ... }}
+- posts: {{ 1: {{ "post_id": 1, "author_id": 1, "content": "Hello.", "post_type": "original", "parent_id": null, "created_at": "2024-08-10T12:00:00+00:00", "likes_count": 0, "reposts_count": 0, "comments_count": 0, "view_count": 0, "tags": [], "topic_category": null }}, ... }}
+- comments: {{ 1: [ {{ "comment_id": 1, "post_id": 1, "author_id": 2, "content": "A comment.", "parent_comment_id": null, "created_at": "2024-08-10T12:30:00+00:00", "likes_count": 0 }} ] }}, ... }}
+- follows: {{ 1: [2, 3], 2: [1] }}
+- likes: {{ 1: [1, 2], 2: [1] }}
 
 **Example initialization config:**
 ```json
 {{
-  "data_dir": "data/social_media"
+  "users": {{ "1": {{ "user_id": 1, "username": "alice", "created_at": "2024-08-01T00:00:00" }}, "2": {{ "user_id": 2, "username": "bob", "created_at": "2024-08-01T00:00:00" }} }},
+  "posts": {{ "1": {{ "post_id": 1, "author_id": 1, "content": "First post.", "post_type": "original", "created_at": "2024-08-10T12:00:00" }} }},
+  "comments": {{}},
+  "follows": {{ "1": [2], "2": [1] }},
+  "likes": {{}},
+  "feed_source": "global",
+  "polarization_mode": "none"
 }}
 ```
 """
@@ -116,66 +296,90 @@ Your task is to use the available tools to:
 - Generate personalized feeds with recommendation algorithms
 
 Use the available tools based on the agent's request."""
-    
+
+    @staticmethod
+    def _norm_user_data(data: Any) -> Dict[str, Any]:
+        """Normalize user dict for User(...); accept ISO datetime strings."""
+        d = dict(data)
+        if "created_at" in d and isinstance(d["created_at"], str):
+            d["created_at"] = datetime.fromisoformat(d["created_at"].replace("Z", "+00:00"))
+        return d
+
+    @staticmethod
+    def _norm_post_data(data: Any) -> Dict[str, Any]:
+        """Normalize post dict for Post(...)."""
+        d = dict(data)
+        if "created_at" in d and isinstance(d["created_at"], str):
+            d["created_at"] = datetime.fromisoformat(d["created_at"].replace("Z", "+00:00"))
+        return d
+
+    @staticmethod
+    def _norm_comment_data(data: Any) -> Dict[str, Any]:
+        """Normalize comment dict for Comment(...)."""
+        d = dict(data)
+        if "created_at" in d and isinstance(d["created_at"], str):
+            d["created_at"] = datetime.fromisoformat(d["created_at"].replace("Z", "+00:00"))
+        return d
+
+    def _apply_initial_data(self) -> None:
+        """Populate _users, _posts, _comments, _follows, _likes from constructor initial data."""
+        self._users = {}
+        for uid, data in (self._initial_users or {}).items():
+            self._users[int(uid)] = User(**self._norm_user_data(data))
+        self._posts = {}
+        for pid, data in (self._initial_posts or {}).items():
+            self._posts[int(pid)] = Post(**self._norm_post_data(data))
+        self._follows = defaultdict(list)
+        for uid, followee_ids in (self._initial_follows or {}).items():
+            self._follows[int(uid)] = [int(x) for x in followee_ids]
+        self._likes = defaultdict(list)
+        for uid, post_ids in (self._initial_likes or {}).items():
+            self._likes[int(uid)] = [int(x) for x in post_ids]
+        self._comments = defaultdict(list)
+        for post_id, comment_list in (self._initial_comments or {}).items():
+            self._comments[int(post_id)] = [
+                Comment(**self._norm_comment_data(c)) for c in comment_list
+            ]
+        if self._posts:
+            self._next_post_id = max(self._posts.keys()) + 1
+        else:
+            self._next_post_id = 1
+        all_comment_ids = [
+            c.comment_id for comments in self._comments.values() for c in comments
+        ]
+        self._next_comment_id = max(all_comment_ids) + 1 if all_comment_ids else 1
+        get_logger().info(
+            f"Applied initial data: {len(self._users)} users, {len(self._posts)} posts, "
+            f"{len(self._follows)} follows, {len(self._comments)} post comments"
+        )
+
     async def init(self, start_datetime: datetime):
         """
-        Initialize the environment module
+        Initialize the environment module. Uses in-memory initial data (users, posts, ...) if provided; otherwise starts with empty state. Persistence is handled by external DB.
         """
         self.t = start_datetime
-        
-        try:
-            users_data = await self._storage.load_users()
-            posts_data = await self._storage.load_posts()
-            follows_data = await self._storage.load_follows()
-            likes_data = await self._storage.load_likes()
-            comments_data = await self._storage.load_comments()
-            groups_data = await self._storage.load_groups()
-            
-            self._users = {
-                uid: User(**data) for uid, data in users_data.items()
-            }
-            self._posts = {
-                pid: Post(**data) for pid, data in posts_data.items()
-            }
-            self._follows = defaultdict(list, follows_data)
-            self._likes = defaultdict(list, likes_data)
-            
-            self._comments = defaultdict(list)
-            for post_id, comment_list in comments_data.items():
-                self._comments[post_id] = [Comment(**c) for c in comment_list]
-            
-            self._groups = {
-                gid: GroupChat(**data) for gid, data in groups_data.items()
-            }
-            
-            # 由于私聊消息按对话分文件，这里暂不在init时加载
-            # 私聊消息会在get_direct_messages时按需加载
-            
-            # 加载群聊消息
-            for group_id in self._groups.keys():
-                try:
-                    gm_data = await self._storage.load_group_messages(group_id)
-                    self._group_messages[group_id] = [GroupMessage(**gm) for gm in gm_data]
-                except Exception:
-                    pass
-            
-            if self._posts:
-                self._next_post_id = max(self._posts.keys()) + 1
-            if self._comments:
-                all_comments = [c for comments in self._comments.values() for c in comments]
-                if all_comments:
-                    self._next_comment_id = max(c.comment_id for c in all_comments) + 1
-            if self._groups:
-                self._next_group_id = max(self._groups.keys()) + 1
-            
-            get_logger().info(
-                f"Loaded {len(self._users)} users, {len(self._posts)} posts, "
-                f"{len(self._follows)} follows, {len(self._comments)} post comments, "
-                f"{len(self._groups)} groups"
+        has_initial = any(
+            x is not None
+            for x in (
+                self._initial_users,
+                self._initial_posts,
+                self._initial_comments,
+                self._initial_follows,
+                self._initial_likes,
             )
-        except Exception as e:
-            get_logger().warning(f"Failed to load data from storage: {e}, starting fresh")
-        
+        )
+        if has_initial:
+            self._apply_initial_data()
+        # 未传初始数据时保持空状态，持久化由外部数据库负责
+
+        # 显式映射时：为 agent_id_name_pairs 中尚未存在的 id 创建对应用户
+        if self._allowed_user_ids is not None:
+            for aid in self._allowed_user_ids:
+                if aid not in self._users:
+                    name = self._agent_names.get(aid, f"user_{aid}")
+                    self._users[aid] = User(user_id=aid, username=name)
+                    get_logger().info(f"Created user for agent {aid} (username={name})")
+
         # Register social media tables if replay writer is available
         if self._replay_writer is not None:
             for schema in ALL_SOCIAL_SCHEMAS:
@@ -196,48 +400,13 @@ Use the available tools based on the agent's request."""
         # All updates happen through @tool method calls
     
     async def close(self):
-        """Close the environment module"""
-        await self._save_to_storage()
-        get_logger().info("SocialMediaSpace closed and data saved")
+        """Close the environment module. Data persistence is handled by external DB."""
+        get_logger().info("SocialMediaSpace closed")
 
     def set_replay_writer(self, writer) -> None:
         super().set_replay_writer(writer)
         self._schedule_replay_task(self._sync_replay_state())
     
-    async def _save_to_storage(self):
-        """Save current state to storage"""
-        try:
-            users_data = {uid: user.model_dump(mode='json') for uid, user in self._users.items()}
-            posts_data = {pid: post.model_dump(mode='json') for pid, post in self._posts.items()}
-            comments_data = {
-                pid: [c.model_dump(mode='json') for c in comment_list]
-                for pid, comment_list in self._comments.items()
-            }
-            groups_data = {gid: group.model_dump(mode='json') for gid, group in self._groups.items()}
-            
-            await self._storage.save_users(users_data)
-            await self._storage.save_posts(posts_data)
-            await self._storage.save_follows(dict(self._follows))
-            await self._storage.save_likes(dict(self._likes))
-            await self._storage.save_comments(comments_data)
-            await self._storage.save_groups(groups_data)
-            
-            # 保存私聊消息（暂时按对话分文件）
-            for conv_key, dm_list in self._direct_messages.items():
-                user_ids = conv_key.split('_')
-                user1_id, user2_id = int(user_ids[0]), int(user_ids[1])
-                dm_data = [dm.model_dump(mode='json') for dm in dm_list]
-                await self._storage.save_direct_messages(user1_id, user2_id, dm_data)
-            
-            # 保存群聊消息（暂时按群分文件）
-            for group_id, gm_list in self._group_messages.items():
-                gm_data = [gm.model_dump(mode='json') for gm in gm_list]
-                await self._storage.save_group_messages(group_id, gm_data)
-            
-            get_logger().debug("Data saved to storage")
-        except Exception as e:
-            get_logger().error(f"Failed to save data to storage: {e}")
-
     def _schedule_replay_task(self, coro) -> None:
         if self._replay_writer is None:
             return
@@ -538,15 +707,16 @@ Use the available tools based on the agent's request."""
             ObserveUserResponse 响应模型，包含用户状态和可用行为
         """
         user_id = person_id
-        await self._ensure_user_exists(user_id)
+        self._ensure_user_exists(user_id)
         user = self._users[user_id]
 
-        # 获取最近的 Feed（使用 chronological 算法）
-        all_posts = list(self._posts.values())
-        if all_posts:
-            recent_feed_posts = self._rec_engine.chronological(
-                all_posts, user_id, limit=5
-            )
+        # 获取最近的 Feed
+        candidate_posts = self._get_candidate_posts(user_id)
+        if candidate_posts:
+            if self._polarization_mode == "follow_community":
+                recent_feed_posts = self._apply_polarization_mix(user_id, candidate_posts, 5)
+            else:
+                recent_feed_posts = self._rec_engine.chronological(candidate_posts, user_id, limit=5)
             recent_feed = [p.model_dump() for p in recent_feed_posts]
         else:
             recent_feed = []
@@ -614,7 +784,7 @@ Use the available tools based on the agent's request."""
             CreatePostResponse with post details
         """
         async with self._lock:
-            await self._ensure_user_exists(author_id)
+            self._ensure_user_exists(author_id)
 
             post_id = self._get_next_post_id()
             post = Post(
@@ -663,7 +833,7 @@ Use the available tools based on the agent's request."""
             LikePostResponse with like details
         """
         async with self._lock:
-            await self._ensure_user_exists(user_id)
+            self._ensure_user_exists(user_id)
 
             if post_id not in self._posts:
                 raise ValueError(f"Post {post_id} does not exist")
@@ -707,7 +877,7 @@ Use the available tools based on the agent's request."""
             UnlikePostResponse with unlike details
         """
         async with self._lock:
-            await self._ensure_user_exists(user_id)
+            self._ensure_user_exists(user_id)
 
             if post_id not in self._posts:
                 raise ValueError(f"Post {post_id} does not exist")
@@ -751,8 +921,8 @@ Use the available tools based on the agent's request."""
             FollowUserResponse with follow details
         """
         async with self._lock:
-            await self._ensure_user_exists(follower_id)
-            await self._ensure_user_exists(followee_id)
+            self._ensure_user_exists(follower_id)
+            self._ensure_user_exists(followee_id)
 
             if follower_id == followee_id:
                 raise ValueError(f"Failed to follow: user {follower_id} cannot follow themselves")
@@ -799,8 +969,8 @@ Use the available tools based on the agent's request."""
             UnfollowUserResponse with unfollow details
         """
         async with self._lock:
-            await self._ensure_user_exists(follower_id)
-            await self._ensure_user_exists(followee_id)
+            self._ensure_user_exists(follower_id)
+            self._ensure_user_exists(followee_id)
 
             if followee_id not in self._follows[follower_id]:
                 raise ValueError(f"User {follower_id} is not following user {followee_id}")
@@ -844,7 +1014,7 @@ Use the available tools based on the agent's request."""
             ViewPostResponse with post details
         """
         async with self._lock:
-            await self._ensure_user_exists(user_id)
+            self._ensure_user_exists(user_id)
 
             if post_id not in self._posts:
                 raise ValueError(f"Failed to view: post {post_id} does not exist")
@@ -961,7 +1131,7 @@ Use the available tools based on the agent's request."""
             CommentOnPostResponse with comment details
         """
         async with self._lock:
-            await self._ensure_user_exists(user_id)
+            self._ensure_user_exists(user_id)
 
             if post_id not in self._posts:
                 raise ValueError(f"Failed to comment: post {post_id} does not exist")
@@ -1012,7 +1182,7 @@ Use the available tools based on the agent's request."""
             ReplyToCommentResponse with reply details
         """
         async with self._lock:
-            await self._ensure_user_exists(user_id)
+            self._ensure_user_exists(user_id)
 
             parent_comment = None
             parent_post_id = None
@@ -1075,7 +1245,7 @@ Use the available tools based on the agent's request."""
             RepostResponse with repost details
         """
         async with self._lock:
-            await self._ensure_user_exists(user_id)
+            self._ensure_user_exists(user_id)
 
             if post_id not in self._posts:
                 raise ValueError(f"Failed to repost: post {post_id} does not exist")
@@ -1130,8 +1300,8 @@ Use the available tools based on the agent's request."""
             SendDirectMessageResponse with message details
         """
         async with self._lock:
-            await self._ensure_user_exists(from_user_id)
-            await self._ensure_user_exists(to_user_id)
+            self._ensure_user_exists(from_user_id)
+            self._ensure_user_exists(to_user_id)
 
             if from_user_id == to_user_id:
                 raise ValueError(
@@ -1186,20 +1356,10 @@ Use the available tools based on the agent's request."""
         Returns:
             Tuple of (context_dict, answer_string)
         """
-        await self._ensure_user_exists(user1_id)
-        await self._ensure_user_exists(user2_id)
+        self._ensure_user_exists(user1_id)
+        self._ensure_user_exists(user2_id)
         
         conv_key = self._get_dm_key(user1_id, user2_id)
-        
-        # 如果内存中没有，尝试从存储加载
-        if conv_key not in self._direct_messages:
-            try:
-                dm_data = await self._storage.load_direct_messages(user1_id, user2_id)
-                if dm_data:
-                    self._direct_messages[conv_key] = [DirectMessage(**dm) for dm in dm_data]
-            except Exception:
-                pass
-        
         messages = self._direct_messages.get(conv_key, [])
         
         sorted_messages = sorted(messages, key=lambda m: m.created_at, reverse=True)
@@ -1238,10 +1398,10 @@ Use the available tools based on the agent's request."""
             CreateGroupChatResponse with group details
         """
         async with self._lock:
-            await self._ensure_user_exists(owner_id)
+            self._ensure_user_exists(owner_id)
 
             for member_id in member_ids:
-                await self._ensure_user_exists(member_id)
+                self._ensure_user_exists(member_id)
 
             if owner_id not in member_ids:
                 member_ids.append(owner_id)
@@ -1290,7 +1450,7 @@ Use the available tools based on the agent's request."""
             SendGroupMessageResponse with message details
         """
         async with self._lock:
-            await self._ensure_user_exists(from_user_id)
+            self._ensure_user_exists(from_user_id)
 
             if group_id not in self._groups:
                 raise ValueError(f"Failed to send message: group {group_id} does not exist")
@@ -1381,53 +1541,91 @@ Use the available tools based on the agent's request."""
                 - "reddit_hot": Reddit热度排序
                 - "twitter_ranking": Twitter综合排序(考虑社交关系)
                 - "random": 随机推荐
+                - "mf" / "model": 预训练推荐模型（需在构造时传入 recommendation_model_path）
             limit: 返回贴文数量
 
         Returns:
             (context_dict, answer_string) 元组
         """
-        await self._ensure_user_exists(user_id)
-        
-        # 获取所有帖子作为候选
-        all_posts = list(self._posts.values())
-        
-        if not all_posts:
+        self._ensure_user_exists(user_id)
+
+        # 按 feed_source 得到候选帖子（global=全站，following=关注+自己）
+        candidate_posts = self._get_candidate_posts(user_id)
+
+        if not candidate_posts:
             return RefreshFeedResponse(
                 user_id=user_id,
                 algorithm=algorithm,
                 posts=[],
                 count=0
             )
-        
-        # 贴文推荐算法（Feed Recommendation）
-        # 注意：这里只支持贴文流推荐，不支持物品推荐(MF等)
-        # 物品推荐应该使用独立的API
-        if algorithm == "chronological":
-            recommended_posts = self._rec_engine.chronological(
-                all_posts, user_id, limit
-            )
-        elif algorithm == "reddit_hot":
-            recommended_posts = self._rec_engine.reddit_hot(
-                all_posts, user_id, limit
-            )
-        elif algorithm == "twitter_ranking":
-            recommended_posts = self._rec_engine.twitter_ranking(
-                all_posts,
-                user_id,
-                limit,
-                follows=dict(self._follows),
-                likes=dict(self._likes)
-            )
-        elif algorithm == "random":
-            recommended_posts = self._rec_engine.random_recommend(
-                all_posts, user_id, limit
-            )
+
+        # 极化混合：若 polarization_mode=="follow_community"，按 within_community_ratio 混合同/异阵营
+        if self._polarization_mode == "follow_community":
+            candidate_posts = self._apply_polarization_mix(user_id, candidate_posts, limit)
+            # 混合后已按时间倒序；若算法非 chronological 则再按该算法重排
+            if algorithm == "chronological":
+                recommended_posts = candidate_posts
+            elif algorithm == "reddit_hot":
+                recommended_posts = self._rec_engine.reddit_hot(
+                    candidate_posts, user_id, limit
+                )
+            elif algorithm == "twitter_ranking":
+                recommended_posts = self._rec_engine.twitter_ranking(
+                    candidate_posts,
+                    user_id,
+                    limit,
+                    follows=dict(self._follows),
+                    likes=dict(self._likes)
+                )
+            elif algorithm == "random":
+                rng = random.Random(self._random_seed)
+                if len(candidate_posts) <= limit:
+                    recommended_posts = list(candidate_posts)
+                else:
+                    recommended_posts = rng.sample(candidate_posts, limit)
+            elif algorithm in ("mf", "model") or algorithm == self._rec_engine.get_model_algorithm_name():
+                recommended_posts = self._rec_engine.model_recommend(
+                    candidate_posts, user_id, limit, exclude_post_ids=None
+                )
+            else:
+                recommended_posts = candidate_posts
         else:
-            # 未知算法，使用chronological作为fallback
-            get_logger().warning(f"Unknown algorithm '{algorithm}', using chronological")
-            recommended_posts = self._rec_engine.chronological(
-                all_posts, user_id, limit
-            )
+            # 无极化：直接按算法排序
+            if algorithm == "chronological":
+                recommended_posts = self._rec_engine.chronological(
+                    candidate_posts, user_id, limit
+                )
+            elif algorithm == "reddit_hot":
+                recommended_posts = self._rec_engine.reddit_hot(
+                    candidate_posts, user_id, limit
+                )
+            elif algorithm == "twitter_ranking":
+                recommended_posts = self._rec_engine.twitter_ranking(
+                    candidate_posts,
+                    user_id,
+                    limit,
+                    follows=dict(self._follows),
+                    likes=dict(self._likes)
+                )
+            elif algorithm == "random":
+                if self._random_seed is not None:
+                    rng = random.Random(self._random_seed)
+                    recommended_posts = rng.sample(candidate_posts, limit) if len(candidate_posts) > limit else list(candidate_posts)
+                else:
+                    recommended_posts = self._rec_engine.random_recommend(
+                        candidate_posts, user_id, limit
+                    )
+            elif algorithm in ("mf", "model") or algorithm == self._rec_engine.get_model_algorithm_name():
+                # 预训练推荐模型（如 MF）；未加载模型时 model_recommend 内部回退为时间序
+                recommended_posts = self._rec_engine.model_recommend(
+                    candidate_posts, user_id, limit, exclude_post_ids=None
+                )
+            else:
+                get_logger().warning(f"Unknown algorithm '{algorithm}', using chronological")
+                recommended_posts = self._rec_engine.chronological(
+                    candidate_posts, user_id, limit
+                )
         
         get_logger().info(
             f"User {user_id} refreshed feed with algorithm '{algorithm}', got {len(recommended_posts)} posts"
@@ -1739,21 +1937,27 @@ Use the available tools based on the agent's request."""
             user_ids: List of user IDs to initialize
         """
         for user_id in user_ids:
-            await self._ensure_user_exists(user_id)
+            self._ensure_user_exists(user_id)
 
         get_logger().info(f"Initialized {len(user_ids)} users")
 
     # 一些辅助函数
     
-    async def _ensure_user_exists(self, user_id: int) -> None:
-        """Create user if not exists"""
-        if user_id not in self._users:
-            self._users[user_id] = User(
-                user_id=user_id,
-                username=f"user_{user_id}"
+    def _ensure_user_exists(self, user_id: int) -> None:
+        """
+        若 user_id 不在当前用户集中则创建对应用户。
+        当初始化时传入了 agent_id_name_pairs 时，仅允许该集合内的 id；否则允许任意 id 并按需创建。
+        """
+        if self._allowed_user_ids is not None and user_id not in self._allowed_user_ids:
+            raise ValueError(
+                f"User id {user_id} is not in the allowed agent set (agent_id_name_pairs). "
+                f"Allowed ids: {sorted(self._allowed_user_ids)}"
             )
-            get_logger().info(f"Auto-created user {user_id}")
-            await self._write_social_user(self._users[user_id])
+        if user_id not in self._users:
+            name = self._agent_names.get(user_id, f"user_{user_id}")
+            self._users[user_id] = User(user_id=user_id, username=name)
+            get_logger().info(f"Auto-created user {user_id} (username={name})")
+            self._schedule_replay_task(self._write_social_user(self._users[user_id]))
 
     def _get_next_post_id(self) -> int:
         """Get next available post ID"""

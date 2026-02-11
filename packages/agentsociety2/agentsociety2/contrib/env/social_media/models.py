@@ -15,6 +15,10 @@ class User(BaseModel):
     followers_count: int = Field(0, ge=0, description="Number of followers")
     following_count: int = Field(0, ge=0, description="Number of users being followed")
     posts_count: int = Field(0, ge=0, description="Number of posts created")
+    camp_score: Optional[float] = Field(
+        None,
+        description="Camp score for polarization experiment, optional",
+    )
     
     class Config:
         json_encoders = {
