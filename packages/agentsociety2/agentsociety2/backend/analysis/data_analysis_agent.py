@@ -21,7 +21,7 @@ from litellm import AllMessageValues
 
 from .models import ExperimentContext, AnalysisResult, SUPPORTED_ASSET_FORMATS
 from .tool_executor import ToolExecutor, collect_experiment_files
-from .utils import parse_llm_json_response
+from .utils import parse_llm_json_response, get_analysis_skills, AnalysisProgressCallback
 
 
 class DataAnalysisAgent:
@@ -74,60 +74,46 @@ class DataAnalysisAgent:
         analysis_result: AnalysisResult,
         db_path: Path,
         output_dir: Path,
+        on_progress: AnalysisProgressCallback = None,
     ) -> Dict[str, Any]:
-        """
-        自主分析实验数据并决定分析策略。
-        
-        代理将：
-        1. 检查可用数据
-        2. 发现可用工具
-        3. 让LLM决定分析策略和使用的工具
-        4. 执行LLM决定的工具
-        5. 决定创建哪些可视化
-        6. 生成分析结果
-        
-        Args:
-            context: 实验上下文
-            analysis_result: 之前的分析结果
-            db_path: 实验数据库路径
-            output_dir: 输出目录
-            
-        Returns:
-            包含分析计划、工具执行结果、可视化和结果的字典
-        """
+        """自主分析实验数据：决定策略、执行工具、生成可视化。"""
         self.logger.info("Starting autonomous data analysis...")
-        
+        async def progress(msg: str) -> None:
+            if on_progress:
+                await on_progress(msg)
+
         data_summary = self._examine_data_sources(db_path)
-        
-        # Import here to avoid circular import
         from agentsociety2.backend.tools.registry import get_registry
         tool_registry = get_registry()
         tool_executor = ToolExecutor(self.workspace_path, output_dir, tool_registry=tool_registry)
-        available_tools = tool_executor.discover_tools()
-        self.logger.info(f"Discovered {len(available_tools)} available tools")
-        
-        # 多轮对话：让LLM根据执行结果调整策略
+        available_tools = tool_executor.discover_tools_with_schemas()
+        self.logger.info(f"Discovered {len(available_tools)} available tools (with parameter schemas)")
+
+        await progress("Deciding analysis strategy...")
         analysis_plan = await self._decide_analysis_strategy(
             context, analysis_result, data_summary, available_tools
         )
-        
+
         tool_results = {}
         if analysis_plan.get("tools_to_use"):
+            await progress("Running data tools...")
             tool_results = await self._execute_tools_with_feedback(
                 tool_executor, analysis_plan.get("tools_to_use", []), db_path, output_dir,
-                context, analysis_result, data_summary
+                context, analysis_result, data_summary, on_progress=on_progress
             )
-        
+
+        await progress("Deciding visualizations...")
         visualization_plan = await self._decide_visualizations(
             context, analysis_result, data_summary, tool_results
         )
-        
+
         generated_charts = []
         if visualization_plan:
+            await progress("Generating charts...")
             generated_charts = await self._generate_visualizations(
-                visualization_plan, db_path, output_dir, tool_executor
+                visualization_plan, db_path, output_dir, tool_executor, on_progress=on_progress
             )
-        
+
         return {
             "analysis_plan": analysis_plan,
             "tool_results": tool_results,
@@ -137,15 +123,6 @@ class DataAnalysisAgent:
     
     
     def _examine_data_sources(self, db_path: Path) -> Dict[str, Any]:
-        """
-        检查可用数据源并提供基本信息。
-        
-        Args:
-            db_path: 实验数据库路径
-            
-        Returns:
-            数据源摘要字典，包含数据库路径与存在性
-        """
         summary = {
             "database": {
                 "path": str(db_path),
@@ -163,21 +140,6 @@ class DataAnalysisAgent:
         data_summary: Dict[str, Any],
         available_tools: Dict[str, Dict[str, Any]] = None,
     ) -> Dict[str, Any]:
-        """
-        让LLM决定分析哪些数据以及如何分析。
-        
-        Args:
-            context: 实验上下文
-            analysis_result: 之前的分析结果
-            data_summary: 可用数据源摘要
-            available_tools: 可用工具字典（可选）
-            
-        Returns:
-            包含分析计划的字典：
-            - analysis_strategy: 分析策略描述
-            - tools_to_use: 要执行的工具列表
-        """
-        # 格式化可用工具列表
         tools_list = ""
         if available_tools:
             builtin_tools = {k: v for k, v in available_tools.items() if v.get("type") == "builtin"}
@@ -186,56 +148,31 @@ class DataAnalysisAgent:
             else:
                 tools_list = "No built-in tools available"
         
-        prompt = f"""You are a data analysis expert. Decide how to analyze the experiment data.
-
-## Experiment context
+        prompt = f"""Decide how to analyze the experiment data and which tools to run.
 
 **Hypothesis**: {context.design.hypothesis}
-**Completion**: {context.completion_percentage:.1f}%
-**Status**: {context.execution_status.value}
+**Completion**: {context.completion_percentage:.1f}% | **Status**: {context.execution_status.value}
 
-## Previous insights
+**Previous insights**: {chr(10).join([f"- {insight}" for insight in analysis_result.insights[:5]]) if analysis_result.insights else "None yet."}
 
-{chr(10).join([f"- {insight}" for insight in analysis_result.insights[:5]])}
+**Database**: {data_summary['database']['path']} (schema discovered when using code_executor.)
 
-## Available data
-
-### Database
-
-**Path**: {data_summary['database']['path']}
-Schema will be discovered by the code executor when needed.
-
-## Available tools
-
-**Built-in tools**:
+**Available tools**:
 {tools_list if tools_list else 'None'}
 
-## Output
-
-Return a JSON analysis plan:
-
+Return JSON: analysis_strategy (string), tools_to_use (list of objects with tool_name, tool_type, action, parameters).
 ```json
-{{
-  "analysis_strategy": "Overall analysis strategy",
-  "tools_to_use": [
-    {{
-      "tool_name": "tool_name",
-      "tool_type": "builtin|code_executor",
-      "action": "what you want to do",
-      "parameters": {{}}
-    }}
-  ]
-}}
+{{ "analysis_strategy": "", "tools_to_use": [] }}
 ```"""
 
+        sys_msg = "Return only JSON."
+        skills = get_analysis_skills()
+        if skills:
+            sys_msg = f"{skills}\n\n---\n\n{sys_msg}"
         messages: List[AllMessageValues] = [
-            {
-                "role": "system",
-                "content": "You are a data analysis expert. Decide the analysis strategy and which tools to run."
-            },
-            {"role": "user", "content": prompt}
+            {"role": "system", "content": sys_msg},
+            {"role": "user", "content": prompt},
         ]
-        
         self.logger.info(f"Calling LLM model: {self.model_name} (decide_analysis_strategy)")
         
         response = await self.llm_router.acompletion(
@@ -245,8 +182,6 @@ Return a JSON analysis plan:
         )
         
         content = response.choices[0].message.content or ""
-        
-        # 解析JSON响应
         plan = self._parse_json_response(content, "analysis_plan")
         
         self.logger.info(f"Analysis strategy decided: {plan.get('analysis_strategy', 'N/A')[:100]}")
@@ -254,62 +189,61 @@ Return a JSON analysis plan:
     
     async def _execute_tools_with_feedback(
         self,
-        tool_executor: 'ToolExecutor',
+        tool_executor: "ToolExecutor",
         tools_to_use: List[Dict[str, Any]],
         db_path: Path,
         output_dir: Path,
         context: ExperimentContext,
         analysis_result: AnalysisResult,
         data_summary: Dict[str, Any],
+        on_progress: AnalysisProgressCallback = None,
     ) -> Dict[str, Any]:
-        """
-        通过多轮对话执行工具：让LLM根据结果调整策略。
-        """
+        """多轮执行工具，LLM 根据结果决定是否继续。"""
+        async def progress(msg: str) -> None:
+            if on_progress:
+                await on_progress(msg)
+
         results = {}
         conversation_history = []
         max_iterations = 3
-        
+
         for iteration in range(max_iterations):
-            # Execute current batch of tools
             current_tools = tools_to_use if iteration == 0 else []
-            
+
             if iteration > 0:
-                # 让LLM根据之前的结果调整策略
                 adjustment = await self._adjust_strategy_based_on_results(
                     context, analysis_result, data_summary, results, conversation_history
                 )
                 if not adjustment.get("tools_to_use"):
                     break
                 current_tools = adjustment.get("tools_to_use", [])
-            
+
             for i, tool_spec in enumerate(current_tools):
                 tool_name = tool_spec.get("tool_name", f"tool_{i}")
                 tool_type = tool_spec.get("tool_type", "code_executor")
                 parameters = tool_spec.get("parameters", {})
-                
+                await progress(f"Running tool: {tool_name}...")
                 self.logger.info(f"执行工具: {tool_name} (类型: {tool_type}, 第{iteration + 1}轮)")
-                
+
                 exec_parameters = parameters.copy()
                 if tool_type == "code_executor":
                     exec_parameters["db_path"] = str(db_path)
                     exec_parameters["code_description"] = tool_spec.get("action", "")
                     exec_parameters["extra_files"] = collect_experiment_files(db_path)
-                
+
                 result = await tool_executor.execute_tool(
                     tool_name=tool_name,
                     tool_type=tool_type,
                     parameters=exec_parameters,
                 )
-                
                 results[tool_name] = result
                 conversation_history.append({
                     "tool": tool_name,
                     "result": result,
                     "iteration": iteration + 1,
                 })
-                
                 self.logger.info(f"Tool {tool_name} execution: {'success' if result.get('success') else 'failed'}")
-        
+
         return results
     
     async def _adjust_strategy_based_on_results(
@@ -320,46 +254,28 @@ Return a JSON analysis plan:
         current_results: Dict[str, Any],
         conversation_history: List[Dict[str, Any]],
     ) -> Dict[str, Any]:
-        """
-        让LLM根据工具执行结果调整分析策略。
-        """
-        prompt = f"""Based on the tool execution results, decide whether to adjust the analysis strategy.
+        prompt = f"""Decide whether to run more tools or stop.
 
-## Experiment context
-**Hypothesis**: {context.design.hypothesis}
-**Completion**: {context.completion_percentage:.1f}%
+**Hypothesis**: {context.design.hypothesis} | **Completion**: {context.completion_percentage:.1f}%
 
-## Tool execution results
+**Tool results**:
 {self._format_tool_results(current_results)}
 
-## Recent history
-{chr(10).join([f"- Iteration {h['iteration']}: {h['tool']} - {'Success' if h['result'].get('success') else 'Failed'}" for h in conversation_history[-5:]])}
+**Recent**: {chr(10).join([f"- Iter {h['iteration']}: {h['tool']} - {'OK' if h['result'].get('success') else 'Failed'}" for h in conversation_history[-5:]])}
 
-## Task
-Assess whether the results are sufficient. If sufficient, return an empty tools_to_use. Otherwise, propose next tools.
-
+Return JSON: assessment (string), tools_to_use (list; empty if done).
 ```json
-{{
-  "assessment": "assessment of current results",
-  "tools_to_use": [
-    {{
-      "tool_name": "tool_name",
-      "tool_type": "code_executor",
-      "action": "what you want to do next",
-      "parameters": {{}}
-    }}
-  ]
-}}
+{{ "assessment": "", "tools_to_use": [] }}
 ```"""
 
+        sys_msg = "Return only JSON."
+        skills = get_analysis_skills()
+        if skills:
+            sys_msg = f"{skills}\n\n---\n\n{sys_msg}"
         messages: List[AllMessageValues] = [
-            {
-                "role": "system",
-                "content": "You are a data analysis expert. Review results and decide whether to run more tools."
-            },
-            {"role": "user", "content": prompt}
+            {"role": "system", "content": sys_msg},
+            {"role": "user", "content": prompt},
         ]
-        
         response = await self.llm_router.acompletion(
             model=self.model_name,
             messages=messages,
@@ -378,46 +294,30 @@ Assess whether the results are sufficient. If sufficient, return an empty tools_
         data_summary: Dict[str, Any],
         analysis_results: Dict[str, Any],
     ) -> List[Dict[str, Any]]:
-        """
-        让LLM决定创建哪些可视化。
-        """
-        prompt = f"""You are a data visualization expert. Decide which visualizations to create.
+        prompt = f"""Decide which charts to generate.
 
-## Experiment context
-**Hypothesis**: {context.design.hypothesis}
-**Completion**: {context.completion_percentage:.1f}%
+**Hypothesis**: {context.design.hypothesis} | **Completion**: {context.completion_percentage:.1f}%
 
-## Analysis insights
-{chr(10).join([f"- {insight}" for insight in analysis_result.insights[:5]])}
+**Insights**: {chr(10).join([f"- {insight}" for insight in analysis_result.insights[:5]]) if analysis_result.insights else "None."}
 
-## Available data
-**Database**: `{data_summary['database']['path']}`
+**Database**: {data_summary['database']['path']}
 
-## Tool execution history
+**Tool results**:
 {self._format_tool_results(analysis_results)}
 
-## Output
-
-Return a JSON visualization plan:
-
+Return JSON: visualizations (list of objects with use_tool, tool_name, tool_description; empty if nothing to plot).
 ```json
-{{
-  "visualizations": [
-    {{
-      "use_tool": true,
-      "tool_name": "code_executor",
-      "tool_description": "what to visualize and how to extract the data"
-    }}
-  ]
-}}
-```
-"""
+{{ "visualizations": [] }}
+```"""
 
+        sys_msg = "Return only JSON."
+        skills = get_analysis_skills()
+        if skills:
+            sys_msg = f"{skills}\n\n---\n\n{sys_msg}"
         messages: List[AllMessageValues] = [
-            {"role": "system", "content": "You are a data visualization expert. Choose the most useful visualizations."},
-            {"role": "user", "content": prompt}
+            {"role": "system", "content": sys_msg},
+            {"role": "user", "content": prompt},
         ]
-        
         self.logger.info(f"Calling LLM model: {self.model_name} (decide_visualizations)")
         
         response = await self.llm_router.acompletion(
@@ -427,8 +327,6 @@ Return a JSON visualization plan:
         )
         
         content = response.choices[0].message.content or ""
-        
-        # 解析JSON响应
         plan_data = self._parse_json_response(content, "visualization_plan")
         visualizations = plan_data.get("visualizations", [])
         
@@ -441,34 +339,29 @@ Return a JSON visualization plan:
         db_path: Path,
         output_dir: Path,
         tool_executor,
+        on_progress: AnalysisProgressCallback = None,
     ) -> List[Path]:
-        """
-        使用LLM的计划通过code-executor工具生成可视化。
-        
-        Args:
-            visualization_plan: LLM的可视化计划
-            db_path: 数据库文件路径
-            output_dir: 可视化输出目录
-            tool_executor: ToolExecutor实例
-            
-        Returns:
-            生成的图表文件路径列表
-        """
+        """按 LLM 计划用 code_executor 生成图表。"""
+        async def progress(msg: str) -> None:
+            if on_progress:
+                await on_progress(msg)
+
         generated_charts = []
-        
         if not visualization_plan:
             return generated_charts
-        
+
         use_tools = any(viz.get("use_tool") or viz.get("tool_name") for viz in visualization_plan)
-        
         if use_tools and tool_executor is not None:
             self.logger.info("使用工具生成可视化（LLM驱动）")
-            
+            total = sum(1 for v in visualization_plan if v.get("use_tool") or v.get("tool_name"))
+            done = 0
             for viz in visualization_plan:
                 if viz.get("use_tool") or viz.get("tool_name"):
+                    done += 1
+                    await progress(f"Generating chart {done}/{total}..." if total > 1 else "Generating chart...")
                     tool_name = viz.get("tool_name", "code_executor")
                     tool_description = viz.get("tool_description", viz.get("description", ""))
-                    
+
                     if tool_description:
                         tool_spec = {
                             "tool_name": f"viz_{tool_name}",
@@ -515,61 +408,40 @@ Return a JSON visualization plan:
         return generated_charts
     
     def _parse_json_response(self, content: str, context: str = "") -> Dict[str, Any]:
-        """
-        解析LLM响应中的JSON
-        """
         return parse_llm_json_response(content)
-    
+
     def _format_tools_list(self, tools: Dict[str, Dict[str, Any]]) -> str:
-        """
-        格式化可用工具列表以便包含在提示词中。
-        
-        Args:
-            tools: 工具名称到工具信息的字典映射
-            
-        Returns:
-            按类别组织的格式化markdown字符串
-        """
         if not tools:
             return "No built-in tools available"
         
-        # 优先显示文件操作工具
-        file_tools = ["read_file", "write_file", "list_directory", "glob", "search_file_content"]
-        other_tools = []
-        
+        file_tool_names = ["read_file", "write_file", "list_directory", "glob", "search_file_content"]
+        file_entries = []
+        other_entries = []
         for tool_name, tool_info in tools.items():
             description = tool_info.get("description", "No description available")
-            entry = f"- **{tool_name}**: {description}"
-            if tool_name in file_tools:
-                file_tools[file_tools.index(tool_name)] = entry
+            params_desc = tool_info.get("parameters_description") or tool_info.get("parameters")
+            if params_desc is not None and not isinstance(params_desc, str):
+                params_desc = ", ".join(str(p) for p in params_desc)
+            param_line = f" Parameters: {params_desc}" if params_desc else ""
+            entry = f"- **{tool_name}**: {description}{param_line}"
+            if tool_name in file_tool_names:
+                file_entries.append((file_tool_names.index(tool_name), entry))
             else:
-                other_tools.append(entry)
-        
-        # 过滤掉原始字符串，保留格式化条目
-        file_tools = [e for e in file_tools if isinstance(e, str) and e.startswith("-")]
-        
+                other_entries.append(entry)
+        file_entries.sort(key=lambda x: x[0])
+        file_lines = [e[1] for e in file_entries]
         lines = []
-        if file_tools:
+        if file_lines:
             lines.append("**File Operations**:")
-            lines.extend(file_tools)
-        if other_tools:
+            lines.extend(file_lines)
+        if other_entries:
             if lines:
                 lines.append("")
             lines.append("**Other Tools**:")
-            lines.extend(other_tools)
-        
+            lines.extend(other_entries)
         return "\n".join(lines)
     
     def _format_tool_results(self, tool_results: Dict[str, Any]) -> str:
-        """
-        格式化工具执行结果以便包含在提示词中。
-        
-        Args:
-            tool_results: 工具名称到执行结果的字典映射
-            
-        Returns:
-            总结工具执行结果的格式化markdown字符串
-        """
         if not tool_results:
             return "No tool execution results available"
         
@@ -591,8 +463,5 @@ Return a JSON visualization plan:
         
         return "\n".join(lines) if lines else "No results"
     
-    async def close(self):
-        """
-        清理资源。
-        """
+    async def close(self) -> None:
         pass

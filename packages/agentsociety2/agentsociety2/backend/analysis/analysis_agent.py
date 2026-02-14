@@ -10,11 +10,11 @@ from typing import Any, Dict, List, Optional
 
 from pydantic import BaseModel
 from agentsociety2.logger import get_logger
-from agentsociety2.config import get_llm_router_and_model, extract_json
+from agentsociety2.config import get_llm_router_and_model
 from litellm import AllMessageValues
 
 from .models import ExperimentContext, AnalysisResult
-from .utils import parse_llm_json_response, parse_llm_json_to_model
+from .utils import parse_llm_json_response, parse_llm_json_to_model, get_analysis_skills
 
 
 class AnalysisJudgment(BaseModel):
@@ -72,7 +72,9 @@ class AnalysisAgent:
         self.logger.info(f"Starting analysis for experiment {context.experiment_id}")
 
         initial_prompt = self._build_analysis_prompt(context, custom_instructions)
-        messages: List[AllMessageValues] = [{"role": "user", "content": initial_prompt}]
+        skills = get_analysis_skills()
+        user_content = (f"{skills}\n\n---\n\n{initial_prompt}") if skills else initial_prompt
+        messages: List[AllMessageValues] = [{"role": "user", "content": user_content}]
 
         max_retries = 5
         parsed = None
@@ -149,9 +151,6 @@ Please generate an improved analysis."""
         context: ExperimentContext,
         custom_instructions: Optional[str] = None,
     ) -> str:
-        """
-        构建综合分析提示词。
-        """
         hypothesis_md_block = ""
         if getattr(context.design, "hypothesis_markdown", None):
             hypothesis_md_block = f"""
@@ -172,46 +171,24 @@ Please generate an improved analysis."""
 {context.design.experiment_markdown}
 ```"""
 
-        return f"""Analyze the following experiment.
+        return f"""## Experiment
 
-## Experiment Information
-
-**Experiment ID**: {context.experiment_id}
-**Hypothesis ID**: {context.hypothesis_id}
+**Experiment ID**: {context.experiment_id} | **Hypothesis ID**: {context.hypothesis_id}
 **Hypothesis**: {context.design.hypothesis}
+**Status**: {context.execution_status.value} | **Completion**: {context.completion_percentage:.1f}% | **Duration**: {f"{context.duration_seconds:.2f}s" if context.duration_seconds else "Unknown"}
 
-**Execution Status**: {context.execution_status.value}
-**Completion**: {context.completion_percentage:.1f}%
-**Duration**: {f"{context.duration_seconds:.2f}s" if context.duration_seconds else "Unknown"}
-
-**Error Messages**:
-{chr(10).join([f"- {err}" for err in context.error_messages]) if context.error_messages else "No errors"}
+**Errors**: {chr(10).join([f"- {err}" for err in context.error_messages]) if context.error_messages else "None"}
 
 {hypothesis_md_block}
 {experiment_md_block}
-
 {custom_instructions or ""}
 
-Return a JSON object:
+Return one JSON object: insights (list), findings (list), conclusions (string), recommendations (list).
 ```json
-{{
-    "insights": [...],
-    "findings": [...],
-    "conclusions": "...",
-    "recommendations": [...]
-}}
+{{ "insights": [], "findings": [], "conclusions": "", "recommendations": [] }}
 ```"""
 
     def _parse_analysis_response(self, content: str) -> Dict[str, Any]:
-        """
-        解析 LLM 分析响应。
-
-        Args:
-            content: LLM 原始响应文本
-
-        Returns:
-            包含 insights, findings, conclusions, recommendations 的字典
-        """
         data = parse_llm_json_response(content)
 
         return {
@@ -226,45 +203,17 @@ Return a JSON object:
         parsed: Dict[str, Any],
         context: ExperimentContext,
     ) -> AnalysisJudgment:
-        """
-        使用 LLM 判断分析结果是否完整和准确。
-
-        Args:
-            parsed: 解析后的分析结果
-            context: 实验上下文
-
-        Returns:
-            AnalysisJudgment 判断结果
-        """
         insights = parsed.get("insights", [])
         findings = parsed.get("findings", [])
         conclusions = parsed.get("conclusions", "")
         recommendations = parsed.get("recommendations", [])
 
-        judgment_prompt = f"""Evaluate the analysis result:
+        judgment_prompt = f"""Evaluate the analysis (experiment {context.experiment_id}).
+Generated: {len(insights)} insights, {len(findings)} findings, conclusions, {len(recommendations)} recommendations.
 
-## Experiment Context
-- Experiment ID: {context.experiment_id}
-- Hypothesis: {context.design.hypothesis}
-- Completion: {context.completion_percentage:.1f}%
-- Status: {context.execution_status.value}
-
-## Generated Analysis
-- Insights: {len(insights)} items
-- Findings: {len(findings)} items
-- Conclusions: {len(conclusions)} characters
-- Recommendations: {len(recommendations)} items
-
-Accept the analysis when it contains substantive insights, findings, or conclusions; only set should_retry when the response is clearly incomplete or off-task. Do not require full run metadata to accept a valid design-based analysis.
-
-Return JSON:
+Return JSON: success, reason, should_retry, retry_instruction.
 ```json
-{{
-    "success": true/false,
-    "reason": "brief explanation",
-    "should_retry": true/false,
-    "retry_instruction": "what to improve if should_retry is true"
-}}
+{{ "success": true, "reason": "", "should_retry": false, "retry_instruction": "" }}
 ```"""
 
         response = await self.llm_router.acompletion(
@@ -277,24 +226,4 @@ Return JSON:
         return parse_llm_json_to_model(content, AnalysisJudgment)
 
     def _format_analysis_for_feedback(self, parsed: Dict[str, Any]) -> str:
-        """格式化分析结果用于反馈。"""
         return json.dumps(parsed, indent=2, ensure_ascii=False)
-
-    def _format_variables(self, variables: Dict[str, Any]) -> str:
-        """
-        格式化变量用于提示词显示。
-
-        Args:
-            variables: 变量名到值的字典
-
-        Returns:
-            格式化的变量字符串表示
-        """
-        if not variables:
-            return "None"
-
-        lines = []
-        for key, value in variables.items():
-            lines.append(f"- {key}: {value}")
-
-        return "\n".join(lines)

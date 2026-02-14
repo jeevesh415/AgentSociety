@@ -31,12 +31,12 @@ class DataAnalysisTool(BaseTool):
     def get_description(self) -> str:
         return (
             "Analyze experiment data and generate visualizations autonomously.\n\n"
-            "This tool performs comprehensive data analysis on experiment results:\n"
-            "- Examines available data sources (database tables, JSON/YAML/CSV files, images)\n"
-            "- Decides analysis strategy autonomously using LLM\n"
-            "- Generates visualizations based on analysis needs\n"
-            "- Provides insights and recommendations\n\n"
-            "The analysis is fully autonomous - the LLM decides what to analyze and how to present results."
+            "You MUST pass hypothesis_id and experiment_id in every call. Infer them from the current "
+            "conversation context (e.g. 'hypothesis 1 experiment 1' -> hypothesis_id='1', experiment_id='1'); "
+            "if the user did not specify, use the default experiment (e.g. '1', '1'). Do not ask the user "
+            "for these IDs in chat—always pass them in the tool call.\n\n"
+            "This tool: examines data under workspace/hypothesis_<id>/experiment_<id>/ (run/, results/), "
+            "decides analysis strategy via LLM, generates visualizations, and returns insights."
         )
 
     def get_parameters_schema(self) -> Dict[str, Any]:
@@ -45,15 +45,15 @@ class DataAnalysisTool(BaseTool):
             "properties": {
                 "hypothesis_id": {
                     "type": "string",
-                    "description": "ID of the hypothesis (e.g., '1', '2')",
+                    "description": "Required. Hypothesis ID, e.g. '1', '2'. Must be passed in this call.",
                 },
                 "experiment_id": {
                     "type": "string",
-                    "description": "ID of the experiment within the hypothesis (e.g., '1', '2')",
+                    "description": "Required. Experiment ID within the hypothesis, e.g. '1', '2'. Must be passed in this call.",
                 },
                 "custom_instructions": {
                     "type": "string",
-                    "description": "Optional custom instructions for the analysis (e.g., focus on specific aspects, use particular methods)",
+                    "description": "Optional. Custom instructions for the analysis (e.g. focus on specific aspects).",
                 },
             },
             "required": ["hypothesis_id", "experiment_id"],
@@ -69,20 +69,24 @@ class DataAnalysisTool(BaseTool):
             if not hypothesis_id or not experiment_id:
                 return ToolResult(
                     success=False,
-                    content="hypothesis_id and experiment_id are required",
+                    content=(
+                        "Missing required parameters: hypothesis_id and experiment_id. "
+                        "You must pass both in this tool call (e.g. hypothesis_id='1', experiment_id='1'). "
+                        "Infer from conversation context or use default '1','1'. Do not ask the user for IDs."
+                    ),
                     error="Missing required parameters",
                 )
 
-            # 发送进度更新
-            await self._send_progress(
-                ToolEvent(
-                    tool_id=self._current_tool_id,
-                    event_type="progress",
-                    content=f"Analyzing experiment {experiment_id} in hypothesis {hypothesis_id}...",
+            async def on_progress(msg: str) -> None:
+                await self._send_progress(
+                    ToolEvent(
+                        tool_id=self._current_tool_id,
+                        tool_name=self.get_name(),
+                        status="progress",
+                        content=msg,
+                    )
                 )
-            )
 
-            # 初始化分析服务并执行
             analysis_service = AnalysisService(
                 AnalysisConfig(workspace_path=self._workspace_path)
             )
@@ -90,6 +94,7 @@ class DataAnalysisTool(BaseTool):
                 hypothesis_id=hypothesis_id,
                 experiment_id=experiment_id,
                 custom_instructions=custom_instructions,
+                on_progress=on_progress,
             )
 
             if result.get("success"):
@@ -112,7 +117,6 @@ class DataAnalysisTool(BaseTool):
 
                 insights = None
                 if analysis_result is not None:
-                    # `analysis_result` 可能是 Pydantic 模型，也可能是 dict（兼容两种情况）
                     if hasattr(analysis_result, "insights"):
                         insights = getattr(analysis_result, "insights", None)
                     elif isinstance(analysis_result, dict):
@@ -124,13 +128,22 @@ class DataAnalysisTool(BaseTool):
                         [f"{i}. {ins}" for i, ins in enumerate(list(insights)[:5], 1)]
                     )
 
+                ar_dict = None
+                if analysis_result is not None:
+                    ar_dict = (
+                        analysis_result.model_dump(mode="json")
+                        if hasattr(analysis_result, "model_dump")
+                        else analysis_result
+                    )
+                    if not isinstance(ar_dict, dict):
+                        ar_dict = None
                 return ToolResult(
                     success=True,
                     content="\n".join(content_parts),
                     data={
                         "output_directory": output_dir,
                         "generated_files": generated_files,
-                        "analysis_result": analysis_result,
+                        "analysis_result": ar_dict,
                     },
                 )
             else:
@@ -144,8 +157,4 @@ class DataAnalysisTool(BaseTool):
 
         except Exception as e:
             logger.error(f"Data analysis tool execution failed: {e}", exc_info=True)
-            return ToolResult(
-                success=False,
-                content=f"Data analysis tool execution failed: {str(e)}",
-                error=str(e),
-            )
+            return ToolResult(success=False, content=str(e), error=str(e))
