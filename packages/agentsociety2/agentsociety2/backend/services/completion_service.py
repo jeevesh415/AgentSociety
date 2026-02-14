@@ -5,6 +5,7 @@ from __future__ import annotations
 import asyncio
 import json
 import uuid
+from datetime import date, datetime
 from typing import List, Dict, Any, AsyncGenerator
 from litellm import AllMessageValues
 
@@ -20,6 +21,23 @@ from agentsociety2.backend.sse import (
 )
 
 logger = get_logger()
+
+
+def _serializable_data(data: Any) -> Any:
+    """Ensure data is JSON-serializable (for tool result messages)."""
+    if data is None:
+        return None
+    if hasattr(data, "model_dump"):
+        return data.model_dump(mode="json")
+    if isinstance(data, dict):
+        return {k: _serializable_data(v) for k, v in data.items()}
+    if isinstance(data, (list, tuple)):
+        return [_serializable_data(x) for x in data]
+    if isinstance(data, (datetime, date)):
+        return data.isoformat()
+    if isinstance(data, (str, int, float, bool)):
+        return data
+    return str(data)
 
 
 class FunctionWrapper:
@@ -410,10 +428,10 @@ class CompletionService:
 
                     try:
                         logger.info(f"[SSE] 调用工具execute方法: {tool_name}")
-                        
+
                         # 启动工具执行任务
                         execute_task = asyncio.create_task(tool.execute(arguments))
-                        
+
                         # 在工具执行期间，实时从队列中取出事件并yield
                         while not execute_task.done():
                             try:
@@ -421,20 +439,24 @@ class CompletionService:
                                 event = await asyncio.wait_for(
                                     progress_queue.get(), timeout=0.1
                                 )
-                                logger.info(f"[SSE] 实时发送工具进度事件: {event.model_dump()}")
+                                logger.info(
+                                    f"[SSE] 实时发送工具进度事件: {event.model_dump()}"
+                                )
                                 yield event
                                 progress_queue.task_done()
                             except asyncio.TimeoutError:
                                 # 超时后继续检查工具执行状态
                                 continue
-                        
+
                         # 工具执行完成后，处理队列中剩余的事件
                         while not progress_queue.empty():
                             event = progress_queue.get_nowait()
-                            logger.info(f"[SSE] 发送剩余工具进度事件: {event.model_dump()}")
+                            logger.info(
+                                f"[SSE] 发送剩余工具进度事件: {event.model_dump()}"
+                            )
                             yield event
                             progress_queue.task_done()
-                        
+
                         # 获取工具执行结果
                         result = await execute_task
                         logger.info(
@@ -448,7 +470,7 @@ class CompletionService:
                             "name": tool_name,
                         }
                         if result.data:
-                            tool_result_msg["data"] = result.data
+                            tool_result_msg["data"] = _serializable_data(result.data)
                         tool_results.append(tool_result_msg)
 
                         # 发送工具结果事件（暂时取消）
@@ -560,20 +582,20 @@ class CompletionService:
             yield error_event
 
     def _convert_messages(self, messages: List[ChatMessage]) -> List[AllMessageValues]:
-        """转换消息格式为litellm格式"""
+        """转换消息格式为 litellm 格式，保证 content/data 等可 JSON 序列化。"""
         result = []
         for msg in messages:
-            litellm_msg: Dict[str, Any] = {
-                "role": msg.role,
-            }
-            if msg.content:
-                litellm_msg["content"] = msg.content
+            litellm_msg: Dict[str, Any] = {"role": msg.role}
+            if msg.content is not None:
+                litellm_msg["content"] = msg.content if isinstance(msg.content, str) else str(msg.content)
             if msg.tool_calls:
                 litellm_msg["tool_calls"] = msg.tool_calls
             if msg.tool_call_id:
                 litellm_msg["tool_call_id"] = msg.tool_call_id
             if msg.name:
                 litellm_msg["name"] = msg.name
+            if msg.data is not None:
+                litellm_msg["data"] = _serializable_data(msg.data)
             result.append(litellm_msg)
         return result
 

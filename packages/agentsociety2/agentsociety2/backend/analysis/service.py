@@ -21,7 +21,7 @@ from .models import (
 )
 from .analysis_agent import AnalysisAgent
 from .report_generator import ReportGenerator, AssetProcessor
-from .utils import parse_llm_json_response
+from .utils import parse_llm_json_response, AnalysisProgressCallback
 
 
 
@@ -52,28 +52,21 @@ class AnalysisService:
     def _find_database_path(self, hypothesis_id: str, experiment_id: str) -> Optional[Path]:
         """
         查找数据库路径。
-        
-        Args:
-            hypothesis_id: 假设标识符
-            experiment_id: 实验标识符
-            
-        Returns:
-            数据库路径，如果未找到则返回 None
+        约定路径: workspace_path / hypothesis_{id} / experiment_{id} / run / sqlite.db
         """
-        run_path = (
-            self.workspace_path 
-            / f"hypothesis_{hypothesis_id}" 
-            / f"experiment_{experiment_id}" 
+        db_path = (
+            self.workspace_path
+            / f"hypothesis_{hypothesis_id}"
+            / f"experiment_{experiment_id}"
             / "run"
+            / "sqlite.db"
         )
-        
-        db_path = run_path / "sqlite.db"
-        
         if db_path.exists():
             self.logger.info(f"Found database at: {db_path}")
             return db_path
-        
-        self.logger.warning(f"Database not found for hypothesis_{hypothesis_id}/experiment_{experiment_id}")
+        self.logger.warning(
+            f"Database not found: {db_path}"
+        )
         return None
     
     async def analyze(
@@ -81,76 +74,75 @@ class AnalysisService:
         hypothesis_id: str,
         experiment_id: str,
         custom_instructions: Optional[str] = None,
+        on_progress: AnalysisProgressCallback = None,
     ) -> Dict[str, Any]:
         """
         分析实验。
-        
-        Args:
-            hypothesis_id: 假设标识符
-            experiment_id: 实验标识符
-            custom_instructions: 可选的定制分析指令
-            
-        Returns:
-            包含分析结果和生成文件的字典
+        on_progress: 可选，每步进度消息（发给前端）。
         """
         self.logger.info(f"Starting analysis for experiment {experiment_id}")
-        
+
+        async def progress(msg: str) -> None:
+            if on_progress:
+                await on_progress(msg)
+
+        await progress("Loading experiment context...")
         context = await self._load_context(hypothesis_id, experiment_id)
+
+        await progress("Running text analysis...")
         analysis_result = await self.agent.analyze(context, custom_instructions)
-        
+
         assets = self.asset_processor.discover_assets(experiment_id, hypothesis_id)
-        
         output_dir = self.presentation_path / f"hypothesis_{hypothesis_id}" / f"experiment_{experiment_id}"
         output_dir.mkdir(parents=True, exist_ok=True)
         assets_dir = output_dir / "assets"
         assets_dir.mkdir(exist_ok=True)
-        
         db_path = self._find_database_path(hypothesis_id, experiment_id)
+        data_analyzed = False
 
         if db_path:
             from .data_analysis_agent import DataAnalysisAgent
 
             data_agent = DataAnalysisAgent(
                 llm_router=self.agent.llm_router,
-
                 model_name=self.agent.model_name,
                 temperature=self.agent.temperature,
                 workspace_path=self.workspace_path,
             )
-            
             try:
                 data_analysis_result = await data_agent.analyze_data(
-                    context, analysis_result, db_path, assets_dir
+                    context, analysis_result, db_path, assets_dir, on_progress=on_progress
                 )
-                
+                data_analyzed = True
                 for chart_path in data_analysis_result.get("generated_charts", []):
                     asset = ReportAsset(
                         asset_id=f"gen_{chart_path.stem}",
                         asset_type="visualization",
-                        title=chart_path.stem.replace('_', ' ').title(),
+                        title=chart_path.stem.replace("_", " ").title(),
                         file_path=str(chart_path),
                         description=f"Autonomously generated visualization: {chart_path.name}",
                         file_size=chart_path.stat().st_size,
-                        embedded_content=None
+                        embedded_content=None,
                     )
                     assets.append(asset)
-                
-                self.logger.info(f"Data analysis completed: {len(data_analysis_result.get('generated_charts', []))} charts generated")
-                
+                self.logger.info(
+                    f"Data analysis completed: {len(data_analysis_result.get('generated_charts', []))} charts generated"
+                )
             finally:
                 await data_agent.close()
-        
+        else:
+            self.logger.info("No database found; skipping data analysis.")
+
+        await progress("Writing report...")
         processed_assets = self.asset_processor.process_assets(assets, output_dir)
-        
         report_generator = ReportGenerator(agent=self.agent)
-        
-        generated_files = await report_generator.generate(
+        generated_files, report_complete = await report_generator.generate(
             context=context,
             analysis_result=analysis_result,
             processed_assets=processed_assets,
             output_dir=output_dir,
+            on_progress=on_progress,
         )
-        
         return {
             "success": True,
             "experiment_id": experiment_id,
@@ -161,6 +153,8 @@ class AnalysisService:
             "execution_status": context.execution_status,
             "completion_percentage": context.completion_percentage,
             "error_messages": context.error_messages,
+            "data_analyzed": data_analyzed,
+            "report_complete": report_complete,
         }
 
     async def _load_context(
@@ -193,10 +187,7 @@ class AnalysisService:
         experiment_path: Path,
         hypothesis_id: str,
     ) -> ExperimentDesign:
-        """从 Markdown 文件加载实验设计。
-
-        不再通过 LLM 解析 Markdown 为结构化字段，只读取原始 Markdown 文本，
-        """
+        """从 HYPOTHESIS.md / EXPERIMENT.md 读取原始 Markdown 文本。"""
         design_data: Dict[str, Any] = {
             "hypothesis": "Hypothesis not specified",
             "objectives": [],
@@ -238,21 +229,92 @@ class AnalysisService:
         self,
         run_path: Path,
     ) -> Tuple[Optional[datetime], Optional[datetime], Optional[float]]:
-        """从数据库加载运行时信息。"""
-        return None, None, None
+        """从 pid.json 读取开始/结束时间并计算 duration（秒）。"""
+        pid_file = run_path / "pid.json"
+        if not pid_file.exists():
+            return None, None, None
+        try:
+            data = json.loads(pid_file.read_text(encoding="utf-8"))
+        except (json.JSONDecodeError, OSError):
+            return None, None, None
+        start_s = data.get("start_time")
+        end_s = data.get("end_time")
+        start_dt = None
+        end_dt = None
+        if start_s:
+            try:
+                start_dt = datetime.fromisoformat(start_s.replace("Z", "+00:00"))
+            except (ValueError, TypeError):
+                pass
+        if end_s:
+            try:
+                end_dt = datetime.fromisoformat(end_s.replace("Z", "+00:00"))
+            except (ValueError, TypeError):
+                pass
+        duration = None
+        if start_dt and end_dt:
+            delta = end_dt - start_dt
+            duration = delta.total_seconds()
+        return start_dt, end_dt, duration
 
     async def _analyze_status(
         self,
         run_path: Path,
     ) -> Tuple[ExperimentStatus, float, list[str]]:
-        """
-        读取实验状态和完成度。
-
-        """
+        """从 pid.json 和（可选）sqlite 读取实验状态与完成度。"""
         db_path = run_path / "sqlite.db"
+        pid_file = run_path / "pid.json"
+        errors: list[str] = []
+        status = ExperimentStatus.UNKNOWN
+        completion = 0.0
         if not db_path.exists():
             return ExperimentStatus.FAILED, 0.0, ["Database file not found"]
-        return ExperimentStatus.UNKNOWN, 0.0, []
+        if pid_file.exists():
+            try:
+                data = json.loads(pid_file.read_text(encoding="utf-8"))
+                pid_status = (data.get("status") or "").strip().lower()
+                if pid_status in ("completed", "success", "done"):
+                    status = ExperimentStatus.SUCCESSFUL
+                elif pid_status in ("failed", "error"):
+                    status = ExperimentStatus.FAILED
+                elif pid_status in ("running", "in_progress"):
+                    status = ExperimentStatus.UNKNOWN
+                elif pid_status:
+                    status = ExperimentStatus.UNKNOWN
+            except (json.JSONDecodeError, OSError) as e:
+                errors.append(f"Failed to read pid.json: {e}")
+        try:
+            conn = sqlite3.connect(str(db_path))
+            cursor = conn.cursor()
+            try:
+                cursor.execute(
+                    "SELECT status, cur_day, num_day FROM as_experiment LIMIT 1"
+                )
+                row = cursor.fetchone()
+                if row:
+                    st, cur_day, num_day = row[0], row[1], row[2]
+                    if status == ExperimentStatus.UNKNOWN and st is not None:
+                        if st == 2:
+                            status = ExperimentStatus.SUCCESSFUL
+                        elif st == 1:
+                            status = ExperimentStatus.UNKNOWN
+                        elif st == 3:
+                            status = ExperimentStatus.FAILED
+                    if num_day and num_day > 0 and cur_day is not None:
+                        completion = min(100.0, max(0.0, 100.0 * cur_day / num_day))
+            except sqlite3.OperationalError:
+                pass
+            try:
+                cursor.execute("SELECT COUNT(*) FROM step_executions")
+                r = cursor.fetchone()
+                if r and completion == 0.0 and r[0] and r[0] > 0:
+                    completion = 50.0
+            except sqlite3.OperationalError:
+                pass
+            conn.close()
+        except Exception as e:
+            errors.append(f"Database read error: {e}")
+        return status, completion, errors
 
 
 class ExperimentSynthesizer:

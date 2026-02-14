@@ -7,10 +7,9 @@
 import base64
 import json
 import mimetypes
-import re
 import shutil
 from pathlib import Path
-from typing import Dict, Any, List
+from typing import Dict, Any, List, Optional, Tuple
 
 from agentsociety2.logger import get_logger
 from litellm import AllMessageValues
@@ -24,7 +23,7 @@ from .models import (
     SUPPORTED_IMAGE_FORMATS,
 )
 from .analysis_agent import AnalysisAgent
-from .utils import parse_llm_json_to_model
+from .utils import parse_llm_json_to_model, get_analysis_skills, AnalysisProgressCallback
 
 
 class ReportGenerationResult(BaseModel):
@@ -39,20 +38,9 @@ class ReportGenerationResult(BaseModel):
 
 
 class AssetProcessor:
-    """
-    资源处理器：发现/处理/复制报告所需的可视化资源（图片/图表等）。
-
-    说明：
-    - 仅负责资源发现与复制/内嵌编码，不负责报告内容生成
-    """
+    """发现并处理报告所需的可视化资源（复制/内嵌）。"""
 
     def __init__(self, workspace_path: Path):
-        """
-        初始化资源处理器。
-
-        Args:
-            workspace_path: 工作空间根目录
-        """
         self.workspace_path = workspace_path
         self.logger = get_logger()
 
@@ -175,34 +163,30 @@ class ReportGenerator:
         analysis_result: AnalysisResult,
         processed_assets: Dict[str, Any],
         output_dir: Path,
-    ) -> Dict[str, str]:
+        on_progress: AnalysisProgressCallback = None,
+    ) -> Tuple[Dict[str, str], bool]:
         """
         生成报告，同时保存 Markdown 和 HTML 格式。
-
-        Args:
-            context: 实验上下文
-            analysis_result: 分析结果
-            processed_assets: 处理后的可视化资源
-            output_dir: 输出目录
-
-        Returns:
-            文件路径字典
+        Returns: (文件路径字典, report_complete 是否成功)
         """
+        async def progress(msg: str) -> None:
+            if on_progress:
+                await on_progress(msg)
+
         max_retries = 5
         retry_count = 0
 
         while retry_count < max_retries:
+            await progress("Generating report content...")
             content = await self._generate_content(
                 context, analysis_result, processed_assets
             )
-
-            files = {}
+            files: Dict[str, str] = {}
+            await progress("Saving report (Markdown & HTML)...")
             md_path = await self._save_markdown(content, output_dir)
             files["markdown"] = str(md_path)
-
             html_path = await self._save_html(content, output_dir)
             files["html"] = str(html_path)
-
             judgment = await self._judge_report_generation(content, md_path, html_path)
 
             if judgment.success:
@@ -211,7 +195,7 @@ class ReportGenerator:
                         context, analysis_result, output_dir
                     )
                 )
-                return files
+                return (files, True)
 
             if not judgment.should_retry or retry_count >= max_retries - 1:
                 self.logger.warning(
@@ -222,17 +206,18 @@ class ReportGenerator:
                         context, analysis_result, output_dir
                     )
                 )
-                return files
+                return (files, False)
 
             retry_count += 1
             self.logger.info(
                 f"Retrying report generation ({retry_count}/{max_retries}): {judgment.retry_instruction}"
             )
 
+        files = {}
         files.update(
             await self._save_supporting_files(context, analysis_result, output_dir)
         )
-        return files
+        return (files, False)
 
     async def _generate_content(
         self,
@@ -240,20 +225,13 @@ class ReportGenerator:
         analysis_result: AnalysisResult,
         processed_assets: Dict[str, Any],
     ) -> ReportContent:
-        """
-        使用 LLM 生成报告内容。
-
-        Args:
-            context: 实验上下文
-            analysis_result: 分析结果
-            processed_assets: 处理后的可视化资源
-
-        Returns:
-            ReportContent 对象
-        """
         prompt = self._build_prompt(context, analysis_result, processed_assets)
-        messages: list[AllMessageValues] = [{"role": "user", "content": prompt}]
-
+        skills = get_analysis_skills()
+        system = (f"{skills}\n\n---\n\nWrite the experiment report. Output: Markdown block between ---MARKDOWN--- and ---END MARKDOWN---, then HTML block between ---HTML--- and ---END HTML---." if skills else "Write the experiment report. Output: ---MARKDOWN--- ... ---END MARKDOWN---, then ---HTML--- ... ---END HTML---.")
+        messages: list[AllMessageValues] = [
+            {"role": "system", "content": system},
+            {"role": "user", "content": prompt},
+        ]
         self.logger.info(f"Generating report content with {self.agent.model_name}")
 
         response = await self.agent.llm_router.acompletion(
@@ -272,23 +250,10 @@ class ReportGenerator:
         analysis_result: AnalysisResult,
         processed_assets: Dict[str, Any],
     ) -> str:
-        """
-        构建 LLM 报告生成提示词。
-
-        Args:
-            context: 实验上下文
-            analysis_result: 分析结果
-            processed_assets: 处理后的可视化资源
-
-        Returns:
-            格式化的提示词字符串
-        """
         status_msg = self._get_status_message(context.execution_status.value)
         viz_info = self._format_viz_info(processed_assets)
 
-        return f"""You are an expert data analysis report writer. Create a comprehensive, insightful report that effectively communicates the experiment results.
-
-## Experiment Context
+        return f"""## Experiment Context
 
 **Experiment ID**: {context.experiment_id}
 **Hypothesis**: {context.design.hypothesis}
@@ -296,20 +261,18 @@ class ReportGenerator:
 **Status**: {context.execution_status.value}
 **Duration**: {f"{context.duration_seconds:.2f}s" if context.duration_seconds else "Not available"}
 
-**Objectives**:
-{self._format_list(context.design.objectives) if context.design.objectives else "Not specified"}
+**Objectives**: {self._format_list(context.design.objectives) if context.design.objectives else "Not specified"}
 
-**Success Criteria**:
-{self._format_list(context.design.success_criteria) if context.design.success_criteria else "Not specified"}
+**Success Criteria**: {self._format_list(context.design.success_criteria) if context.design.success_criteria else "Not specified"}
 
-**Status Context**: {status_msg}
+**Status context**: {status_msg}
 
 ## Analysis Results
 
 **Key Insights** ({len(analysis_result.insights)}):
 {self._format_list(analysis_result.insights)}
 
-**Main Findings** ({len(analysis_result.findings)}):
+**Findings** ({len(analysis_result.findings)}):
 {self._format_list(analysis_result.findings)}
 
 **Conclusions**:
@@ -321,82 +284,31 @@ class ReportGenerator:
 **Visualizations**:
 {viz_info}
 
-## Your Task
+---
 
-Create a comprehensive report that:
-- Addresses the experiment context, key results, analysis, evidence, implications, and next steps
-- Is well-structured, professional, and tailored to this specific experiment
-- Integrates visualizations naturally within the narrative
-
-## Output Format
-
-You must generate both Markdown and HTML formats:
-
-1. **Markdown Report**: Generate a complete Markdown report first. Use `![title](assets/image.png)` syntax for images.
-
-2. **HTML Report**: Generate a complete, standalone HTML document with:
-   - `<!DOCTYPE html>` declaration
-   - Complete `<head>` section with `<title>`, `<meta>` tags, and inline CSS in `<style>` tags
-   - Full `<body>` content
-   - Use `<img src="assets/image.png">` tags for images
-
-Output both formats separately. Start with Markdown, then HTML."""
+Output: first a Markdown block (---MARKDOWN--- ... ---END MARKDOWN---), then an HTML block (---HTML--- ... ---END HTML---)."""
 
     def _parse_content(
         self,
         content: str,
         context: ExperimentContext,
     ) -> ReportContent:
-        """
-        解析 LLM 响应，检测格式并提取内容。
-
-        Args:
-            content: LLM 原始响应文本
-            context: 实验上下文
-
-        Returns:
-            ReportContent 对象
-        """
-        has_html = "<!DOCTYPE html>" in content or "<html" in content
-
-        title_match = re.search(r"^#\s+(.+)$", content, re.MULTILINE)
-        if not title_match:
-            title_match = re.search(r"<title>(.+?)</title>", content, re.IGNORECASE)
-        title = (
-            title_match.group(1)
-            if title_match
-            else f"Analysis: {context.design.hypothesis}"
-        )
-
-        subtitle_match = re.search(r"^##\s+(.+)$", content, re.MULTILINE)
-        subtitle = (
-            subtitle_match.group(1)
-            if subtitle_match
-            else f"Experiment {context.experiment_id}"
-        )
-
+        """按 ---MARKDOWN--- / ---HTML--- 分隔符提取内容。"""
+        raw = (content or "").strip()
+        title = f"Analysis: {context.design.hypothesis}"
+        subtitle = f"Experiment {context.experiment_id}"
         markdown_content = None
         html_content = None
-
-        if has_html:
-            html_match = re.search(
-                r"(<!DOCTYPE html>.*?</html>)", content, re.DOTALL | re.IGNORECASE
-            )
-            if not html_match:
-                html_match = re.search(
-                    r"(<html.*?</html>)", content, re.DOTALL | re.IGNORECASE
-                )
-
-            if html_match:
-                html_content = html_match.group(1)
-                remaining = content.replace(html_content, "").strip()
-                if remaining and not remaining.startswith(("<!DOCTYPE", "<html")):
-                    markdown_content = remaining
-            else:
-                markdown_content = content
-        else:
-            markdown_content = content
-
+        if "---MARKDOWN---" in raw and "---END MARKDOWN---" in raw:
+            i0 = raw.index("---MARKDOWN---") + len("---MARKDOWN---")
+            i1 = raw.index("---END MARKDOWN---")
+            markdown_content = raw[i0:i1].strip()
+        if "---HTML---" in raw and "---END HTML---" in raw:
+            i0 = raw.index("---HTML---") + len("---HTML---")
+            i1 = raw.index("---END HTML---")
+            html_content = raw[i0:i1].strip()
+        if not markdown_content and raw:
+            markdown_content = raw
         return ReportContent(
             title=title,
             subtitle=subtitle,
@@ -411,17 +323,6 @@ Output both formats separately. Start with Markdown, then HTML."""
         md_path: Path,
         html_path: Path,
     ) -> ReportGenerationResult:
-        """
-        使用 LLM 判断报告生成是否成功。
-
-        Args:
-            content: ReportContent 对象
-            md_path: Markdown 文件路径
-            html_path: HTML 文件路径
-
-        Returns:
-            ReportGenerationResult 判断结果
-        """
         md_exists = md_path.exists() and md_path.stat().st_size > 0
         html_exists = html_path.exists() and html_path.stat().st_size > 0
         has_markdown_content = bool(
@@ -590,15 +491,6 @@ Respond in JSON format:
         return "\n".join([f"- {item}" for item in items]) if items else "None"
 
     def _format_viz_info(self, processed_assets: Dict[str, Any]) -> str:
-        """
-        格式化可视化信息用于 LLM 提示词。
-
-        Args:
-            processed_assets: 处理后的可视化资源字典
-
-        Returns:
-            格式化的字符串
-        """
         if not processed_assets:
             return "No visualizations available."
 
@@ -615,15 +507,6 @@ Respond in JSON format:
         return "\n".join(lines)
 
     def _get_status_message(self, status: str) -> str:
-        """
-        获取状态上下文消息用于提示词。
-
-        Args:
-            status: 执行状态字符串
-
-        Returns:
-            状态相关的消息
-        """
         messages = {
             "success": "Experiment completed successfully. Focus on positive outcomes.",
             "partial_success": "Partial success. Discuss achievements and limitations.",

@@ -218,6 +218,34 @@ class ToolExecutor:
             for name, info in self._builtin_tools.items()
         }
 
+    def discover_tools_with_schemas(self) -> Dict[str, Dict[str, Any]]:
+        """返回内置工具及其参数 schema，供 LLM 使用正确参数名。"""
+        result = {}
+        if self._tool_registry is None:
+            return self.discover_tools()
+        try:
+            all_tools = self._tool_registry.get_all_tools()
+        except Exception:
+            return self.discover_tools()
+        for name, info in self._builtin_tools.items():
+            entry = {
+                "description": info.get("description", ""),
+                "type": "builtin",
+                "usage": f"Use tool name '{name}' in your analysis plan",
+            }
+            default_tool = all_tools.get(name)
+            if default_tool is not None and getattr(default_tool, "parameters_schema", None):
+                schema = default_tool.parameters_schema
+                props = schema.get("properties") or {}
+                required = schema.get("required") or []
+                params_desc = ", ".join(
+                    f"{k}{' (required)' if k in required else ''}" for k in props
+                )
+                entry["parameters"] = list(props.keys())
+                entry["parameters_description"] = params_desc or "none"
+            result[name] = entry
+        return result
+
     async def execute_tool(
         self,
         tool_name: str,
@@ -280,7 +308,7 @@ class ToolExecutor:
         if tool_name == "write_todos":
             result = await tool.execute({"todos": parameters.get("todos", [])})
         else:
-            result = await tool.execute(**parameters)
+            result = await tool.execute(parameters)
         return {
             "success": True,
             "tool_name": tool_name,
@@ -352,10 +380,9 @@ class ToolExecutor:
 {discovered_schema}
 
 **IMPORTANT**: 
-- The schema above shows the actual database structure discovered from the file.
-- Your code MUST first read and verify the database structure before processing data.
-- Do NOT hardcode table or column names - always query the schema first.
-- Use the discovered schema as reference, but verify it programmatically in your code.
+- The schema above is the ONLY source of truth. Use ONLY tables and columns listed there.
+- Do NOT assume any other table exists. If a table is not in the schema, it does not exist.
+- Your code MUST read and verify the database structure before processing. Do NOT hardcode table or column names.
 """
                 self.logger.info(
                     "Database schema discovered and will be included in code generation prompt"
@@ -405,9 +432,10 @@ class ToolExecutor:
 ## Important Guidelines
 
 - **No Command-Line Arguments**: Do NOT use argparse, sys.argv, or any command-line argument parsing. All file paths are provided in the context above and files are already in the current working directory.
+- **Imports**: If you use sys (e.g. sys.exit), add `import sys` at the top. Use standard imports: sqlite3, pandas, etc., as needed.
 - **File Reading**: ALWAYS read and examine file contents FIRST before processing. For databases, query the schema programmatically. For other files, read and inspect their structure and content first. Do NOT hardcode assumptions about file structure.
-- **Database Schema**: ALWAYS read and verify the database structure FIRST before processing data. Query the schema programmatically, do NOT hardcode table or column names.
-- **Error Handling**: Use try-except blocks for file/database operations. If the core task cannot be completed, exit with `sys.exit(1)`.
+- **Database Schema**: Use ONLY tables from the schema above. ALWAYS verify the database structure before processing. Do NOT hardcode table or column names.
+- **Error Handling**: Use try-except blocks for file/database operations. If the core task cannot be completed, exit with `sys.exit(1)` (and ensure `import sys` is present).
 - **Type Safety**: SQLite often stores mixed types. Use `pd.to_numeric(..., errors='coerce')` for numeric conversion.
 - **Output Files**: Save all output files to the output directory specified above (use relative path or Path object)."""
 
