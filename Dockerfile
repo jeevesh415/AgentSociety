@@ -63,11 +63,10 @@ RUN mkdir -p /etc/sudoers.d && \
     echo "coder ALL=(ALL) NOPASSWD:ALL" >>/etc/sudoers.d/nopasswd
 
 # Make typing unicode characters in the terminal work.
-# Generate the desired locale (en_US.UTF-8)
-RUN locale-gen en_US.UTF-8
-ENV LANG=en_US.UTF-8
-ENV LANGUAGE=en_US.UTF-8
-ENV LC_ALL=en_US.UTF-8
+# Use C.UTF-8 locale which is available by default in Debian-based images
+ENV LANG=C.UTF-8
+ENV LANGUAGE=C.UTF-8
+ENV LC_ALL=C.UTF-8
 
 # Install pipx and ensure path is set up
 RUN uv pip install --system pipx && pipx ensurepath

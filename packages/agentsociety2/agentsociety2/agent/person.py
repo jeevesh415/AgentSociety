@@ -267,7 +267,8 @@ class ReActInstructionResponse(BaseModel):
         description="1.Why you are giving this action instruction. 2.check if the action instruction is available based on the available operations."
     )
     instruction: str = Field(
-        description="A single, clear sentence or short paragraph that tells the router what action to take"
+        default="",
+        description="A single, clear sentence or short paragraph that tells the router what action to take. Use empty string or <break> to indicate agent wants to stop (no further environment calls)."
     )
     status: Optional[str] = Field(
         default=None,
@@ -279,7 +280,8 @@ class ReActInstructionResponseWithTemplate(ReActInstructionResponse):
     """ReAct Act阶段的指令响应模型（template模式，含variables）。"""
 
     instruction: str = Field(
-        description="A single, clear sentence or short paragraph that tells the router what action to take. This instruction MUST contain variable placeholders like {variable_name} if there are ANY variables in the instruction."
+        default="",
+        description="A single, clear sentence or short paragraph that tells the router what action to take. Use empty string or <break> to indicate agent wants to stop. If providing an action, this MUST contain variable placeholders like {variable_name} if there are ANY variables."
     )
     variables: Dict[str, Any] = Field(
         default_factory=dict,
@@ -1468,6 +1470,10 @@ If you can determine the step status directly from the conversation history (e.g
 - "unknown" or omit: Continue with environment call
 </optional_status>
 
+<agent_break>
+To actively stop and skip further environment calls, use empty "instruction" ("") or "<break>". This indicates you want to end the step without another action. Provide "status" (success/fail/error) and "reasoning" to explain why.
+</agent_break>
+
 <format>
 You should return the result in JSON format with the following structure:
 {json_format}
@@ -1488,8 +1494,8 @@ Your instruction:"""
                     tick=self._tick,
                     t=self._t,
                 )
-                instruction = response.instruction.strip()
-                reasoning = response.reasoning.strip()
+                instruction = response.instruction.strip() if response.instruction else ""
+                reasoning = response.reasoning.strip() if response.reasoning else ""
                 llm_status = response.status
                 variables = getattr(response, "variables", {})  # 仅template模式有variables字段
             except Exception as e:
@@ -1501,10 +1507,45 @@ Your instruction:"""
                 llm_status = None
                 variables = {}  # 异常时使用空字典
 
-            if not instruction:
-                instruction = (
-                    f"I want to: {intention}. Please help me execute this step."
+            # 检查agent是否主动停止：instruction为空或为<break>
+            if not instruction or instruction.lower() == "<break>":
+                self._logger.info(
+                    f"{_get_debug_info('Agent主动停止执行')} - instruction为空或<break>, reasoning: {reasoning}"
                 )
+                # 根据reasoning或llm_status确定最终状态
+                if llm_status and llm_status in ["success", "fail", "error"]:
+                    final_status = llm_status
+                else:
+                    # 默认认为步骤已完成
+                    final_status = "success"
+                final_answer = f"Agent主动停止。Reasoning: {reasoning}"
+
+                # 记录act信息
+                step_acts.append(
+                    {
+                        "plan_step_index": step_index,
+                        "interaction_num": interaction_num + 1,
+                        "instruction": instruction if instruction else "<empty>",
+                        "reasoning": reasoning,
+                        "answer": final_answer,
+                        "status": final_status,
+                        "agent_break": True,  # 标记为agent主动停止
+                    }
+                )
+
+                # 保存记忆到cognition_memory
+                self._add_cognition_memory(
+                    f"ReAct interaction {interaction_num + 1} for step '{intention}': Agent主动停止 - {reasoning}",
+                    memory_type="react",
+                    metadata={
+                        "step_intention": intention,
+                        "interaction_num": interaction_num + 1,
+                        "agent_break": True,
+                    },
+                )
+
+                interaction_count += 1
+                break
 
             # 生成tool_call_id（在添加assistant消息之前生成，以便在tool_calls中使用）
             tool_call_id = f"call_{interaction_num}_{interaction_count}"
@@ -2561,8 +2602,8 @@ Your response is:
         if self._step_count % 2 == 0:
             await self._query_current_intention()
 
-        # 写入回放数据快照
-        await self._write_replay_snapshot(step=self._step_count, t=t)
+        # # 写入回放数据快照
+        # await self._write_replay_snapshot(step=self._step_count, t=t)
 
         return summary
 

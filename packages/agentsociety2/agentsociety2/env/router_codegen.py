@@ -46,6 +46,7 @@ __all__ = ["CodeGenRouter", "AskContext"]
 class CacheStats:
     """缓存统计信息"""
     request_count: int = 0  # 总请求次数
+    predefined_hit_count: int = 0  # 预定义指令命中次数（observe/statistics）
     cache_hit_count: int = 0  # 缓存命中次数
     cache_miss_count: int = 0  # 缓存未命中次数
     total_input_tokens: int = 0  # 总输入token数
@@ -424,7 +425,9 @@ class CacheStatsObserver:
     async def on_final(self, context: AskContext) -> None:
         async with self._router._cache_stats_lock:
             self._router._cache_stats.request_count += 1
-            if context.cache_entry:
+            if context.code_source == "predefined":
+                self._router._cache_stats.predefined_hit_count += 1
+            elif context.cache_entry:
                 self._router._cache_stats.cache_hit_count += 1
             elif not context.is_observe_or_statistics:
                 self._router._cache_stats.cache_miss_count += 1
@@ -1091,11 +1094,17 @@ class CodeGenRouter(RouterBase):
         # 持久化缓存（pickle 文件，跨运行共用）
         cache_dir = template_cache_dir or os.path.join(Config.HOME_DIR, "codegen_router_cache")
         cache_path = os.path.join(cache_dir, "cache.pkl")
+        self._cache_dir = cache_dir  # 与 cache 同目录，用于保存 cache_stats.jsonl
         self._cache_db = TemplateCacheDB(
             cache_path=cache_path,
             embedding_dims=Config.EMBEDDING_DIMS,
             max_size_per_env=template_cache_max_size,
         )
+        # 每步统计：用于计算 delta 并写入 JSONL
+        self._cache_stats_jsonl_path = os.path.join(cache_dir, "cache_stats.jsonl")
+        self._prev_step_stats: Optional[CacheStats] = None
+        self._step_index: int = 0
+        self._run_id: Optional[str] = None  # 在 init() 时设置，用于区分不同次模拟
 
         # 当前 env 的缓存集（从 DB 加载，在 init() 时填充）
         self._cache_entries: List[CacheEntry] = []
@@ -1181,6 +1190,9 @@ class CodeGenRouter(RouterBase):
         if self._template_cache_enabled:
             self._load_cache_from_db()
 
+        # 为本次模拟生成 run_id，便于在 JSONL 中区分不同次模拟
+        self._run_id = datetime.now().strftime("%Y%m%d_%H%M%S")
+
         # Generate code using LLM if not already done
         if not self._llm_code_generated:
             # Generate observe code using LLM (using same logic as regular code generation)
@@ -1204,8 +1216,60 @@ class CodeGenRouter(RouterBase):
     async def step(self, tick: int, t: datetime):
         """
         Run forward one step for all simulation modules, then output cache statistics.
+        每步结束后将本步的统计指标以 JSONL 形式追加写入缓存目录，便于分析缓存带来的性能提升。
         """
         await super().step(tick, t)
+
+        # 快照当前累计统计，计算本步增量，写入 JSONL（追加模式，支持多次模拟聚合）
+        async with self._cache_stats_lock:
+            current = CacheStats(
+                request_count=self._cache_stats.request_count,
+                predefined_hit_count=self._cache_stats.predefined_hit_count,
+                cache_hit_count=self._cache_stats.cache_hit_count,
+                cache_miss_count=self._cache_stats.cache_miss_count,
+                total_input_tokens=self._cache_stats.total_input_tokens,
+                total_output_tokens=self._cache_stats.total_output_tokens,
+                code_execution_success_count=self._cache_stats.code_execution_success_count,
+                code_execution_failure_count=self._cache_stats.code_execution_failure_count,
+                total_code_retry_count=self._cache_stats.total_code_retry_count,
+            )
+        prev = self._prev_step_stats or CacheStats()
+        delta = CacheStats(
+            request_count=current.request_count - prev.request_count,
+            predefined_hit_count=current.predefined_hit_count - prev.predefined_hit_count,
+            cache_hit_count=current.cache_hit_count - prev.cache_hit_count,
+            cache_miss_count=current.cache_miss_count - prev.cache_miss_count,
+            total_input_tokens=current.total_input_tokens - prev.total_input_tokens,
+            total_output_tokens=current.total_output_tokens - prev.total_output_tokens,
+            code_execution_success_count=current.code_execution_success_count - prev.code_execution_success_count,
+            code_execution_failure_count=current.code_execution_failure_count - prev.code_execution_failure_count,
+            total_code_retry_count=current.total_code_retry_count - prev.total_code_retry_count,
+        )
+        exec_total = delta.code_execution_success_count + delta.code_execution_failure_count
+        code_execution_success_rate = (
+            delta.code_execution_success_count / exec_total if exec_total > 0 else None
+        )
+        record = {
+            "run_id": self._run_id or "",
+            "step": self._step_index,
+            "request_count": delta.request_count,
+            "predefined_hit_count": delta.predefined_hit_count,
+            "cache_hit_count": delta.cache_hit_count,
+            "cache_miss_count": delta.cache_miss_count,
+            "cached_entries_count": len(self._cache_entries),  # 当前已缓存数据条目标数
+            "total_input_tokens": delta.total_input_tokens,
+            "total_output_tokens": delta.total_output_tokens,
+            "code_execution_success_rate": code_execution_success_rate,
+        }
+        try:
+            os.makedirs(self._cache_dir, exist_ok=True)
+            with open(self._cache_stats_jsonl_path, "a", encoding="utf-8") as f:
+                f.write(json.dumps(record, ensure_ascii=False) + "\n")
+        except Exception as e:
+            get_logger().warning(f"Failed to write cache stats JSONL: {e}")
+
+        self._prev_step_stats = current
+        self._step_index += 1
         get_logger().info(self.get_cache_stats_summary())
 
     async def dump(self) -> dict:
@@ -1223,6 +1287,7 @@ class CodeGenRouter(RouterBase):
         async with self._cache_stats_lock:
             base_dump["cache_stats"] = {
                 "request_count": self._cache_stats.request_count,
+                "predefined_hit_count": self._cache_stats.predefined_hit_count,
                 "cache_hit_count": self._cache_stats.cache_hit_count,
                 "cache_miss_count": self._cache_stats.cache_miss_count,
                 "total_input_tokens": self._cache_stats.total_input_tokens,
@@ -1397,6 +1462,7 @@ class CodeGenRouter(RouterBase):
         stats = self._cache_stats
         return f"""Cache Statistics Summary:
 - Total Requests: {stats.request_count}
+- Predefined Hits (observe/statistics): {stats.predefined_hit_count}
 - Cache Hits: {stats.cache_hit_count}
 - Cache Misses: {stats.cache_miss_count}
 - Cache Hit Rate: {stats.cache_hit_rate:.2%}
