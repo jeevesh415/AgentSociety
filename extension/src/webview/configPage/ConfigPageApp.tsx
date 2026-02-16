@@ -12,8 +12,8 @@ import {
   Select,
   Space,
 } from 'antd';
-import { SaveOutlined, KeyOutlined, ApiOutlined, DatabaseOutlined, ThunderboltOutlined, SettingOutlined } from '@ant-design/icons';
-import type { VSCodeAPI, ConfigValues } from './types';
+import { SaveOutlined, KeyOutlined, ApiOutlined, DatabaseOutlined, ThunderboltOutlined, SettingOutlined, FolderOpenOutlined } from '@ant-design/icons';
+import type { VSCodeAPI, ConfigValues, WorkspaceInfo } from './types';
 import 'antd/dist/reset.css';
 
 const { Content } = Layout;
@@ -53,13 +53,14 @@ export const ConfigPageApp: React.FC<ConfigPageAppProps> = ({ vscode }) => {
   const [loading, setLoading] = React.useState(false);
   const [saveSuccess, setSaveSuccess] = React.useState(false);
   const [error, setError] = React.useState<string | null>(null);
+  const [workspaceInfo, setWorkspaceInfo] = React.useState<WorkspaceInfo>({ hasWorkspace: false });
 
   React.useEffect(() => {
     vscode.postMessage({ command: 'requestConfig' });
   }, [vscode]);
 
   React.useEffect(() => {
-    const handleMessage = (event: MessageEvent<{ command: string; config?: Partial<ConfigValues> }>) => {
+    const handleMessage = (event: MessageEvent<{ command: string; config?: Partial<ConfigValues>; workspaceInfo?: WorkspaceInfo }>) => {
       const message = event.data;
 
       if (message.command === 'initialConfig') {
@@ -68,6 +69,8 @@ export const ConfigPageApp: React.FC<ConfigPageAppProps> = ({ vscode }) => {
           ...DEFAULT_VALUES,
           ...config,
         });
+      } else if (message.command === 'workspaceInfo') {
+        setWorkspaceInfo(message.workspaceInfo || { hasWorkspace: false });
       } else if (message.command === 'saveResult') {
         setLoading(false);
         const msg = message as { success?: boolean; error?: string };
@@ -86,6 +89,10 @@ export const ConfigPageApp: React.FC<ConfigPageAppProps> = ({ vscode }) => {
   }, [form, vscode]);
 
   const handleSave = () => {
+    if (!workspaceInfo.hasWorkspace) {
+      setError('请先打开一个工作区文件夹（文件夹），配置将保存在当前工作区中。');
+      return;
+    }
     form.validateFields().then((values) => {
       setLoading(true);
       setError(null);
@@ -117,6 +124,26 @@ export const ConfigPageApp: React.FC<ConfigPageAppProps> = ({ vscode }) => {
             </Button>
           </Space>
         </div>
+
+        {!workspaceInfo.hasWorkspace && (
+          <Alert
+            message="未检测到工作区"
+            description="配置将保存在当前工作区的 .vscode/settings.json 文件中。请先打开一个工作区文件夹（File > Open Folder）。"
+            type="warning"
+            showIcon
+            action={
+              <Button
+                type="primary"
+                size="small"
+                icon={<FolderOpenOutlined />}
+                onClick={() => vscode.postMessage({ command: 'openFolder' })}
+              >
+                打开文件夹
+              </Button>
+            }
+            style={{ marginBottom: 16 }}
+          />
+        )}
 
         {saveSuccess && (
           <Alert

@@ -37,3 +37,8 @@ export interface ConfigValues {
   miroflowDefaultLlm: string;
   miroflowDefaultAgent: string;
 }
+
+export interface WorkspaceInfo {
+  hasWorkspace: boolean;
+  workspacePath?: string;
+}

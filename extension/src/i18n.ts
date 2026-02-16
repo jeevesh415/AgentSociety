@@ -142,6 +142,8 @@ const translations: Record<string, Record<string, string>> = {
 
     // configPageViewProvider.ts
     'configPage.title': 'AI Social Scientist 配置',
+    'configPage.noWorkspace': '请先打开一个工作区文件夹。配置将保存在当前工作区中。',
+    'configPage.openWorkspace': '打开工作区',
   },
   'en-US': {
     // extension.ts
@@ -276,6 +278,8 @@ const translations: Record<string, Record<string, string>> = {
 
     // configPageViewProvider.ts
     'configPage.title': 'AI Social Scientist Configuration',
+    'configPage.noWorkspace': 'Please open a workspace folder first. Configuration will be saved in the current workspace.',
+    'configPage.openWorkspace': 'Open Workspace',
   },
 };
 

@@ -116,7 +116,14 @@ export class BackendManager {
     // 确定工作目录 - 始终使用工作区相对路径
     const workspaceFolder = vscode.workspace.workspaceFolders?.[0];
     if (!workspaceFolder) {
-      throw new Error('No workspace folder found. Please open a workspace first.');
+      // 没有工作区时返回一个默认配置，不抛出错误
+      this.log('No workspace folder found, using default configuration');
+      return {
+        pythonPath,
+        workingDirectory: '',
+        autoStart: false,  // 没有工作区时不自动启动
+        env: {}
+      };
     }
     const workingDirectory = workspaceFolder.uri.fsPath;
 

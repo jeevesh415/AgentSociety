@@ -8,7 +8,7 @@
 import * as vscode from 'vscode';
 import * as path from 'path';
 import { localize } from './i18n';
-import type { ConfigValues } from './webview/configPage/types';
+import type { ConfigValues, WorkspaceInfo } from './webview/configPage/types';
 
 export class ConfigPageViewProvider {
   public static currentPanel: ConfigPageViewProvider | undefined;
@@ -65,6 +65,9 @@ export class ConfigPageViewProvider {
           case 'openVscodeSettings':
             await vscode.commands.executeCommand('workbench.action.openSettings', '@aiSocialScientist');
             break;
+          case 'openFolder':
+            await vscode.commands.executeCommand('workbench.action.files.openFolder');
+            break;
         }
       },
       null,
@@ -101,78 +104,98 @@ export class ConfigPageViewProvider {
       miroflowDefaultAgent: (envConfig?.miroflowDefaultAgent as string) || 'mirothinker_v1.5_keep5_max200'
     };
 
+    // 获取工作区信息
+    const workspaceInfo: WorkspaceInfo = {
+      hasWorkspace: !!(vscode.workspace.workspaceFolders && vscode.workspace.workspaceFolders.length > 0),
+      workspacePath: vscode.workspace.workspaceFolders?.[0]?.uri.fsPath
+    };
+
     this._panel.webview.postMessage({
       command: 'initialConfig',
       config: configValues
+    });
+
+    this._panel.webview.postMessage({
+      command: 'workspaceInfo',
+      workspaceInfo: workspaceInfo
     });
   }
 
   private async _handleSaveConfig(config: Partial<ConfigValues>): Promise<void> {
     try {
+      // 检查是否有工作区
+      if (!vscode.workspace.workspaceFolders || vscode.workspace.workspaceFolders.length === 0) {
+        this._panel.webview.postMessage({
+          command: 'saveResult',
+          success: false,
+          error: localize('configPage.noWorkspace')
+        });
+        return;
+      }
       const vscodeConfig = vscode.workspace.getConfiguration('aiSocialScientist');
 
       if (config.llmApiKey !== undefined) {
-        await vscodeConfig.update('env.llmApiKey', config.llmApiKey, vscode.ConfigurationTarget.Global);
+        await vscodeConfig.update('env.llmApiKey', config.llmApiKey, vscode.ConfigurationTarget.Workspace);
       }
       if (config.backendHost !== undefined) {
-        await vscodeConfig.update('env.backendHost', config.backendHost, vscode.ConfigurationTarget.Global);
+        await vscodeConfig.update('env.backendHost', config.backendHost, vscode.ConfigurationTarget.Workspace);
       }
       if (config.backendPort !== undefined) {
-        await vscodeConfig.update('env.backendPort', config.backendPort, vscode.ConfigurationTarget.Global);
+        await vscodeConfig.update('env.backendPort', config.backendPort, vscode.ConfigurationTarget.Workspace);
       }
       if (config.pythonPath !== undefined) {
-        await vscodeConfig.update('backend.pythonPath', config.pythonPath, vscode.ConfigurationTarget.Global);
+        await vscodeConfig.update('backend.pythonPath', config.pythonPath, vscode.ConfigurationTarget.Workspace);
       }
       if (config.llmApiBase !== undefined) {
-        await vscodeConfig.update('env.llmApiBase', config.llmApiBase, vscode.ConfigurationTarget.Global);
+        await vscodeConfig.update('env.llmApiBase', config.llmApiBase, vscode.ConfigurationTarget.Workspace);
       }
       if (config.llmModel !== undefined) {
-        await vscodeConfig.update('env.llmModel', config.llmModel, vscode.ConfigurationTarget.Global);
+        await vscodeConfig.update('env.llmModel', config.llmModel, vscode.ConfigurationTarget.Workspace);
       }
       if (config.backendLogLevel !== undefined) {
-        await vscodeConfig.update('env.backendLogLevel', config.backendLogLevel, vscode.ConfigurationTarget.Global);
+        await vscodeConfig.update('env.backendLogLevel', config.backendLogLevel, vscode.ConfigurationTarget.Workspace);
       }
       if (config.coderLlmApiKey !== undefined) {
-        await vscodeConfig.update('env.coderLlmApiKey', config.coderLlmApiKey, vscode.ConfigurationTarget.Global);
+        await vscodeConfig.update('env.coderLlmApiKey', config.coderLlmApiKey, vscode.ConfigurationTarget.Workspace);
       }
       if (config.coderLlmApiBase !== undefined) {
-        await vscodeConfig.update('env.coderLlmApiBase', config.coderLlmApiBase, vscode.ConfigurationTarget.Global);
+        await vscodeConfig.update('env.coderLlmApiBase', config.coderLlmApiBase, vscode.ConfigurationTarget.Workspace);
       }
       if (config.coderLlmModel !== undefined) {
-        await vscodeConfig.update('env.coderLlmModel', config.coderLlmModel, vscode.ConfigurationTarget.Global);
+        await vscodeConfig.update('env.coderLlmModel', config.coderLlmModel, vscode.ConfigurationTarget.Workspace);
       }
       if (config.nanoLlmApiKey !== undefined) {
-        await vscodeConfig.update('env.nanoLlmApiKey', config.nanoLlmApiKey, vscode.ConfigurationTarget.Global);
+        await vscodeConfig.update('env.nanoLlmApiKey', config.nanoLlmApiKey, vscode.ConfigurationTarget.Workspace);
       }
       if (config.nanoLlmApiBase !== undefined) {
-        await vscodeConfig.update('env.nanoLlmApiBase', config.nanoLlmApiBase, vscode.ConfigurationTarget.Global);
+        await vscodeConfig.update('env.nanoLlmApiBase', config.nanoLlmApiBase, vscode.ConfigurationTarget.Workspace);
       }
       if (config.nanoLlmModel !== undefined) {
-        await vscodeConfig.update('env.nanoLlmModel', config.nanoLlmModel, vscode.ConfigurationTarget.Global);
+        await vscodeConfig.update('env.nanoLlmModel', config.nanoLlmModel, vscode.ConfigurationTarget.Workspace);
       }
       if (config.embeddingApiKey !== undefined) {
-        await vscodeConfig.update('env.embeddingApiKey', config.embeddingApiKey, vscode.ConfigurationTarget.Global);
+        await vscodeConfig.update('env.embeddingApiKey', config.embeddingApiKey, vscode.ConfigurationTarget.Workspace);
       }
       if (config.embeddingApiBase !== undefined) {
-        await vscodeConfig.update('env.embeddingApiBase', config.embeddingApiBase, vscode.ConfigurationTarget.Global);
+        await vscodeConfig.update('env.embeddingApiBase', config.embeddingApiBase, vscode.ConfigurationTarget.Workspace);
       }
       if (config.embeddingModel !== undefined) {
-        await vscodeConfig.update('env.embeddingModel', config.embeddingModel, vscode.ConfigurationTarget.Global);
+        await vscodeConfig.update('env.embeddingModel', config.embeddingModel, vscode.ConfigurationTarget.Workspace);
       }
       if (config.embeddingDims !== undefined) {
-        await vscodeConfig.update('env.embeddingDims', config.embeddingDims, vscode.ConfigurationTarget.Global);
+        await vscodeConfig.update('env.embeddingDims', config.embeddingDims, vscode.ConfigurationTarget.Workspace);
       }
       if (config.miroflowMcpUrl !== undefined) {
-        await vscodeConfig.update('env.miroflowMcpUrl', config.miroflowMcpUrl, vscode.ConfigurationTarget.Global);
+        await vscodeConfig.update('env.miroflowMcpUrl', config.miroflowMcpUrl, vscode.ConfigurationTarget.Workspace);
       }
       if (config.miroflowMcpToken !== undefined) {
-        await vscodeConfig.update('env.miroflowMcpToken', config.miroflowMcpToken, vscode.ConfigurationTarget.Global);
+        await vscodeConfig.update('env.miroflowMcpToken', config.miroflowMcpToken, vscode.ConfigurationTarget.Workspace);
       }
       if (config.miroflowDefaultLlm !== undefined) {
-        await vscodeConfig.update('env.miroflowDefaultLlm', config.miroflowDefaultLlm, vscode.ConfigurationTarget.Global);
+        await vscodeConfig.update('env.miroflowDefaultLlm', config.miroflowDefaultLlm, vscode.ConfigurationTarget.Workspace);
       }
       if (config.miroflowDefaultAgent !== undefined) {
-        await vscodeConfig.update('env.miroflowDefaultAgent', config.miroflowDefaultAgent, vscode.ConfigurationTarget.Global);
+        await vscodeConfig.update('env.miroflowDefaultAgent', config.miroflowDefaultAgent, vscode.ConfigurationTarget.Workspace);
       }
 
       // 标记已完成初始配置
