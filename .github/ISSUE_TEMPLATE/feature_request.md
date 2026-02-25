@@ -1,20 +1,27 @@
 ---
-name: Feature request
-about: 提出新想法 Suggest an idea for this project
-title: "[Feat] Change this to the feature"
+name: Feature Request
+about: Suggest an enhancement for AgentSociety 2
+title: '[FEATURE] '
 labels: enhancement
 assignees: ''
-
 ---
 
-**描述你的想法和解决方案 Describe your idea and possible solutions**
-> 给出对你的想法的清晰简洁的描述
-> A clear and concise description of what you want to happen.
+## Feature Description
 
-**附加信息 Additional context**
-> 增加任何其他关于这个想法的内容或截图
-> Add any other context or screenshots about the feature request here.
+A clear and concise description of the feature you'd like to see added.
 
-**最后一个问题 Last Question**
-你是否愿意加入我们来实现这个想法？[是/否/对于我太难了/已经加入]
-Would you like to join us and implement the idea? [Yes/No/It is too hard/Joined]
+## Use Case
+
+Please describe the use case for this feature. Why would it be useful?
+
+## Proposed Solution
+
+If you have an idea for how this should be implemented, please describe it here.
+
+## Alternative Solutions
+
+Describe any alternative solutions or features you've considered.
+
+## Additional Context
+
+Add any other context, mockups, or examples about the feature request here.

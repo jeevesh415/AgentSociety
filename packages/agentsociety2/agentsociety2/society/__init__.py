@@ -1,4 +1,5 @@
 from .society import AgentSociety
+from .helper import AgentSocietyHelper
 from .models import (
     EnvModuleConfig,
     AgentConfig,
@@ -13,6 +14,7 @@ from .models import (
 
 __all__ = [
     "AgentSociety",
+    "AgentSocietyHelper",
     "EnvModuleConfig",
     "AgentConfig",
     "InitConfig",

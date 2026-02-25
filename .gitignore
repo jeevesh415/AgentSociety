@@ -45,3 +45,10 @@ result_volunteer_dilemma_person_agent/
 game_log/
 *.json
 .vscode/
+*.template
+NEXT_STEPS.md
+PUBLISH_CHECKLIST.md
+
+# Sphinx build outputs
+packages/agentsociety2/docs/_build/
+docs_v1/_build/
