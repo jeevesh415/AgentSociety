@@ -28,11 +28,11 @@ from agentsociety2.logger import get_logger
 
 logger = get_logger()
 
-# Miro Web Research（外部 MCP）是可选功能，通过环境变量控制
-# 如果设置了 MIROFLOW_MCP_URL 环境变量，则尝试导入和注册
+
+# 如果设置了 WEB_SEARCH_API_URL 环境变量，则尝试导入和注册
 def _should_enable_mirothinker() -> bool:
     """检查是否应该启用 Miro Web Research（外部 MCP）"""
-    mcp_url = os.environ.get("MIROFLOW_MCP_URL")
+    mcp_url = os.environ.get("WEB_SEARCH_API_URL")
     return mcp_url is not None and mcp_url.strip() != ""
 
 
@@ -40,11 +40,12 @@ def _try_import_mirothinker():
     """尝试导入 Miro Web Research 工具"""
     try:
         from agentsociety2.backend.tools.miro_web_research import MiroWebResearchTool
+
         return MiroWebResearchTool
     except ImportError as e:
         logger.warning(
             "Miro Web Research（外部 MCP）不可用（可选功能）。"
-            "如需使用，请配置 MIROFLOW_MCP_URL 并确保依赖已安装。"
+            "如需使用，请配置 WEB_SEARCH_API_URL 并确保依赖已安装。"
             f"错误: {e}"
         )
         return None
@@ -85,8 +86,8 @@ class ToolRegistry:
             # 数据分析工具
             DataAnalysisTool,
         ]
-        
-        # 只有在环境变量配置了 MIROFLOW_MCP_URL 时才启用
+
+        # 只有在环境变量配置了 WEB_SEARCH_API_URL 时才启用
         if _should_enable_mirothinker():
             MiroWebResearchTool = _try_import_mirothinker()
             if MiroWebResearchTool is not None:
@@ -94,7 +95,7 @@ class ToolRegistry:
                 logger.info("Miro Web Research（外部 MCP）已启用")
             else:
                 logger.warning(
-                    "检测到 MIROFLOW_MCP_URL 环境变量，但 Miro Web Research（外部 MCP）不可用。"
+                    "检测到 WEB_SEARCH_API_URL 环境变量，但 Miro Web Research（外部 MCP）不可用。"
                 )
         for tool_class in tool_classes:
             # 创建默认实例用于获取schema

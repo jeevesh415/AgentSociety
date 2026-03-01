@@ -57,5 +57,10 @@ module.exports = {
   externals: {
     vscode: 'commonjs vscode', // 排除 vscode 模块
   },
+  performance: {
+    maxAssetSize: 5 * 1024 * 1024,      // 5 MiB
+    maxEntrypointSize: 5 * 1024 * 1024, // 5 MiB
+    hints: false,
+  },
 };
 

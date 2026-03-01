@@ -160,9 +160,9 @@ export class BackendManager {
     if (envConfig?.embeddingModel) env.AGENTSOCIETY_EMBEDDING_MODEL = envConfig.embeddingModel;
     if (envConfig?.embeddingDims) env.AGENTSOCIETY_EMBEDDING_DIMS = String(envConfig.embeddingDims);
 
-    // MiroFlow MCP 配置
-    if (envConfig?.miroflowMcpUrl) env.MIROFLOW_MCP_URL = envConfig.miroflowMcpUrl;
-    if (envConfig?.miroflowMcpToken) env.MIROFLOW_MCP_TOKEN = envConfig.miroflowMcpToken;
+    // Web Search 配置
+    if (envConfig?.webSearchApiUrl) env.WEB_SEARCH_API_URL = envConfig.webSearchApiUrl;
+    if (envConfig?.webSearchApiToken) env.WEB_SEARCH_API_TOKEN = envConfig.webSearchApiToken;
     if (envConfig?.miroflowDefaultLlm) env.MIROFLOW_DEFAULT_LLM = envConfig.miroflowDefaultLlm;
     if (envConfig?.miroflowDefaultAgent) env.MIROFLOW_DEFAULT_AGENT = envConfig.miroflowDefaultAgent;
 

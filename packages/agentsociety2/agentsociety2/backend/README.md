@@ -311,8 +311,8 @@ const result = await response.json();
 `miro_web_research` 支持通过外部 MCP Server 调用远端的 `run_task` 来完成联网检索/阅读任务。
 
 **必需环境变量：**
-- `MIROFLOW_MCP_URL`：MCP 服务器 URL
-- `MIROFLOW_MCP_TOKEN`：Bearer token 用于认证
+- `WEB_SEARCH_API_URL`：Web 搜索 / MCP 服务器 URL
+- `WEB_SEARCH_API_TOKEN`：Bearer token 用于认证
 
 ## 故障排查
 
