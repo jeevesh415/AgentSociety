@@ -1,7 +1,7 @@
 """外部 MCP 工具：`miro_web_research`。
 
 通过 HTTP MCP 调用远程的 `run_task` 工具完成联网检索/阅读任务。
-未配置 `MIROFLOW_MCP_URL` 时该工具不会被注册。
+未配置 `WEB_SEARCH_API_URL` 时该工具不会被注册。
 """
 
 from __future__ import annotations
@@ -19,8 +19,8 @@ from agentsociety2.logger import get_logger
 
 logger = get_logger()
 
-MCP_URL = Config.MIROFLOW_MCP_URL
-MCP_TOKEN = Config.MIROFLOW_MCP_TOKEN
+MCP_URL = Config.WEB_SEARCH_API_URL
+MCP_TOKEN = Config.WEB_SEARCH_API_TOKEN
 DEFAULT_LLM = Config.MIROFLOW_DEFAULT_LLM
 DEFAULT_AGENT = Config.MIROFLOW_DEFAULT_AGENT
 
@@ -41,9 +41,13 @@ class MiroWebResearchTool(BaseTool):
         )
 
         if not MCP_URL:
-            raise ValueError("MIROFLOW_MCP_URL 未设置，无法使用 miro_web_research 外部 MCP 工具。")
+            raise ValueError(
+                "WEB_SEARCH_API_URL 未设置，无法使用 miro_web_research 外部 MCP 工具。"
+            )
         if not MCP_TOKEN:
-            raise ValueError("MIROFLOW_MCP_TOKEN 未设置，无法使用 miro_web_research 外部 MCP 工具。")
+            raise ValueError(
+                "WEB_SEARCH_API_TOKEN 未设置，无法使用 miro_web_research 外部 MCP 工具。"
+            )
 
     def get_name(self) -> str:
         return "miro_web_research"
@@ -51,7 +55,7 @@ class MiroWebResearchTool(BaseTool):
     def get_description(self) -> str:
         return (
             "Miro Web Research：通过外部 MCP Server 执行联网搜索/阅读任务。\n\n"
-            "需要配置 MIROFLOW_MCP_URL 和 MIROFLOW_MCP_TOKEN。"
+            "需要配置 WEB_SEARCH_API_URL 和 WEB_SEARCH_API_TOKEN。"
         )
 
     def get_parameters_schema(self) -> Dict[str, Any]:
@@ -77,7 +81,9 @@ class MiroWebResearchTool(BaseTool):
     async def execute(self, arguments: Dict[str, Any]) -> ToolResult:
         query = (arguments.get("query") or "").strip()
         if not query:
-            return ToolResult(success=False, content="查询内容不能为空", error="query is required")
+            return ToolResult(
+                success=False, content="查询内容不能为空", error="query is required"
+            )
 
         llm = (arguments.get("llm") or DEFAULT_LLM).strip()
         agent = (arguments.get("agent") or DEFAULT_AGENT).strip()
@@ -96,7 +102,11 @@ class MiroWebResearchTool(BaseTool):
         logger.info(f"Miro MCP: url={MCP_URL}, task_id={task_id}")
 
         try:
-            async with streamablehttp_client(MCP_URL, headers=headers) as (read, write, _):
+            async with streamablehttp_client(MCP_URL, headers=headers) as (
+                read,
+                write,
+                _,
+            ):
                 async with ClientSession(read, write) as session:
                     await session.initialize()
                     tools = await session.list_tools()
@@ -126,8 +136,14 @@ class MiroWebResearchTool(BaseTool):
                     )
 
             if result.isError:
-                error_blocks = [block.text for block in result.content if hasattr(block, "text") and block.text]
-                error_msg = "\n".join(error_blocks).strip() if error_blocks else "未知错误"
+                error_blocks = [
+                    block.text
+                    for block in result.content
+                    if hasattr(block, "text") and block.text
+                ]
+                error_msg = (
+                    "\n".join(error_blocks).strip() if error_blocks else "未知错误"
+                )
                 logger.error(f"Miro MCP run_task 返回错误: {error_msg}")
                 return ToolResult(
                     success=False,
@@ -135,7 +151,11 @@ class MiroWebResearchTool(BaseTool):
                     error=error_msg,
                 )
 
-            blocks = [block.text for block in result.content if hasattr(block, "text") and block.text]
+            blocks = [
+                block.text
+                for block in result.content
+                if hasattr(block, "text") and block.text
+            ]
             content = "\n\n".join(blocks).strip() if blocks else "远端 MCP 返回为空"
 
         except Exception as e:
@@ -166,4 +186,3 @@ class MiroWebResearchTool(BaseTool):
                 "agent": agent,
             },
         )
-

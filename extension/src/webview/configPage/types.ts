@@ -31,9 +31,9 @@ export interface ConfigValues {
   embeddingApiBase: string;
   embeddingModel: string;
   embeddingDims: number;
-  // MiroFlow / MiroThinker
-  miroflowMcpUrl: string;
-  miroflowMcpToken: string;
+  // Web Search
+  webSearchApiUrl: string;
+  webSearchApiToken: string;
   miroflowDefaultLlm: string;
   miroflowDefaultAgent: string;
 }

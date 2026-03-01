@@ -242,21 +242,21 @@ class Config:
     Common values are 384, 512, 768, 1024, or 1536 depending on the model.
     """
 
-    # MiroFlow MCP settings
+    # Web Search API settings
 
-    MIROFLOW_MCP_URL: str = os.getenv("MIROFLOW_MCP_URL", "").strip()
+    WEB_SEARCH_API_URL: str = os.getenv("WEB_SEARCH_API_URL", "").strip()
     """
-    Base URL for the MiroFlow MCP HTTP endpoint.
+    Base URL for the Web Search / MiroFlow MCP HTTP endpoint.
 
-    Environment variable: MIROFLOW_MCP_URL
-    Example: "http://127.0.0.1:18001/mcp/"
+    Environment variable: WEB_SEARCH_API_URL
+    Example: "http://localhost:8003/api/v1/search"
     """
 
-    MIROFLOW_MCP_TOKEN: str = os.getenv("MIROFLOW_MCP_TOKEN", "").strip()
+    WEB_SEARCH_API_TOKEN: str = os.getenv("WEB_SEARCH_API_TOKEN", "").strip()
     """
-    Authentication token for the MiroFlow MCP server.
+    Authentication token for the Web Search / MiroFlow MCP server.
 
-    Environment variable: MIROFLOW_MCP_TOKEN
+    Environment variable: WEB_SEARCH_API_TOKEN
     The token is sent as a Bearer token in the Authorization header.
     """
 
@@ -303,11 +303,11 @@ class Config:
             coder_api_key = cls.CODER_LLM_API_KEY
             coder_api_base = cls.CODER_LLM_API_BASE
             coder_model = cls.CODER_LLM_MODEL
-            
+
             default_api_key = cls.LLM_API_KEY
             default_api_base = cls.LLM_API_BASE
             default_model = cls.LLM_MODEL
-            
+
             nano_api_key = cls.NANO_LLM_API_KEY
             nano_api_base = cls.NANO_LLM_API_BASE
             nano_model = cls.NANO_LLM_MODEL
@@ -355,16 +355,14 @@ class Config:
                     },
                 },
             ]
-            
+
             # Configure fallback chain: coder -> default -> nano
             # fallbacks should be a list of dicts, where each dict maps primary model to fallback models
-            fallbacks = [
-                {coder_model: [default_model, nano_model]}
-            ]
-            
+            fallbacks = [{coder_model: [default_model, nano_model]}]
+
             print(f"Model list for coder (with fallbacks): {model_list}")
             print(f"Fallbacks: {fallbacks}")
-            
+
             return Router(
                 model_list=model_list,
                 fallbacks=fallbacks,
@@ -376,7 +374,7 @@ class Config:
             default_api_key = cls.LLM_API_KEY
             default_api_base = cls.LLM_API_BASE
             default_model = cls.LLM_MODEL
-            
+
             nano_api_key = cls.NANO_LLM_API_KEY
             nano_api_base = cls.NANO_LLM_API_BASE
             nano_model = cls.NANO_LLM_MODEL
@@ -411,15 +409,13 @@ class Config:
                     },
                 },
             ]
-            
+
             # Configure fallback chain: default -> nano
-            fallbacks = [
-                {default_model: [nano_model]}
-            ]
-            
+            fallbacks = [{default_model: [nano_model]}]
+
             print(f"Model list for default (with fallbacks): {model_list}")
             print(f"Fallbacks: {fallbacks}")
-            
+
             return Router(
                 model_list=model_list,
                 fallbacks=fallbacks,
@@ -468,7 +464,9 @@ class Config:
                 "provider": "chroma",
                 "config": {
                     "collection_name": f"memories_{id}_{random_suffix}",
-                    "path": os.path.join(cls.HOME_DIR, f"memories_{id}_{random_suffix}"),
+                    "path": os.path.join(
+                        cls.HOME_DIR, f"memories_{id}_{random_suffix}"
+                    ),
                 },
             },
             "storage_config": {

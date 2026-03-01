@@ -38,8 +38,8 @@ const DEFAULT_VALUES: ConfigValues = {
   embeddingApiBase: '',
   embeddingModel: 'bge-m3',
   embeddingDims: 1024,
-  miroflowMcpUrl: '',
-  miroflowMcpToken: '',
+  webSearchApiUrl: '',
+  webSearchApiToken: '',
   miroflowDefaultLlm: 'qwen-3',
   miroflowDefaultAgent: 'mirothinker_v1.5_keep5_max200',
 };
@@ -293,10 +293,10 @@ export const ConfigPageApp: React.FC<ConfigPageAppProps> = ({ vscode }) => {
               <Text type="secondary" style={{ display: 'block', marginBottom: 12 }}>
                 MiroFlow MCP 服务配置，用于高级推理任务。不使用 MiroFlow 可留空。
               </Text>
-              <Form.Item name="miroflowMcpUrl" label="MCP 服务 URL">
-                <Input placeholder="http://127.0.0.1:18001/mcp/" />
+              <Form.Item name="webSearchApiUrl" label="Web 搜索 API URL">
+                <Input placeholder="http://localhost:8003/mcp 或 http://localhost:8003/api/v1/search" />
               </Form.Item>
-              <Form.Item name="miroflowMcpToken" label="MCP 认证令牌">
+              <Form.Item name="webSearchApiToken" label="Web 搜索 API 认证令牌">
                 <Input.Password placeholder="Bearer token" autoComplete="off" />
               </Form.Item>
               <Form.Item name="miroflowDefaultLlm" label="默认 LLM 模型">

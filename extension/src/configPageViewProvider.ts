@@ -98,8 +98,8 @@ export class ConfigPageViewProvider {
       embeddingApiBase: (envConfig?.embeddingApiBase as string) || '',
       embeddingModel: (envConfig?.embeddingModel as string) || 'bge-m3',
       embeddingDims: (envConfig?.embeddingDims as number) ?? 1024,
-      miroflowMcpUrl: (envConfig?.miroflowMcpUrl as string) || '',
-      miroflowMcpToken: (envConfig?.miroflowMcpToken as string) || '',
+      webSearchApiUrl: (envConfig?.webSearchApiUrl as string) || '',
+      webSearchApiToken: (envConfig?.webSearchApiToken as string) || '',
       miroflowDefaultLlm: (envConfig?.miroflowDefaultLlm as string) || 'qwen-3',
       miroflowDefaultAgent: (envConfig?.miroflowDefaultAgent as string) || 'mirothinker_v1.5_keep5_max200'
     };
@@ -185,11 +185,11 @@ export class ConfigPageViewProvider {
       if (config.embeddingDims !== undefined) {
         await vscodeConfig.update('env.embeddingDims', config.embeddingDims, vscode.ConfigurationTarget.Workspace);
       }
-      if (config.miroflowMcpUrl !== undefined) {
-        await vscodeConfig.update('env.miroflowMcpUrl', config.miroflowMcpUrl, vscode.ConfigurationTarget.Workspace);
+      if (config.webSearchApiUrl !== undefined) {
+        await vscodeConfig.update('env.webSearchApiUrl', config.webSearchApiUrl, vscode.ConfigurationTarget.Workspace);
       }
-      if (config.miroflowMcpToken !== undefined) {
-        await vscodeConfig.update('env.miroflowMcpToken', config.miroflowMcpToken, vscode.ConfigurationTarget.Workspace);
+      if (config.webSearchApiToken !== undefined) {
+        await vscodeConfig.update('env.webSearchApiToken', config.webSearchApiToken, vscode.ConfigurationTarget.Workspace);
       }
       if (config.miroflowDefaultLlm !== undefined) {
         await vscodeConfig.update('env.miroflowDefaultLlm', config.miroflowDefaultLlm, vscode.ConfigurationTarget.Workspace);
