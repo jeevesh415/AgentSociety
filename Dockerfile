@@ -30,7 +30,14 @@ RUN vsce package --out /app/extension.vsix
 # Stage 2: Python runtime with extension
 FROM python:3.12
 
-RUN apt-get update && apt-get install -y curl locales && rm -rf /var/lib/apt/lists/*
+RUN apt-get update && apt-get install -y \
+    curl \
+    locales \
+    texlive-latex-recommended \
+    texlive-latex-extra \
+    texlive-fonts-recommended \
+    texlive-fonts-extra \
+    && rm -rf /var/lib/apt/lists/*
 
 WORKDIR /app
 

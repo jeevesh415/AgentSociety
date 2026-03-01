@@ -24,6 +24,7 @@ from agentsociety2.backend.tools.file_system import (
 from agentsociety2.backend.tools.write_todo import WriteTodoTool
 from agentsociety2.backend.tools.hypothesis import HypothesisTool
 from agentsociety2.backend.tools.data_analysis import DataAnalysisTool
+from agentsociety2.backend.tools.generate_paper import GeneratePaperTool
 from agentsociety2.logger import get_logger
 
 logger = get_logger()
@@ -84,6 +85,8 @@ class ToolRegistry:
             HypothesisTool,
             # 数据分析工具
             DataAnalysisTool,
+            # 分析报告排版成 PDF（EasyPaper，可选 LLM 合成 meta）
+            GeneratePaperTool,
         ]
         
         # 只有在环境变量配置了 MIROFLOW_MCP_URL 时才启用

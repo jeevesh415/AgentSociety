@@ -22,12 +22,20 @@
             "content": "我想研究社交媒体对政治观点的影响"
         }
     ],
+    "workspace_path": "/path/to/your/workspace",
     "enabled_tools": null,
     "max_turns": 10,
     "temperature": 0.7,
     "stream": false
 }
 ```
+
+**请求字段说明**:
+- `messages` (必需): 对话消息列表，多轮时需包含完整历史（含 assistant 的 tool_calls 与 tool 的 content）
+- `workspace_path` (必需): 工作区根目录路径；所有涉及文件/实验的工具（如 data_analysis、synthesize_paper_metadata、generate_paper、hypothesis、run_experiment 等）均基于此路径
+- `enabled_tools` (可选): 逗号分隔的工具名列表，限制本轮可用工具；null 表示使用全部已注册工具
+- `max_turns`: 最大对话轮数（含工具调用）
+- `temperature`, `stream`: 与 LLM 行为、返回方式相关
 
 **消息格式**:
 - `role`: `"system" | "user" | "assistant" | "tool"`
@@ -298,10 +306,43 @@ HTTP状态码：
 - `400`: 请求错误
 - `500`: 服务器内部错误
 
+## 分析到论文生成流程（由 Chatbot 驱动）
+
+从「实验分析」到「论文 meta 合成」再到「生成 PDF」的整条链路，均由 **Chatbot（LLM）通过同一对话接口自主决定调用哪些工具、以何种顺序执行**。前端只需调用 `POST /api/v1/chat/completion` 并传入 `workspace_path` 与用户消息，无需写死流程。
+
+**相关工具**（均由 LLM 按需选择）:
+- **data_analysis**: 对指定 hypothesis/experiment 做单实验分析，生成 `analysis_report.md`、`data/analysis_result.json`、`assets/` 等
+- **generate_paper**: 将分析报告排版成论文 PDF（EasyPaper）。默认 `use_synthesis=true` 时，工具内先由 LLM 根据 TOPIC、HYPOTHESIS、分析报告等填写论文 meta，再提交 EasyPaper；`use_synthesis=false` 时则用固定映射构建 meta 后提交
+
+**典型对话示例**（用户一句，Chatbot 可能多轮调用工具）:
+
+```python
+response = requests.post(
+    "http://localhost:8001/api/v1/chat/completion",
+    json={
+        "messages": [
+            {"role": "user", "content": "帮我分析 hypothesis 1 的 experiment 1，然后用 EasyPaper 生成一篇论文 PDF"}
+        ],
+        "workspace_path": "/home/me/project/agentsociety/workspace",
+        "max_turns": 20,
+        "stream": False
+    }
+)
+# Chatbot 可能依次自主调用：
+# 1. data_analysis(hypothesis_id="1", experiment_id="1")
+# 2. generate_paper(hypothesis_id="1", experiment_id="1")  # 默认 use_synthesis=true，工具内完成 meta 合成 + 生成 PDF
+# 最终返回 final_answer 与完整 messages（含各次工具调用及结果）
+```
+
+是否传 `use_synthesis`、`synthesis_instructions` 等，均由 **LLM 根据用户意图与上下文决定**，无需在请求中显式指定步骤。
+
+---
+
 ## 注意事项
 
 1. **消息历史**: 多轮对话需要传递完整的消息历史，包括工具调用和结果
-2. **工具选择**: LLM会根据消息内容自主选择工具，无需手动指定
-3. **对话轮数**: `max_turns` 控制最大对话轮数，防止无限循环
-4. **工具参数**: LLM会自动构建工具参数，无需手动构造
-5. **异步处理**: 所有API都是异步的，可能需要较长时间（特别是LLM调用）
+2. **工具选择**: LLM 会根据消息内容**自主选择**工具及调用顺序，无需在请求中指定流程；分析、合成 meta、生成论文等均由 Chatbot 决定
+3. **workspace_path**: 每次请求必须提供正确的工作区路径，工具才能正确读写实验与报告
+4. **对话轮数**: `max_turns` 控制最大对话轮数，防止无限循环
+5. **工具参数**: LLM 会自动构建工具参数（如 hypothesis_id、experiment_id），无需手动构造
+6. **异步处理**: 所有 API 均为异步，分析/生成论文等可能耗时较长
