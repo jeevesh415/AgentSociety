@@ -326,6 +326,33 @@
           "description": "MiroFlow MCP任务使用的默认Agent配置名称",
           "markdownDescription": "MiroFlow MCP任务使用的默认Agent配置名称。默认为 `mirothinker_v1.5_keep5_max200`。对应环境变量 `MIROFLOW_DEFAULT_AGENT`。"
         },
+        "aiSocialScientist.env.easypaperApiUrl": {
+          "type": "string",
+          "default": "",
+          "description": "EasyPaper 服务 API URL（可选）",
+          "markdownDescription": "EasyPaper 论文排版服务的 API 地址（需单独部署，见 https://github.com/Aph-xin/EasyPaper）。留空时默认 `http://localhost:8004`。对应环境变量 `EASYPAPER_API_URL`。"
+        },
+        "aiSocialScientist.env.easypaperLlmApiKey": {
+          "type": "string",
+          "default": "",
+          "description": "EasyPaper 通用 LLM API Key（可选）",
+          "markdownDescription": "与默认 LLM 一致时可留空。保存后写入工作区 easypaper_agentsociety.yaml，供 EasyPaper 启动时 AGENT_CONFIG_PATH 使用。"
+        },
+        "aiSocialScientist.env.easypaperLlmModel": {
+          "type": "string",
+          "default": "qwen3-next-80b-a3b-instruct",
+          "description": "EasyPaper 通用 LLM 模型"
+        },
+        "aiSocialScientist.env.easypaperVlmModel": {
+          "type": "string",
+          "default": "qwen3-vl-235b-a22b-thinking",
+          "description": "EasyPaper VLM 模型（版面检查）"
+        },
+        "aiSocialScientist.env.easypaperVlmApiKey": {
+          "type": "string",
+          "default": "",
+          "description": "EasyPaper VLM API Key（可选，与 LLM 一致可留空）"
+        },
         "aiSocialScientist.chat.viewColumn": {
           "type": "string",
           "default": "beside",

@@ -166,6 +166,9 @@ export class BackendManager {
     if (envConfig?.miroflowDefaultLlm) env.MIROFLOW_DEFAULT_LLM = envConfig.miroflowDefaultLlm;
     if (envConfig?.miroflowDefaultAgent) env.MIROFLOW_DEFAULT_AGENT = envConfig.miroflowDefaultAgent;
 
+    // EasyPaper (for generate_paper tool)
+    if (envConfig?.easypaperApiUrl) env.EASYPAPER_API_URL = envConfig.easypaperApiUrl;
+
     return {
       pythonPath,
       workingDirectory,

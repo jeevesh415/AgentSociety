@@ -278,6 +278,28 @@ class Config:
     Default: "mirothinker_v1.5_keep5_max200"
     """
 
+    # EasyPaper API (for generate_paper tool)
+
+    EASYPAPER_API_URL: str = (
+        os.getenv("EASYPAPER_API_URL", "").strip() or "http://localhost:8004"
+    )
+    """
+    EasyPaper paper typesetting service API base URL.
+
+    Environment variable: EASYPAPER_API_URL
+    Default: "http://localhost:8004"
+
+    Used by the generate_paper tool to call EasyPaper's /metadata/generate endpoint.
+    EasyPaper must be deployed separately (see https://github.com/Aph-xin/EasyPaper).
+
+    EasyPaper uses two model types (configured in EasyPaper's YAML, not here):
+    - LLM: for planning, writing, review, typesetting (model_name, api_key, base_url per agent).
+    - VLM: for PDF layout review / overflow check (vision-capable model in vlm_review agent).
+    To set LLM/VLM API and models in one place, use AgentSociety2 config page (generates
+    easypaper_agentsociety.yaml); or edit EasyPaper's configs/example.yaml and start
+    EasyPaper with AGENT_CONFIG_PATH pointing to that file.
+    """
+
     @classmethod
     def get_router(
         cls, model_type: Literal["default", "coder", "nano"] = "default"
