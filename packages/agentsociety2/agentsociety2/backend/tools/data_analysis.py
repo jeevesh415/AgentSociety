@@ -1,6 +1,6 @@
-"""数据分析工具
+"""主 Agent 可见的「单实验分析」入口。
 
-提供实验数据分析功能，支持自主分析实验数据并生成可视化。
+主 Agent 只决定「对哪个实验做分析」并调用本工具；分析什么、怎么分析由分析模块内部完成。
 """
 
 from __future__ import annotations
@@ -10,33 +10,24 @@ from typing import Dict, Any
 from agentsociety2.backend.tools.base import BaseTool, ToolResult
 from agentsociety2.backend.sse import ToolEvent
 from agentsociety2.logger import get_logger
-from agentsociety2.backend.analysis.service import AnalysisService
+from agentsociety2.backend.analysis import Analyzer
 from agentsociety2.backend.analysis.models import AnalysisConfig
 
 logger = get_logger()
 
 
 class DataAnalysisTool(BaseTool):
-    """数据分析工具
-
-    支持对实验数据进行自主分析，包括：
-    - 分析实验数据库中的数据
-    - 生成可视化图表
-    - 提供分析结果和建议
-    """
+    """主 Agent 调用的单实验分析入口：指定 hypothesis_id + experiment_id，触发分析并生成图文报告。"""
 
     def get_name(self) -> str:
-        return "data_analysis"
+        return "analyze"
 
     def get_description(self) -> str:
         return (
-            "Analyze experiment data and generate visualizations autonomously.\n\n"
-            "You MUST pass hypothesis_id and experiment_id in every call. Infer them from the current "
-            "conversation context (e.g. 'hypothesis 1 experiment 1' -> hypothesis_id='1', experiment_id='1'); "
-            "if the user did not specify, use the default experiment (e.g. '1', '1'). Do not ask the user "
-            "for these IDs in chat—always pass them in the tool call.\n\n"
-            "This tool: examines data under workspace/hypothesis_<id>/experiment_<id>/ (run/, results/), "
-            "decides analysis strategy via LLM, generates visualizations, and returns insights."
+            "Trigger analysis for one experiment. You only decide *that* analysis should run; "
+            "the analysis module decides what to analyze and how (schema, tools, charts, report).\n\n"
+            "Pass hypothesis_id and experiment_id (infer from context or use e.g. '1','1'). "
+            "Optional: custom_instructions, literature_summary. Returns insights and report paths."
         )
 
     def get_parameters_schema(self) -> Dict[str, Any]:
@@ -55,6 +46,10 @@ class DataAnalysisTool(BaseTool):
                     "type": "string",
                     "description": "Optional. Custom instructions for the analysis (e.g. focus on specific aspects).",
                 },
+                "literature_summary": {
+                    "type": "string",
+                    "description": "Optional. Summary from literature review; will be incorporated into analysis and report.",
+                },
             },
             "required": ["hypothesis_id", "experiment_id"],
         }
@@ -65,6 +60,7 @@ class DataAnalysisTool(BaseTool):
             hypothesis_id = arguments.get("hypothesis_id")
             experiment_id = arguments.get("experiment_id")
             custom_instructions = arguments.get("custom_instructions")
+            literature_summary = arguments.get("literature_summary")
 
             if not hypothesis_id or not experiment_id:
                 return ToolResult(
@@ -87,13 +83,12 @@ class DataAnalysisTool(BaseTool):
                     )
                 )
 
-            analysis_service = AnalysisService(
-                AnalysisConfig(workspace_path=self._workspace_path)
-            )
-            result = await analysis_service.analyze(
+            analyzer = Analyzer(AnalysisConfig(workspace_path=self._workspace_path))
+            result = await analyzer.analyze(
                 hypothesis_id=hypothesis_id,
                 experiment_id=experiment_id,
                 custom_instructions=custom_instructions,
+                literature_summary=literature_summary,
                 on_progress=on_progress,
             )
 

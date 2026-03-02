@@ -1,7 +1,5 @@
 """
-Experiment Analysis Module
-
-Agent-based intelligent analysis system for experiments.
+分析子智能体
 """
 
 from .models import (
@@ -14,19 +12,36 @@ from .models import (
     AnalysisConfig,
     ExperimentSynthesis,
     HypothesisSummary,
+    ExperimentPaths,
+    PresentationPaths,
+    DIR_HYPOTHESIS_PREFIX,
+    DIR_EXPERIMENT_PREFIX,
+    DIR_RUN,
+    DIR_ARTIFACTS,
+    DIR_CHARTS,
+    DIR_PRESENTATION,
+    DIR_SYNTHESIS,
+    FILE_HYPOTHESIS_MD,
+    FILE_EXPERIMENT_MD,
+    FILE_SQLITE,
 )
-
-from .analysis_agent import AnalysisAgent
-from .data_analysis_agent import DataAnalysisAgent
-from .tool_executor import ToolExecutor
-from .service import (
-    AnalysisService,
-    analyze_experiment,
-    ExperimentSynthesizer,
-    synthesize_experiments,
+from .agents import InsightAgent, DataExplorer
+from .tool_executor import AnalysisRunner
+from .service import Analyzer, run_analysis, Synthesizer, run_synthesis
+from .report_generator import Reporter
+from .utils import (
+    XmlParseError,
+    parse_llm_xml_response,
+    parse_llm_xml_to_model,
+    parse_llm_report_response,
+    get_analysis_skills,
+    experiment_paths,
+    presentation_paths,
+    extract_database_schema,
+    format_database_schema_markdown,
+    collect_experiment_files,
 )
-from .report_generator import ReportGenerator
-from .utils import parse_llm_json_response, parse_llm_json_to_model
+from .eda import generate_eda_profile, generate_sweetviz_profile, generate_quick_stats
 
 __all__ = [
     # Models
@@ -39,16 +54,42 @@ __all__ = [
     "AnalysisConfig",
     "ExperimentSynthesis",
     "HypothesisSummary",
-    # Services
-    "AnalysisService",
-    "analyze_experiment",
-    # Components
-    "AnalysisAgent",
-    "ReportGenerator",
-    # Synthesis
-    "ExperimentSynthesizer",
-    "synthesize_experiments",
+    "ExperimentPaths",
+    "PresentationPaths",
+    # Path constants (for tools / callers)
+    "DIR_HYPOTHESIS_PREFIX",
+    "DIR_EXPERIMENT_PREFIX",
+    "DIR_RUN",
+    "DIR_ARTIFACTS",
+    "DIR_CHARTS",
+    "DIR_PRESENTATION",
+    "DIR_SYNTHESIS",
+    "FILE_HYPOTHESIS_MD",
+    "FILE_EXPERIMENT_MD",
+    "FILE_SQLITE",
+    # 分析子智能体入口与便捷函数
+    "Analyzer",
+    "run_analysis",
+    "Synthesizer",
+    "run_synthesis",
+    # 子智能体组件
+    "InsightAgent",
+    "DataExplorer",
+    "AnalysisRunner",
+    "Reporter",
+    # Paths & schema (utils)
+    "experiment_paths",
+    "presentation_paths",
+    "extract_database_schema",
+    "format_database_schema_markdown",
+    "collect_experiment_files",
     # Utils
-    "parse_llm_json_response",
-    "parse_llm_json_to_model",
+    "XmlParseError",
+    "parse_llm_xml_response",
+    "parse_llm_xml_to_model",
+    "parse_llm_report_response",
+    "get_analysis_skills",
+    "generate_eda_profile",
+    "generate_sweetviz_profile",
+    "generate_quick_stats",
 ]

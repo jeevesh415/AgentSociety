@@ -24,6 +24,7 @@ from agentsociety2.backend.tools.file_system import (
 from agentsociety2.backend.tools.write_todo import WriteTodoTool
 from agentsociety2.backend.tools.hypothesis import HypothesisTool
 from agentsociety2.backend.tools.data_analysis import DataAnalysisTool
+from agentsociety2.backend.tools.analysis_workspace import SynthesizeExperimentsTool
 from agentsociety2.logger import get_logger
 
 logger = get_logger()
@@ -89,8 +90,9 @@ class ToolRegistry:
             WriteTodoTool,
             # 假设管理工具
             HypothesisTool,
-            # 数据分析工具
+            # 分析模块对主 Agent 仅暴露两个入口：分析单实验、综合分析（具体分析策略与内容由分析模块内部决定）
             DataAnalysisTool,
+            SynthesizeExperimentsTool,
         ]
 
         # 只有在环境变量配置了 WEB_SEARCH_API_URL 时才启用

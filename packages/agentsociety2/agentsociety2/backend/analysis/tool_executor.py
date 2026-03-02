@@ -1,40 +1,42 @@
 """
-tool_executor.py
-
-工具执行器，支持内置工具和代码执行器。
-
-说明:
-    本模块实现了工具执行器，支持内置工具和代码执行器。
-    内置工具来自工具注册表。
-    代码执行器通过多轮对话让LLM判断执行结果。
+分析子智能体内部执行器：为 DataExplorer 提供内置工具与代码执行能力。
 """
 
 import shutil
 import tempfile
 from pathlib import Path
-from typing import Any, Dict, Optional
+from typing import Any, Dict, List, Optional
 
-from agentsociety2.logger import get_logger
-from agentsociety2.config import get_llm_router_and_model
+from litellm import AllMessageValues
+from pydantic import BaseModel
+
 from agentsociety2.backend.tools.file_system import (
+    GlobTool,
     ListDirectoryTool,
     ReadFileTool,
-    WriteFileTool,
-    GlobTool,
-    SearchFileContentTool,
     ReplaceTool,
+    SearchFileContentTool,
+    WriteFileTool,
 )
+from agentsociety2.backend.tools.load_literature import LoadLiteratureTool
+from agentsociety2.backend.tools.literature_search import LiteratureSearchTool
 from agentsociety2.backend.tools.run_shell_command import RunShellCommandTool
 from agentsociety2.backend.tools.write_todo import WriteTodoTool
-from agentsociety2.backend.tools.literature_search import LiteratureSearchTool
-from agentsociety2.backend.tools.load_literature import LoadLiteratureTool
 from agentsociety2.code_executor.code_generator import CodeGenerator
 from agentsociety2.code_executor.dependency_detector import DependencyDetector
 from agentsociety2.code_executor.local_executor import LocalCodeExecutor
-from pydantic import BaseModel
-from litellm import AllMessageValues
+from agentsociety2.config import get_llm_router_and_model
+from agentsociety2.logger import get_logger
 
-from .utils import parse_llm_json_to_model
+from .models import AnalysisConfig
+from .prompts import judgment_prompt
+from .utils import (
+    XmlParseError,
+    extract_database_schema,
+    format_database_schema_markdown,
+    collect_experiment_files,
+    parse_llm_xml_to_model,
+)
 
 
 class ExecutionResult(BaseModel):
@@ -46,134 +48,25 @@ class ExecutionResult(BaseModel):
     retry_instruction: str = ""
 
 
-def extract_database_schema(db_path: Path) -> Dict[str, Any]:
-    """
-    提取数据库schema（表结构）为字典格式。
-    
-    Args:
-        db_path: SQLite数据库文件路径
-        
-    Returns:
-        字典，键为表名，值为列信息列表。每个列信息包含：name, type, notnull, pk
-    """
-    if not db_path or not db_path.exists():
-        return {}
-    
-    import sqlite3
-    conn = sqlite3.connect(str(db_path))
-    cursor = conn.cursor()
-    
-    cursor.execute("SELECT name FROM sqlite_master WHERE type='table' AND name NOT LIKE 'sqlite_%'")
-    tables = cursor.fetchall()
-    
-    schema = {}
-    for (table_name,) in tables:
-        cursor.execute(f"PRAGMA table_info({table_name})")
-        columns = cursor.fetchall()
-        schema[table_name] = [
-            {"name": col[1], "type": col[2], "notnull": bool(col[3]), "pk": bool(col[5])}
-            for col in columns
-        ]
-    
-    conn.close()
-    return schema
+class AnalysisRunner:
+    """为分析子智能体执行内置工具（文件、搜索、文献等）与生成的 Python 代码。"""
 
-
-def format_database_schema_markdown(schema: Dict[str, Any], include_row_counts: bool = False, db_path: Optional[Path] = None) -> str:
-    """
-    将数据库schema格式化为markdown字符串。
-    
-    Args:
-        schema: 从 extract_database_schema 返回的字典
-        include_row_counts: 是否包含行数统计
-        db_path: 数据库路径
-        
-    Returns:
-        格式化的markdown字符串
-    """
-    if not schema:
-        return "Schema not available"
-    
-    lines = []
-    for table_name, columns in schema.items():
-        lines.append(f"### Table: `{table_name}`")
-        lines.append(f"Columns: {', '.join([col['name'] for col in columns])}")
-        for col in columns:
-            pk_marker = " (PRIMARY KEY)" if col.get("pk") else ""
-            lines.append(f"  - {col['name']} ({col['type']}){pk_marker}")
-        lines.append("")
-    
-    if include_row_counts and db_path:
-        import sqlite3
-        conn = sqlite3.connect(str(db_path))
-        cursor = conn.cursor()
-        lines.append("### Table Row Counts")
-        for table_name in schema.keys():
-            cursor.execute(f"SELECT COUNT(*) FROM {table_name}")
-            count = cursor.fetchone()[0]
-            lines.append(f"- `{table_name}`: {count} rows")
-        conn.close()
-    
-    return "\n".join(lines)
-
-
-def collect_experiment_files(db_path: Path) -> list[str]:
-    """
-    收集需要提供给本地执行器的实验文件。
-
-    Args:
-        db_path: sqlite.db 的路径（上层如果实验/假设路径不同，传入对应的 db_path 即可）
-
-    Returns:
-        提供给本地执行器的文件路径列表
-    """
-    if not db_path:
-        return []
-
-    files: list[str] = [str(db_path)]
-    if not db_path.exists():
-        return files
-
-    run_dir = db_path.parent
-
-    # - run/ 下的同级文件（例如日志、配置、导出结果等）
-    if run_dir.exists():
-        for p in run_dir.glob("*"):
-            if p.is_file() and p != db_path:
-                files.append(str(p))
-
-        # - run/artifacts/ 下的所有文件
-        run_artifacts = run_dir / "artifacts"
-        if run_artifacts.exists():
-            for p in run_artifacts.rglob("*"):
-                if p.is_file():
-                    files.append(str(p))
-
-    return files
-
-
-class ToolExecutor:
-    """
-    工具执行器，支持以下功能：
-    1. 内置工具（builtin）：文件系统工具等，来自 tools/ 文件夹
-    2. 代码执行器（code_executor）：执行 Python 代码
-    """
-
-    def __init__(self, workspace_path: Path, output_dir: Path, tool_registry: Optional[Any] = None):
+    def __init__(
+        self,
+        workspace_path: Path,
+        output_dir: Path,
+        tool_registry: Optional[Any] = None,
+        config: Optional[AnalysisConfig] = None,
+    ):
         self.workspace_path = workspace_path
         self.output_dir = output_dir
         self.logger = get_logger()
+        self._config = config
 
-        # Tool registry (passed in to avoid circular imports)
         self._tool_registry = tool_registry
-
-        # Built-in tools registry
-        self._builtin_tools: Dict[str, Any] = {}
-
-        # LLM router for code execution result judgment
-        self._router, self._model_name = get_llm_router_and_model("coder")
-
-        # Initialize built-in tools (only data analysis related)
+        self._builtin_tools = {}
+        profile = config.llm_profile_coder if config else "coder"
+        self._router, self._model_name = get_llm_router_and_model(profile)
         self._initialize_builtin_tools()
 
     def _initialize_builtin_tools(self):
@@ -190,7 +83,7 @@ class ToolExecutor:
             LiteratureSearchTool,
             LoadLiteratureTool,
         ]
-        
+
         for tool_class in tool_classes:
             default_instance = tool_class(
                 workspace_path="",
@@ -204,7 +97,8 @@ class ToolExecutor:
             }
 
         self.logger.info(
-            f"Initialized {len(self._builtin_tools)} built-in tools for data analysis"
+            "Initialized %s built-in tools for data analysis",
+            len(self._builtin_tools),
         )
 
     def discover_tools(self) -> Dict[str, Dict[str, Any]]:
@@ -219,14 +113,11 @@ class ToolExecutor:
         }
 
     def discover_tools_with_schemas(self) -> Dict[str, Dict[str, Any]]:
-        """返回内置工具及其参数 schema，供 LLM 使用正确参数名。"""
+        """返回内置工具及其参数 schema，供 DataExplorer 调用时使用正确参数名。"""
         result = {}
         if self._tool_registry is None:
             return self.discover_tools()
-        try:
-            all_tools = self._tool_registry.get_all_tools()
-        except Exception:
-            return self.discover_tools()
+        all_tools = self._tool_registry.get_all_tools()
         for name, info in self._builtin_tools.items():
             entry = {
                 "description": info.get("description", ""),
@@ -234,7 +125,9 @@ class ToolExecutor:
                 "usage": f"Use tool name '{name}' in your analysis plan",
             }
             default_tool = all_tools.get(name)
-            if default_tool is not None and getattr(default_tool, "parameters_schema", None):
+            if default_tool is not None and getattr(
+                default_tool, "parameters_schema", None
+            ):
                 schema = default_tool.parameters_schema
                 props = schema.get("properties") or {}
                 required = schema.get("required") or []
@@ -288,6 +181,7 @@ class ToolExecutor:
         # Use provided registry or import lazily as fallback
         if self._tool_registry is None:
             from agentsociety2.backend.tools.registry import ToolRegistry
+
             registry = ToolRegistry()
         else:
             registry = self._tool_registry
@@ -329,8 +223,10 @@ class ToolExecutor:
         schema = extract_database_schema(db_path_obj)
         if not schema:
             return None
-        
-        return format_database_schema_markdown(schema, include_row_counts=True, db_path=db_path_obj)
+
+        return format_database_schema_markdown(
+            schema, include_row_counts=True, db_path=db_path_obj
+        )
 
     async def _execute_code(
         self,
@@ -363,7 +259,8 @@ class ToolExecutor:
 
         db_path = parameters.get("db_path")
         extra_files = parameters.get("extra_files", [])
-        timeout = parameters.get("timeout", 600)
+        default_timeout = self._config.code_execution_timeout if self._config else 600
+        timeout = parameters.get("timeout", default_timeout)
 
         work_dir = Path(tempfile.mkdtemp(prefix="analysis_", dir=self.output_dir))
         local_executor = LocalCodeExecutor(work_dir=work_dir)
@@ -432,16 +329,17 @@ class ToolExecutor:
 ## Important Guidelines
 
 - **No Command-Line Arguments**: Do NOT use argparse, sys.argv, or any command-line argument parsing. All file paths are provided in the context above and files are already in the current working directory.
-- **Imports**: If you use sys (e.g. sys.exit), add `import sys` at the top. Use standard imports: sqlite3, pandas, etc., as needed.
+- **Imports**: If you use sys, add `import sys` at the top. Use standard imports: sqlite3, pandas, etc., as needed.
 - **File Reading**: ALWAYS read and examine file contents FIRST before processing. For databases, query the schema programmatically. For other files, read and inspect their structure and content first. Do NOT hardcode assumptions about file structure.
 - **Database Schema**: Use ONLY tables from the schema above. ALWAYS verify the database structure before processing. Do NOT hardcode table or column names.
 - **Error Handling**: Use try-except blocks for file/database operations. If the core task cannot be completed, exit with `sys.exit(1)` (and ensure `import sys` is present).
 - **Type Safety**: SQLite often stores mixed types. Use `pd.to_numeric(..., errors='coerce')` for numeric conversion.
-- **Output Files**: Save all output files to the output directory specified above (use relative path or Path object)."""
+- **JSON Serialization**: When using json.dumps or writing JSON, convert numpy/pandas types (int64, float64) to native Python: use `int(x)` or `float(x)` for scalars, or `df.astype(object)` before to_dict.
+- **Output Files**: Save charts with plt.savefig('chart.png') in current directory, or to output directory. PNG/CSV/JSON files will be collected automatically."""
 
-        MAX_RETRIES = 5
+        max_retries = self._config.max_code_gen_retries if self._config else 5
 
-        conversation_messages: list[AllMessageValues] = []
+        conversation_messages: List[AllMessageValues] = []
         generated_code = None
         exec_result = None
 
@@ -449,7 +347,7 @@ class ToolExecutor:
         conversation_messages.append({"role": "user", "content": initial_prompt})
 
         try:
-            for current_try in range(MAX_RETRIES):
+            for current_try in range(max_retries):
                 response = await code_generator._router.acompletion(
                     model=code_generator._model_name,
                     messages=conversation_messages,
@@ -457,7 +355,7 @@ class ToolExecutor:
 
                 generated_text = response.choices[0].message.content  # type: ignore
                 if not generated_text:
-                    if current_try < MAX_RETRIES - 1:
+                    if current_try < max_retries - 1:
                         conversation_messages.append(
                             {
                                 "role": "user",
@@ -468,7 +366,7 @@ class ToolExecutor:
 
                 generated_code = code_generator._extract_code(generated_text)
                 if not generated_code or not generated_code.strip():
-                    if current_try < MAX_RETRIES - 1:
+                    if current_try < max_retries - 1:
                         conversation_messages.append(
                             {
                                 "role": "user",
@@ -495,7 +393,7 @@ class ToolExecutor:
                 if judgment.success:
                     break
 
-                if judgment.should_retry and current_try < MAX_RETRIES - 1:
+                if judgment.should_retry and current_try < max_retries - 1:
                     self.logger.info(
                         f"Execution failed, will retry. Reason: {judgment.reason}"
                     )
@@ -543,11 +441,11 @@ Please generate corrected code that addresses the issues above."""
 
             if not final_judgment.success:
                 self.logger.warning(
-                    f"All {MAX_RETRIES} attempts failed. Reason: {final_judgment.reason}"
+                    f"All {max_retries} attempts failed. Reason: {final_judgment.reason}"
                 )
                 return {
                     "success": False,
-                    "error": f"Failed after {MAX_RETRIES} attempts. {final_judgment.reason}",
+                    "error": f"Failed after {max_retries} attempts. {final_judgment.reason}",
                     "code_generated": generated_code or "",
                 }
 
@@ -569,13 +467,21 @@ Please generate corrected code that addresses the issues above."""
                 and p not in files_before_execution
                 and p.suffix.lower() in artifact_extensions
             }
-            artifacts = [str(p) for p in files_after_execution]
+            artifacts: List[str] = []
+            self.output_dir.mkdir(parents=True, exist_ok=True)
+            for idx, p in enumerate(files_after_execution):
+                dest = self.output_dir / p.name
+                if dest.exists() and dest.resolve() != p.resolve():
+                    stem, suf = p.stem, p.suffix
+                    dest = self.output_dir / f"{stem}_{idx}{suf}"
+                if not dest.exists() or dest.resolve() != p.resolve():
+                    shutil.copy2(p, dest)
+                artifacts.append(str(dest))
 
-            artifacts.extend(
-                str(p)
-                for p in self.output_dir.glob("**/*")
-                if p.is_file() and p.suffix.lower() in artifact_extensions
-            )
+            for p in self.output_dir.glob("**/*"):
+                if p.is_file() and p.suffix.lower() in artifact_extensions:
+                    if str(p) not in artifacts:
+                        artifacts.append(str(p))
 
             return {
                 "success": True,
@@ -642,45 +548,60 @@ Please generate corrected code that addresses the issues above."""
                 retry_instruction="Check the execution output and fix any errors",
             )
 
+        def _trunc(s: str, max_len: int = 4000) -> str:
+            if not s:
+                return s
+            t = str(s).strip()
+            if len(t) <= max_len:
+                return t
+            return t[
+                :max_len
+            ] + "\n[output truncated for display, full length=%d]" % len(t)
+
+        stdout_trunc = _trunc(exec_result.stdout if exec_result else "", 4000)
+        stderr_trunc = _trunc(exec_result.stderr if exec_result else "", 2000)
+        code_preview_len = 4000
+        code_trunc = (generated_code or "")[:code_preview_len]
+        code_suffix = (
+            "\n[code truncated for display, full length=%d]" % len(generated_code or "")
+            if len(generated_code or "") > code_preview_len
+            else ""
+        )
+
         execution_summary = f"""## Code Execution Result
+
+**IMPORTANT**: STDOUT, STDERR, and Generated Code below may be truncated for display. The "[truncated for display]" marker means WE cut the text for brevity—the script ran in full and its output was complete. Do NOT treat display truncation as script incompleteness. Judge by: return code, files created, and the visible content.
 
 **Return Code**: {exec_result.return_code if exec_result else 'N/A'}
 
 **STDOUT**:
 ```
-{exec_result.stdout if exec_result else 'No output'}
+{stdout_trunc or 'No output'}
 ```
 
 **STDERR**:
 ```
-{exec_result.stderr if exec_result else 'No error'}
+{stderr_trunc or 'No error'}
 ```
 
 **New Files Created in Work Directory**: {len(new_files)} files
 **Output Directory Files**: {len(output_dir_files)} files
 
-**Generated Code**:
+**Generated Code** (preview):
 ```python
-{generated_code[:1000]}...
+{code_trunc}{code_suffix}
 ```
 
 You should analyze the execution result and determine:
-1. Did the code execute successfully?
-2. Did it produce the expected output or files?
+1. Did the code execute successfully (exit 0)?
+2. Did it produce the expected output or files matching the task?
 3. Are there any errors in stderr that indicate failure?
-4. Is the task completed successfully?
+4. Is the result reasonable and complete for the described task (not partial or wrong output)?
+5. success=true only if the outcome is both correct and complete.
 
-Respond in JSON format:
-```json
-{{
-    "success": true/false,
-    "reason": "brief explanation",
-    "should_retry": true/false,
-    "retry_instruction": "what to fix if should_retry is true"
-}}
-```"""
+{judgment_prompt()}"""
 
-        messages: list[AllMessageValues] = [
+        messages: List[AllMessageValues] = [
             {"role": "user", "content": execution_summary}
         ]
 
@@ -693,4 +614,7 @@ Respond in JSON format:
         if not content:
             return _fallback_check()
 
-        return parse_llm_json_to_model(content, ExecutionResult)
+        try:
+            return parse_llm_xml_to_model(content, ExecutionResult, root_tag="judgment")
+        except XmlParseError:
+            return _fallback_check()

@@ -17,19 +17,59 @@ __all__ = [
     "setup_logging",
 ]
 
+# 控制台超长日志：仅 INFO 截断（保留前后），其他级别不截断
+_HEAD, _TAIL = 180, 180
+_MAX_LEN = 500
+
+
+def _shorten(msg: str, level: int) -> str:
+    if level != logging.INFO or len(msg) <= _MAX_LEN:
+        return msg
+    return msg[:_HEAD] + " ... " + msg[-_TAIL:]
+
+
+class ColoredFormatter(logging.Formatter):
+    """按级别着色，仅 INFO 超长时截断（保留前后）。格式 [HH:MM:SS] LEVEL  msg"""
+
+    # 颜色方案：INFO 用青色减少视觉疲劳，WARNING/ERROR 用亮色提高可见度
+    _colors = {
+        logging.DEBUG: "\x1b[90m",  # 暗灰，DEBUG 通常量大，弱化
+        logging.INFO: "\x1b[36m",  # 青色，大量 INFO 时比绿色更柔和
+        logging.WARNING: "\x1b[93m",  # 亮黄，比普通黄更醒目
+        logging.ERROR: "\x1b[91m",  # 亮红，比普通红更突出
+        logging.CRITICAL: "\x1b[91;1m",  # 粗体亮红，最高优先级
+    }
+    _reset = "\x1b[0m"
+    _fmt = "[%(asctime)s] %(levelname)-7s %(message)s"
+
+    def format(self, record: logging.LogRecord) -> str:
+        orig_msg, orig_args = record.msg, record.args
+        msg = _shorten(record.getMessage(), record.levelno)
+        record.msg, record.args = msg, ()
+
+        use_color = hasattr(sys.stdout, "isatty") and sys.stdout.isatty()
+        fmt = (
+            (self._colors.get(record.levelno, "") + self._fmt + self._reset)
+            if use_color
+            else self._fmt
+        )
+        out = logging.Formatter(fmt, datefmt="%H:%M:%S").format(record)
+        record.msg, record.args = orig_msg, orig_args
+        return out
+
 
 def get_logger():
+    """Return the agentsociety logger singleton."""
     logger = logging.getLogger("agentsociety")
     # check if there is already a handler, avoid duplicate output
     if not logger.hasHandlers():
         logger.setLevel(logging.INFO)
         # set propagate to False, avoid duplicate output
         logger.propagate = False
-        formatter = logging.Formatter(
-            "%(asctime)s - %(name)s - %(levelname)s - %(message)s"
-        )
+
         handler = logging.StreamHandler()
-        handler.setFormatter(formatter)
+        # Use our custom ColoredFormatter
+        handler.setFormatter(ColoredFormatter())
         logger.addHandler(handler)
     return logger
 
@@ -42,7 +82,7 @@ def set_logger_level(level: str):
 class LiteLLMLogger:
     """
     Custom logger for LiteLLM that logs prompts, responses, tokens, and timing.
-    
+
     This class implements the callback interface for LiteLLM to log:
     - Prompts at DEBUG level
     - Responses at INFO level
@@ -61,7 +101,7 @@ class LiteLLMLogger:
     ):
         """
         Log before API call - records the prompt at DEBUG level.
-        
+
         Args:
             model: Model name
             messages: List of messages (prompt)
@@ -70,15 +110,11 @@ class LiteLLMLogger:
         # Generate a unique call ID for tracking
         call_id = f"{model}_{int(time.time() * 1000000)}"
         self._call_start_times[call_id] = time.time()
-        
-        # Format messages for logging
+
         prompt_text = self._format_messages(messages)
-        
-        # Log prompt at DEBUG level
-        self.logger.debug(
-            f"[LiteLLM] Model: {model} | Prompt:\n{prompt_text}"
-        )
-        
+        prompt_text = _shorten(prompt_text, logging.DEBUG)
+        self.logger.debug(f"[LiteLLM] {model} | Prompt:\n{prompt_text}")
+
         # Store call_id in kwargs for later retrieval
         kwargs["_litellm_call_id"] = call_id
 
@@ -91,7 +127,7 @@ class LiteLLMLogger:
     ):
         """
         Log after API call - records response, tokens, and timing at INFO level.
-        
+
         Args:
             kwargs: Arguments passed to the API call
             response_obj: Response object from LiteLLM
@@ -100,15 +136,15 @@ class LiteLLMLogger:
         """
         duration = end_time - start_time
         model = kwargs.get("model", "unknown")
-        
+
         # Extract response content
         response_content = self._extract_response_content(response_obj)
-        
+
         # Extract token usage
         input_tokens = 0
         output_tokens = 0
         total_tokens = 0
-        
+
         if hasattr(response_obj, "usage") and response_obj.usage:
             input_tokens = getattr(response_obj.usage, "prompt_tokens", 0) or 0
             output_tokens = getattr(response_obj.usage, "completion_tokens", 0) or 0
@@ -118,12 +154,10 @@ class LiteLLMLogger:
             input_tokens = usage.get("prompt_tokens", 0) or 0
             output_tokens = usage.get("completion_tokens", 0) or 0
             total_tokens = usage.get("total_tokens", 0) or 0
-        
-        # Log response at INFO level
-        self.logger.info(
-            f"[LiteLLM] Model: {model} | Response:\n{response_content}"
-        )
-        
+
+        response_content = _shorten(response_content, logging.INFO)
+        self.logger.info(f"[LiteLLM] {model} | Response:\n{response_content}")
+
         # Log token usage and timing at INFO level
         self.logger.info(
             f"[LiteLLM] Model: {model} | Tokens - Input: {input_tokens}, "
@@ -134,10 +168,10 @@ class LiteLLMLogger:
     def _format_messages(self, messages: List[Dict[str, Any]]) -> str:
         """
         Format messages list into a readable string.
-        
+
         Args:
             messages: List of message dictionaries
-            
+
         Returns:
             Formatted string representation of messages
         """
@@ -145,7 +179,7 @@ class LiteLLMLogger:
         for i, msg in enumerate(messages):
             role = msg.get("role", "unknown")
             content = msg.get("content", "")
-            
+
             # Handle different content types
             if isinstance(content, list):
                 # Handle content array (e.g., multimodal)
@@ -154,23 +188,25 @@ class LiteLLMLogger:
                 content_str = content
             else:
                 content_str = str(content)
-            
+
             formatted_parts.append(f"[{role}]: {content_str}")
-            
+
             # Include tool_calls if present
             if "tool_calls" in msg:
                 tool_calls = msg["tool_calls"]
-                formatted_parts.append(f"  Tool calls: {json.dumps(tool_calls, ensure_ascii=False, indent=2)}")
-        
+                formatted_parts.append(
+                    f"  Tool calls: {json.dumps(tool_calls, ensure_ascii=False, indent=2)}"
+                )
+
         return "\n".join(formatted_parts)
 
     def _extract_response_content(self, response_obj: Any) -> str:
         """
         Extract response content from LiteLLM response object.
-        
+
         Args:
             response_obj: Response object from LiteLLM
-            
+
         Returns:
             Response content as string
         """
@@ -199,7 +235,7 @@ class LiteLLMLogger:
                         return f"[Tool calls: {len(tool_calls)}]"
         except Exception as e:
             return f"[Error extracting response: {str(e)}]"
-        
+
         return "[Empty or unknown response]"
 
 
@@ -209,28 +245,29 @@ def setup_litellm_logging():
     This should be called once during application initialization.
     """
     try:
-        # Suppress Pydantic serialization warnings from LiteLLM/OpenAI Message and Choices types.
-        # See: https://github.com/BerriAI/litellm/issues/11759
-        # The fix is in open PR https://github.com/BerriAI/litellm/pull/16299
-        warnings.filterwarnings(
-            "ignore",
-            message=".*PydanticSerializationUnexpectedValue.*",
-            category=UserWarning,
-        )
         import litellm
-        
-        # Create and register the custom logger
-        litellm_logger = LiteLLMLogger()
-        litellm.callbacks = [litellm_logger]
-        
-        # Configure litellm's internal logger to avoid duplicate logs
+
+        # NOTE:
+        # Some LiteLLM versions can emit noisy Pydantic serialization warnings
+        # when callback pipelines serialize provider-specific message objects.
+        # Keep callback registration disabled by default to avoid that path.
+        # If detailed callback logs are needed, enable via env:
+        #   AGENTSOCIETY_ENABLE_LITELLM_CALLBACKS=1
+        if os.getenv("AGENTSOCIETY_ENABLE_LITELLM_CALLBACKS", "").strip() == "1":
+            litellm_logger = LiteLLMLogger()
+            litellm.callbacks = [litellm_logger]
+        else:
+            litellm.callbacks = []
+
+        # Configure litellm's internal logger
         litellm_logging = logging.getLogger("litellm")
         litellm_logging.handlers.clear()
         litellm_logging.propagate = False
-        # Set to WARNING to avoid duplicate logs (we handle logging ourselves)
         litellm_logging.setLevel(logging.WARNING)
-        
-        get_logger().info("LiteLLM logging initialized")
+
+        get_logger().info(
+            "LiteLLM logging initialized (callbacks=%s)", litellm.callbacks
+        )
     except ImportError:
         get_logger().warning("litellm not available, skipping LiteLLM logging setup")
     except Exception as e:
@@ -245,12 +282,12 @@ def setup_logging(
 ) -> logging.Logger:
     """
     Setup comprehensive logging configuration for the application.
-    
+
     This function configures:
     - Root logger
     - Agentsociety logger
     - LiteLLM logger integration
-    
+
     Args:
         log_file: Optional path to log file. If provided, logs will be written to file.
                  If None, logs will only go to console.
@@ -258,76 +295,72 @@ def setup_logging(
         log_format: Custom log format string. If None, uses default format.
                    Default: "%(message)s" for file, full format for console
         console_output: Whether to output logs to console (default: True)
-    
+
     Returns:
         Configured agentsociety logger instance
     """
     # Default format
     if log_format is None:
         file_formatter = logging.Formatter(
-            "%(asctime)s - %(levelname)s - %(message)s",
-            datefmt="%Y-%m-%d %H:%M:%S"
+            "%(asctime)s - %(levelname)s - %(message)s", datefmt="%Y-%m-%d %H:%M:%S"
         )
         console_formatter = logging.Formatter(
-            "%(asctime)s - %(levelname)s - %(message)s",
-            datefmt="%Y-%m-%d %H:%M:%S"
+            "%(asctime)s - %(levelname)s - %(message)s", datefmt="%Y-%m-%d %H:%M:%S"
         )
     else:
         file_formatter = logging.Formatter(log_format)
         console_formatter = logging.Formatter(log_format)
-    
+
     # Configure root logger
     root_logger = logging.getLogger()
     root_logger.setLevel(logging.WARNING)
     root_logger.handlers.clear()
-    
+
     # Add file handler if log_file is provided
     if log_file:
         # Create logs directory if needed
         log_dir = os.path.dirname(log_file)
         if log_dir:
             os.makedirs(log_dir, exist_ok=True)
-        
+
         file_handler = logging.FileHandler(log_file, mode="w", encoding="utf-8")
         file_handler.setLevel(log_level)
         file_handler.setFormatter(file_formatter)
         root_logger.addHandler(file_handler)
-    
+
     # Add console handler if requested
     if console_output:
         console_handler = logging.StreamHandler(sys.stdout)
         console_handler.setLevel(log_level)
-        console_handler.setFormatter(console_formatter)
+        console_handler.setFormatter(ColoredFormatter())
         root_logger.addHandler(console_handler)
-    
+
     # Configure agentsociety logger
     logger = get_logger()
     logger.setLevel(log_level)
     logger.handlers.clear()
     logger.propagate = False
-    
+
     # Add handlers to agentsociety logger
     if log_file:
         file_handler = logging.FileHandler(log_file, mode="w", encoding="utf-8")
         file_handler.setLevel(log_level)
         file_handler.setFormatter(file_formatter)
         logger.addHandler(file_handler)
-    
+
     if console_output:
         console_handler = logging.StreamHandler(sys.stdout)
         console_handler.setLevel(log_level)
-        console_handler.setFormatter(console_formatter)
+        console_handler.setFormatter(ColoredFormatter())
         logger.addHandler(console_handler)
-    
+
     # Setup LiteLLM logging
     setup_litellm_logging()
-    
+
     # Configure litellm internal logger to avoid duplicate logs
     litellm_logger = logging.getLogger("litellm")
     litellm_logger.setLevel(logging.WARNING)
     litellm_logger.handlers.clear()
     litellm_logger.propagate = False
-    
+
     return logger
-
-
