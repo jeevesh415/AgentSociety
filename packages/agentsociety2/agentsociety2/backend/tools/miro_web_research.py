@@ -10,7 +10,8 @@ import uuid
 from typing import Any, Dict
 
 from mcp.client.session import ClientSession
-from mcp.client.streamable_http import streamablehttp_client
+from mcp.client.streamable_http import streamable_http_client
+from mcp.shared._httpx_utils import create_mcp_http_client
 
 from agentsociety2.backend.sse import ToolEvent
 from agentsociety2.backend.tools.base import BaseTool, ToolResult
@@ -102,61 +103,62 @@ class MiroWebResearchTool(BaseTool):
         logger.info(f"Miro MCP: url={MCP_URL}, task_id={task_id}")
 
         try:
-            async with streamablehttp_client(MCP_URL, headers=headers) as (
-                read,
-                write,
-                _,
-            ):
-                async with ClientSession(read, write) as session:
-                    await session.initialize()
-                    tools = await session.list_tools()
-                    if "run_task" not in [t.name for t in tools.tools]:
-                        return ToolResult(
-                            success=False,
-                            content="远端 MCP 未提供 run_task 工具",
-                            error="run_task tool not found on MCP server",
+            async with create_mcp_http_client(headers=headers) as http_client:
+                async with streamable_http_client(MCP_URL, http_client=http_client) as (
+                    read,
+                    write,
+                    _,
+                ):
+                    async with ClientSession(read, write) as session:
+                        await session.initialize()
+                        tools = await session.list_tools()
+                        if "run_task" not in [t.name for t in tools.tools]:
+                            return ToolResult(
+                                success=False,
+                                content="远端 MCP 未提供 run_task 工具",
+                                error="run_task tool not found on MCP server",
+                            )
+
+                        await self._send_progress(
+                            ToolEvent(
+                                tool_name=self.name,
+                                tool_id=self._current_tool_id,
+                                status="progress",
+                                content="已连接 MCP，开始执行 run_task...",
+                            )
                         )
 
-                    await self._send_progress(
-                        ToolEvent(
-                            tool_name=self.name,
-                            tool_id=self._current_tool_id,
-                            status="progress",
-                            content="已连接 MCP，开始执行 run_task...",
+                        result = await session.call_tool(
+                            "run_task",
+                            {
+                                "task_description": query,
+                                "llm": llm,
+                                "agent": agent,
+                            },
                         )
+
+                if result.isError:
+                    error_blocks = [
+                        block.text
+                        for block in result.content
+                        if hasattr(block, "text") and block.text
+                    ]
+                    error_msg = (
+                        "\n".join(error_blocks).strip() if error_blocks else "未知错误"
+                    )
+                    logger.error(f"Miro MCP run_task 返回错误: {error_msg}")
+                    return ToolResult(
+                        success=False,
+                        content=f"Miro Web Research 执行失败: {error_msg}",
+                        error=error_msg,
                     )
 
-                    result = await session.call_tool(
-                        "run_task",
-                        {
-                            "task_description": query,
-                            "llm": llm,
-                            "agent": agent,
-                        },
-                    )
-
-            if result.isError:
-                error_blocks = [
+                blocks = [
                     block.text
                     for block in result.content
                     if hasattr(block, "text") and block.text
                 ]
-                error_msg = (
-                    "\n".join(error_blocks).strip() if error_blocks else "未知错误"
-                )
-                logger.error(f"Miro MCP run_task 返回错误: {error_msg}")
-                return ToolResult(
-                    success=False,
-                    content=f"Miro Web Research 执行失败: {error_msg}",
-                    error=error_msg,
-                )
-
-            blocks = [
-                block.text
-                for block in result.content
-                if hasattr(block, "text") and block.text
-            ]
-            content = "\n\n".join(blocks).strip() if blocks else "远端 MCP 返回为空"
+                content = "\n\n".join(blocks).strip() if blocks else "远端 MCP 返回为空"
 
         except Exception as e:
             logger.error(f"Miro MCP 连接或执行失败: {e}", exc_info=True)
