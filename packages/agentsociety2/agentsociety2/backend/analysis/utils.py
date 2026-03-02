@@ -1,5 +1,6 @@
 """
-分析模块通用工具。分析相关 LLM 输出统一使用 XML 格式解析。
+分析模块通用工具。分析相关 LLM 输出统一使用 XML 格式解析；
+为 generate_paper 工具提供 parse_llm_json_response。
 """
 
 import re
@@ -8,6 +9,7 @@ import xml.etree.ElementTree as ET
 from pathlib import Path
 from typing import Any, Awaitable, Callable, Dict, List, Optional, TypeVar, Type
 
+import json_repair
 from pydantic import BaseModel
 from xenon import TrustLevel, repair_xml_safe
 
@@ -196,6 +198,32 @@ def parse_llm_xml_to_model(
             items = v["item"]
             data[k] = items if isinstance(items, list) else [items]
     return model_class.model_validate(data)
+
+
+def _take_json_string(content: str) -> str:
+    """从约定格式中取出 JSON 字符串：整段即 JSON，或 ```json ... ``` 中唯一一段。"""
+    raw = (content or "").strip()
+    if not raw:
+        return ""
+    if raw.startswith("```"):
+        parts = raw.split("```")
+        for i, p in enumerate(parts):
+            s = p.strip()
+            if i == 0:
+                s = s.lstrip("json").strip()
+            if s and (s.startswith("{") or s.startswith("[")):
+                return s
+        return ""
+    return raw
+
+
+def parse_llm_json_response(content: str) -> Dict[str, Any]:
+    """解析 LLM 返回的 JSON，约定为单段 JSON 或 ```json ... ```。返回 dict，失败返回 {}。"""
+    json_str = _take_json_string(content)
+    if not json_str:
+        return {}
+    data = json_repair.loads(json_str)
+    return data if isinstance(data, dict) else {}
 
 
 def parse_llm_report_response(content: str) -> Dict[str, str]:
