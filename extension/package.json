@@ -330,7 +330,7 @@
           "type": "string",
           "default": "",
           "description": "EasyPaper 服务 API URL（可选）",
-          "markdownDescription": "EasyPaper 论文排版服务的 API 地址（需单独部署，见 https://github.com/Aph-xin/EasyPaper）。留空时默认 `http://localhost:8004`。对应环境变量 `EASYPAPER_API_URL`。"
+          "markdownDescription": "EasyPaper 论文排版服务的 API 地址（需单独部署，见 https://github.com/tsinghua-fib-lab/EasyPaper）。留空时默认 `http://localhost:8004`。对应环境变量 `EASYPAPER_API_URL`。"
         },
         "aiSocialScientist.env.easypaperLlmApiKey": {
           "type": "string",
