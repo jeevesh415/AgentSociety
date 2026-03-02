@@ -32,7 +32,7 @@ This file records descriptions of high-value file paths and their meanings to he
 
 - `TOPIC.md`: The core research topic and goals for the current simulation experiment. Always read this file first to understand your mission.
 - `.agentsociety/agent_classes/*.json`: JSON files containing detailed information about all supported agent classes, including their types and capabilities.
-- `agentsociety/env_modules/*.json`: JSON files containing detailed information about all supported environment modules that can be used to build simulation worlds.
+- `.agentsociety/env_modules/*.json`: JSON files containing detailed information about all supported environment modules that can be used to build simulation worlds.
 
 ## Ignore Files
 
