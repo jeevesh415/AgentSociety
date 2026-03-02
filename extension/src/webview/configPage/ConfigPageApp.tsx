@@ -12,7 +12,7 @@ import {
   Select,
   Space,
 } from 'antd';
-import { SaveOutlined, KeyOutlined, ApiOutlined, DatabaseOutlined, ThunderboltOutlined, SettingOutlined, FolderOpenOutlined } from '@ant-design/icons';
+import { SaveOutlined, KeyOutlined, ApiOutlined, DatabaseOutlined, ThunderboltOutlined, SettingOutlined, FolderOpenOutlined, FilePdfOutlined } from '@ant-design/icons';
 import type { VSCodeAPI, ConfigValues, WorkspaceInfo } from './types';
 import 'antd/dist/reset.css';
 
@@ -42,6 +42,11 @@ const DEFAULT_VALUES: ConfigValues = {
   webSearchApiToken: '',
   miroflowDefaultLlm: 'qwen-3',
   miroflowDefaultAgent: 'mirothinker_v1.5_keep5_max200',
+  easypaperApiUrl: '',
+  easypaperLlmApiKey: '',
+  easypaperLlmModel: 'qwen3-next-80b-a3b-instruct',
+  easypaperVlmModel: 'qwen3-vl-235b-a22b-thinking',
+  easypaperVlmApiKey: '',
 };
 
 interface ConfigPageAppProps {
@@ -304,6 +309,34 @@ export const ConfigPageApp: React.FC<ConfigPageAppProps> = ({ vscode }) => {
               </Form.Item>
               <Form.Item name="miroflowDefaultAgent" label="默认 Agent 配置">
                 <Input placeholder="mirothinker_v1.5_keep5_max200" />
+              </Form.Item>
+            </Panel>
+            <Panel
+              header={
+                <Space>
+                  <FilePdfOutlined />
+                  <span>EasyPaper（论文 PDF 排版）</span>
+                </Space>
+              }
+              key="easypaper"
+            >
+              <Text type="secondary" style={{ display: 'block', marginBottom: 12 }}>
+                用于 generate_paper 工具将分析报告排版成论文 PDF。需单独部署 EasyPaper 服务。填写下方模型后保存，会在工作区根目录生成 easypaper_agentsociety.yaml，启动 EasyPaper 时设置 AGENT_CONFIG_PATH 指向该文件即可统一使用此处配置。
+              </Text>
+              <Form.Item name="easypaperApiUrl" label="EasyPaper API URL">
+                <Input placeholder="http://localhost:8004" />
+              </Form.Item>
+              <Form.Item name="easypaperLlmApiKey" label="EasyPaper 通用 LLM API Key">
+                <Input.Password placeholder="与默认 LLM 一致可留空" autoComplete="off" />
+              </Form.Item>
+              <Form.Item name="easypaperLlmModel" label="EasyPaper 通用 LLM 模型（API Base 使用上方默认 LLM）">
+                <Input placeholder="qwen3-next-80b-a3b-instruct" />
+              </Form.Item>
+              <Form.Item name="easypaperVlmModel" label="EasyPaper VLM 模型（版面检查）">
+                <Input placeholder="qwen3-vl-235b-a22b-thinking" />
+              </Form.Item>
+              <Form.Item name="easypaperVlmApiKey" label="EasyPaper VLM API Key">
+                <Input.Password placeholder="与 LLM 一致可留空" autoComplete="off" />
               </Form.Item>
             </Panel>
           </Collapse>

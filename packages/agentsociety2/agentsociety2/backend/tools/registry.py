@@ -25,6 +25,7 @@ from agentsociety2.backend.tools.write_todo import WriteTodoTool
 from agentsociety2.backend.tools.hypothesis import HypothesisTool
 from agentsociety2.backend.tools.data_analysis import DataAnalysisTool
 from agentsociety2.backend.tools.analysis_workspace import SynthesizeExperimentsTool
+from agentsociety2.backend.tools.generate_paper import GeneratePaperTool
 from agentsociety2.logger import get_logger
 
 logger = get_logger()
@@ -93,6 +94,8 @@ class ToolRegistry:
             # 分析模块对主 Agent 仅暴露两个入口：分析单实验、综合分析（具体分析策略与内容由分析模块内部决定）
             DataAnalysisTool,
             SynthesizeExperimentsTool,
+            # 分析报告排版成 PDF（EasyPaper，可选 LLM 合成 meta）
+            GeneratePaperTool,
         ]
 
         # 只有在环境变量配置了 WEB_SEARCH_API_URL 时才启用
