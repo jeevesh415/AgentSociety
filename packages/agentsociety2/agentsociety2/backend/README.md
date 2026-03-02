@@ -320,12 +320,12 @@ const result = await response.json();
 
 ## EasyPaper 论文排版（generate_paper 工具）
 
-`generate_paper` 将分析报告排版成论文 PDF，需单独部署 EasyPaper 服务。EasyPaper 为独立开源项目，仓库：<https://github.com/Aph-xin/EasyPaper>。
+`generate_paper` 将分析报告排版成论文 PDF，需单独部署 EasyPaper 服务。EasyPaper 为独立开源项目，仓库：<https://github.com/tsinghua-fib-lab/EasyPaper>。
 
 **模型配置：** 在 AgentSociety2 配置页「EasyPaper」中可填写通用 LLM（API Key、Base、模型名）与 VLM 模型（用于版面检查）。保存后会在工作区根目录生成 `easypaper_agentsociety.yaml`，启动 EasyPaper 时设置环境变量 `AGENT_CONFIG_PATH=<工作区路径>/easypaper_agentsociety.yaml` 即可统一使用此处配置。若不在配置页填写，则需自行编辑 EasyPaper 的 `configs/example.yaml`。
 
 **部署步骤：**
-1. 克隆 EasyPaper 项目：`git clone https://github.com/Aph-xin/EasyPaper.git`，在任意路径部署
+1. 克隆 EasyPaper 项目：`git clone https://github.com/tsinghua-fib-lab/EasyPaper.git`，在任意路径部署
 2. 在 AgentSociety2 配置页填写 EasyPaper API URL 及 LLM/VLM 模型后保存（会生成 `easypaper_agentsociety.yaml`），或自行编辑 EasyPaper 的 `configs/example.yaml`
 3. 启动 EasyPaper：`AGENT_CONFIG_PATH=/path/to/easypaper_agentsociety.yaml ./start.sh`（默认端口 8004）
 4. 在 AgentSociety2 中设置 `EASYPAPER_API_URL`（如 `http://localhost:8004`）

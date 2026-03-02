@@ -290,7 +290,7 @@ class Config:
     Default: "http://localhost:8004"
 
     Used by the generate_paper tool to call EasyPaper's /metadata/generate endpoint.
-    EasyPaper must be deployed separately (see https://github.com/Aph-xin/EasyPaper).
+    EasyPaper must be deployed separately (see https://github.com/tsinghua-fib-lab/EasyPaper).
 
     EasyPaper uses two model types (configured in EasyPaper's YAML, not here):
     - LLM: for planning, writing, review, typesetting (model_name, api_key, base_url per agent).
