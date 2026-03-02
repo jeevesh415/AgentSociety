@@ -10,7 +10,6 @@
 from __future__ import annotations
 
 import json
-import os
 import re
 import json_repair
 from datetime import datetime
@@ -21,6 +20,7 @@ import httpx
 from agentsociety2.backend.tools.base import BaseTool, ToolResult
 from agentsociety2.backend.sse import ToolEvent
 from agentsociety2.config import get_llm_router_and_model
+from agentsociety2.config.config import Config
 from agentsociety2.logger import get_logger
 from agentsociety2.backend.analysis.utils import parse_llm_json_response
 
@@ -29,12 +29,8 @@ logger = get_logger()
 # 与 analysis/models.py 保持一致
 SUPPORTED_IMAGE_FORMATS = {".png", ".jpg", ".jpeg", ".gif", ".svg", ".webp"}
 
-EASYPAPER_API_URL_ENV = "EASYPAPER_API_URL"
-DEFAULT_EASYPAPER_API_URL = "http://localhost:8004"
-
-
 def _get_easypaper_url() -> str:
-    return os.environ.get(EASYPAPER_API_URL_ENV, "").strip() or DEFAULT_EASYPAPER_API_URL
+    return Config.EASYPAPER_API_URL
 
 
 def _build_metadata_from_analysis(

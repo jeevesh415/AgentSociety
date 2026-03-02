@@ -36,6 +36,12 @@ export interface ConfigValues {
   miroflowMcpToken: string;
   miroflowDefaultLlm: string;
   miroflowDefaultAgent: string;
+  // EasyPaper (optional, for generate_paper tool)
+  easypaperApiUrl: string;
+  easypaperLlmApiKey: string;
+  easypaperLlmModel: string;
+  easypaperVlmModel: string;
+  easypaperVlmApiKey: string;
 }
 
 export interface WorkspaceInfo {

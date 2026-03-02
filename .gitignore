@@ -52,3 +52,8 @@ PUBLISH_CHECKLIST.md
 # Sphinx build outputs
 packages/agentsociety2/docs/_build/
 docs_v1/_build/
+
+# User workspace (may contain API keys)
+workspace/
+packages/agentsociety2/venv/
+packages/agentsociety2/.chainlit/
