@@ -7,6 +7,7 @@
 - [概述](#概述)
 - [架构](#架构)
 - [模块结构](#模块结构)
+- [输出文件结构](#输出文件结构)
 - [公共接口](#公共接口)
 - [配置](#配置)
 - [快速开始](#快速开始)
@@ -75,6 +76,63 @@ analysis/
     ├── 10_visualization_reliability.md
     └── 20_core_skills.md
 ```
+
+---
+
+## 输出文件结构
+
+分析模块运行后，在 `workspace/presentation/` 和 `workspace/synthesis/` 下生成以下结构，供下游工具（如 generate_paper）或人工查阅使用。
+
+### 单实验分析产物（`analyze` 工具）
+
+路径：`{workspace}/presentation/hypothesis_{id}/experiment_{id}/`
+
+```
+presentation/
+└── hypothesis_{id}/
+    └── experiment_{id}/
+        ├── report.md              # Markdown 报告（主输出）
+        ├── report.html            # HTML 报告（含嵌入式 EDA 链接）
+        ├── README.md              # 本目录文件说明
+        ├── data/
+        │   ├── analysis_summary.json   # 分析结果结构化数据（insights, findings, conclusions, recommendations）
+        │   ├── eda_profile.html        # ydata-profiling EDA 概览（可选）
+        │   └── eda_sweetviz.html       # Sweetviz EDA 报告（可选）
+        ├── charts/                # DataExplorer 生成的图表与中间数据
+        │   ├── *.png              # 可视化图表（如 cooperation_by_group.png）
+        │   ├── *.csv, *.json      # 分析中间数据、诊断输出
+        │   └── analysis_*/       # 代码执行临时目录（可含子图）
+        └── assets/                # 报告引用的静态资源（从 charts + run/artifacts 复制）
+            └── *.png, *.jpg, ...  # 报告内嵌图片
+```
+
+| 文件/目录 | 说明 |
+|-----------|------|
+| `report.md` | 主报告 Markdown，含洞察、发现、结论、推荐及图表引用 |
+| `report.html` | 完整 HTML 报告，可嵌入 EDA 链接 |
+| `data/analysis_summary.json` | 结构化分析结果，含 `insights`、`findings`、`conclusions`、`recommendations` |
+| `data/eda_profile.html` | ydata-profiling 生成的数据画像（表统计、分布、缺失） |
+| `data/eda_sweetviz.html` | Sweetviz 目标分析与相关性报告 |
+| `charts/` | DataExplorer 执行 Python 代码的输出目录，图表与中间数据 |
+| `assets/` | 报告实际引用的图片，由 AssetProcessor 从 charts 与 run/artifacts 复制 |
+
+### 跨实验综合分析产物（`synthesize` 工具）
+
+路径：`{workspace}/synthesis/`（默认，可由 `AnalysisConfig.synthesis_output_dir_name` 配置）
+
+```
+synthesis/
+├── synthesis_report_{YYYYMMDD_HHMMSS}.md    # 综合报告 Markdown
+├── synthesis_report_{YYYYMMDD_HHMMSS}.html  # 综合报告 HTML
+└── assets/
+    └── synthesis_comparison.png             # 跨假设对比图（完成度、成功实验数）
+```
+
+| 文件 | 说明 |
+|------|------|
+| `synthesis_report_*.md` | 跨假设综合报告，含策略、对比分析、结论与推荐 |
+| `synthesis_report_*.html` | 综合报告 HTML 版本 |
+| `assets/synthesis_comparison.png` | 各假设完成度与成功实验数柱状图 |
 
 ---
 
