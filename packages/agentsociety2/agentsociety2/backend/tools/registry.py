@@ -24,17 +24,24 @@ from agentsociety2.backend.tools.file_system import (
 from agentsociety2.backend.tools.write_todo import WriteTodoTool
 from agentsociety2.backend.tools.hypothesis import HypothesisTool
 from agentsociety2.backend.tools.data_analysis import DataAnalysisTool
+from agentsociety2.backend.tools.analysis_workspace import SynthesizeExperimentsTool
 from agentsociety2.backend.tools.generate_paper import GeneratePaperTool
 from agentsociety2.logger import get_logger
 
 logger = get_logger()
 
 
-# 如果设置了 WEB_SEARCH_API_URL 环境变量，则尝试导入和注册
+# 如果设置了 WEB_SEARCH_API_URL 和 WEB_SEARCH_API_TOKEN 环境变量，则尝试导入和注册
 def _should_enable_mirothinker() -> bool:
     """检查是否应该启用 Miro Web Research（外部 MCP）"""
     mcp_url = os.environ.get("WEB_SEARCH_API_URL")
-    return mcp_url is not None and mcp_url.strip() != ""
+    mcp_token = os.environ.get("WEB_SEARCH_API_TOKEN")
+    return (
+        mcp_url is not None
+        and mcp_url.strip() != ""
+        and mcp_token is not None
+        and mcp_token.strip() != ""
+    )
 
 
 def _try_import_mirothinker():
@@ -84,8 +91,9 @@ class ToolRegistry:
             WriteTodoTool,
             # 假设管理工具
             HypothesisTool,
-            # 数据分析工具
+            # 分析模块对主 Agent 仅暴露两个入口：分析单实验、综合分析（具体分析策略与内容由分析模块内部决定）
             DataAnalysisTool,
+            SynthesizeExperimentsTool,
             # 分析报告排版成 PDF（EasyPaper，可选 LLM 合成 meta）
             GeneratePaperTool,
         ]
@@ -98,7 +106,7 @@ class ToolRegistry:
                 logger.info("Miro Web Research（外部 MCP）已启用")
             else:
                 logger.warning(
-                    "检测到 WEB_SEARCH_API_URL 环境变量，但 Miro Web Research（外部 MCP）不可用。"
+                    "检测到 WEB_SEARCH_API_URL 和 WEB_SEARCH_API_TOKEN，但 Miro Web Research（外部 MCP）不可用。"
                 )
         for tool_class in tool_classes:
             # 创建默认实例用于获取schema

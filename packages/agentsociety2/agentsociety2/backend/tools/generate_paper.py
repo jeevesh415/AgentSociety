@@ -50,7 +50,7 @@ def _build_metadata_from_analysis(
     figures: List[Dict[str, Any]] = []
     tables: List[Dict[str, Any]] = []
 
-    result_file = output_dir / "data" / "analysis_result.json"
+    result_file = output_dir / "data" / "analysis_summary.json"
     if result_file.exists():
         try:
             raw = json.loads(result_file.read_text(encoding="utf-8"))
@@ -64,9 +64,9 @@ def _build_metadata_from_analysis(
             if conclusions:
                 experiments = (experiments + "\n\nConclusions: " + str(conclusions)).strip()
         except Exception as e:
-            logger.warning(f"Failed to read analysis_result.json: {e}")
+            logger.warning(f"Failed to read analysis_summary.json: {e}")
 
-    report_md = output_dir / "analysis_report.md"
+    report_md = output_dir / "report.md"
     if report_md.exists():
         try:
             content = report_md.read_text(encoding="utf-8")
@@ -81,7 +81,7 @@ def _build_metadata_from_analysis(
             elif content and len(content) <= 8000:
                 experiments = content
         except Exception as e:
-            logger.warning(f"Failed to read analysis_report.md: {e}")
+            logger.warning(f"Failed to read report.md: {e}")
 
     assets_dir = output_dir / "assets"
     if assets_dir.is_dir():
@@ -175,7 +175,7 @@ def _merge_context_into_metadata(ctx: Dict[str, Any], metadata: Dict[str, Any]) 
             parts.append(_truncate(report, 2000))
         method = "\n\n".join(parts) if parts else method
 
-    # data: from report / analysis_result when current is generic
+    # data: from report / analysis_summary when current is generic
     if data in (_GENERIC_DATA, "") and (report or result_json):
         if result_json and result_json.startswith("{"):
             try:
@@ -234,7 +234,7 @@ def _collect_figure_paths_under(base_dir: Path) -> List[str]:
 def _gather_synthesis_context(
     workspace_path: Path, hypothesis_id: str, experiment_id: str
 ) -> Dict[str, Any]:
-    """从 workspace 收集 TOPIC、HYPOTHESIS、EXPERIMENT、analysis_report、analysis_result、assets、可选 literature。
+    """从 workspace 收集 TOPIC、HYPOTHESIS、EXPERIMENT、report、analysis_summary、assets、可选 literature。
     不硬编码绝对路径：TOPIC 在 workspace 根，HYPOTHESIS 在 hypothesis_<id>/，实验材料可在
     presentation/hypothesis_<id>/experiment_<id>/ 或 hypothesis_<id>/experiment_<id>/（后者为 fallback）。
     """
@@ -259,11 +259,11 @@ def _gather_synthesis_context(
     out["experiment"] = _read_text_safe(exp_file)
     # Analysis outputs: try presentation/ first, then hypothesis_X/experiment_Y/ as fallback
     pres_dir = workspace_path / "presentation" / f"hypothesis_{hypothesis_id}" / f"experiment_{experiment_id}"
-    report_md_pres = pres_dir / "analysis_report.md"
-    report_md_exp = exp_dir / "analysis_report.md"
+    report_md_pres = pres_dir / "report.md"
+    report_md_exp = exp_dir / "report.md"
     out["analysis_report"] = _read_text_safe(report_md_pres) or _read_text_safe(report_md_exp)
-    result_pres = pres_dir / "data" / "analysis_result.json"
-    result_exp = exp_dir / "data" / "analysis_result.json"
+    result_pres = pres_dir / "data" / "analysis_summary.json"
+    result_exp = exp_dir / "data" / "analysis_summary.json"
     out["analysis_result_json"] = _read_text_safe(result_pres) or _read_text_safe(result_exp)
     # Collect figure paths relative to assets (include subdirs e.g. assets/figures/*.png)
     figure_paths_set: set[str] = set()
@@ -341,8 +341,8 @@ Output a single JSON object with these keys (all strings except references and f
 # User-facing description of workspace inputs used by synthesis (no hardcoded absolute paths).
 SYNTHESIS_INPUTS_DESCRIPTION = (
     "Synthesis uses content from the workspace: TOPIC.md (workspace root), "
-    "HYPOTHESIS.md (per hypothesis), and per-experiment files: analysis_report.md, "
-    "data/analysis_result.json, and figures under assets/ (multi-experiment aggregation may be added later). "
+    "HYPOTHESIS.md (per hypothesis), and per-experiment files: report.md, "
+    "data/analysis_summary.json, and figures under assets/ (multi-experiment aggregation may be added later). "
     "The fields title, idea_hypothesis, method, data, and experiments are summarized from these file contents, not hardcoded paths."
 )
 
@@ -352,9 +352,9 @@ class GeneratePaperTool(BaseTool):
 
     支持两种 meta 来源：
     - use_synthesis=true（默认）：由 LLM 根据工作区内用户提供的文件内容填写 meta。依赖：TOPIC.md、HYPOTHESIS.md，
-      以及单实验的 analysis_report.md、data/analysis_result.json、assets 中的 figures（后续可扩展多实验）。
+      以及单实验的 report.md、data/analysis_summary.json、assets 中的 figures（后续可扩展多实验）。
       title / idea_hypothesis / method / data / experiments 均从上述文件内容总结得出，不硬编码地址。
-    - use_synthesis=false：使用固定规则从该实验的 analysis_report.md、data/analysis_result.json、assets/ 映射为 meta 后提交 EasyPaper。
+    - use_synthesis=false：使用固定规则从该实验的 report.md、data/analysis_summary.json、assets/ 映射为 meta 后提交 EasyPaper。
     需先对同一 hypothesis/experiment 执行 data_analysis 生成报告与图表。
     """
 
@@ -368,7 +368,7 @@ class GeneratePaperTool(BaseTool):
             "has been run for that hypothesis and experiment.\n\n"
             "By default (use_synthesis=true), an LLM summarizes workspace-provided files to fill paper metadata. "
             "Required inputs in the workspace: TOPIC.md, HYPOTHESIS.md; for the chosen experiment: "
-            "analysis_report.md, data/analysis_result.json, and figures under assets/ (support for multiple "
+            "report.md, data/analysis_summary.json, and figures under assets/ (support for multiple "
             "experiments may be added later). The fields title, idea_hypothesis, method, data, and experiments "
             "are derived from the content of these files, not hardcoded paths. Set use_synthesis=false to use a "
             "fixed mapping from analysis output only.\n\n"

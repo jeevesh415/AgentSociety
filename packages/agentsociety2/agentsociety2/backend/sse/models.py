@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 from typing import Literal, Union
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, ConfigDict, Field
 from enum import Enum
 
 
@@ -19,11 +19,10 @@ class SSEEventType(str, Enum):
 class BaseSSEEvent(BaseModel):
     """SSE事件基类"""
 
+    model_config = ConfigDict(use_enum_values=True)
+
     type: str = Field(..., description="事件类型")
     content: str = Field(..., description="消息内容")
-
-    class Config:
-        use_enum_values = True
 
 
 class MessageEvent(BaseSSEEvent):
