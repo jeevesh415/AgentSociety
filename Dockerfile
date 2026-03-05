@@ -32,6 +32,7 @@ FROM python:3.12
 
 RUN apt-get update && apt-get install -y \
     curl \
+    sudo \
     locales \
     texlive-latex-recommended \
     texlive-latex-extra \
