@@ -188,7 +188,7 @@ class ScriptGenerator:
                 f'            id=0,',
                 f'            profile={{"name": "集成测试", "personality": "测试"}}',
                 f'        )',
-                f'        agent.set_env(router)',
+                f'        await agent.init(router)',
                 f'        print("✓ Agent 创建并设置环境")',
                 f'',
                 f'        print("\\n--- 测试环境查询 ---")',
