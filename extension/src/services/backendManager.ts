@@ -138,6 +138,8 @@ export class BackendManager {
     // 基础配置 - 始终使用工作区相对路径
     // AGENTSOCIETY_HOME_DIR 相对于工作区根目录
     env.AGENTSOCIETY_HOME_DIR = path.join(workspaceFolder.uri.fsPath, 'agentsociety_data');
+    // WORKSPACE_PATH 用于自定义模块扫描等需要工作区路径的后端接口
+    env.WORKSPACE_PATH = workspaceFolder.uri.fsPath;
 
     // LLM 配置
     if (envConfig?.llmApiKey) env.AGENTSOCIETY_LLM_API_KEY = envConfig.llmApiKey;

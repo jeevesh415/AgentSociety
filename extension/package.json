@@ -108,6 +108,31 @@
         "command": "aiSocialScientist.openConfigPage",
         "title": "AI Social Scientist: Open Configuration",
         "icon": "$(settings)"
+      },
+      {
+        "command": "aiSocialScientist.toggleParseMode",
+        "title": "AI Social Scientist: Toggle PDF Parse Mode",
+        "icon": "$(check-square)"
+      },
+      {
+        "command": "aiSocialScientist.scanCustomModules",
+        "title": "AI Social Scientist: Scan Custom Modules",
+        "icon": "$(refresh)"
+      },
+      {
+        "command": "aiSocialScientist.testCustomModules",
+        "title": "AI Social Scientist: Test Custom Modules",
+        "icon": "$(play)"
+      },
+      {
+        "command": "aiSocialScientist.cleanCustomModules",
+        "title": "AI Social Scientist: Clean Custom Modules",
+        "icon": "$(trash)"
+      },
+      {
+        "command": "aiSocialScientist.listCustomModules",
+        "title": "AI Social Scientist: List Custom Modules",
+        "icon": "$(list-tree)"
       }
     ],
     "menus": {
@@ -128,6 +153,24 @@
           "when": "view == projectStructureView",
           "group": "navigation",
           "icon": "$(settings)"
+        },
+        {
+          "command": "aiSocialScientist.scanCustomModules",
+          "when": "view == projectStructureView",
+          "group": "customModules",
+          "icon": "$(refresh)"
+        },
+        {
+          "command": "aiSocialScientist.testCustomModules",
+          "when": "view == projectStructureView",
+          "group": "customModules",
+          "icon": "$(play)"
+        },
+        {
+          "command": "aiSocialScientist.cleanCustomModules",
+          "when": "view == projectStructureView",
+          "group": "customModules",
+          "icon": "$(trash)"
         }
       ],
       "view/item/context": [

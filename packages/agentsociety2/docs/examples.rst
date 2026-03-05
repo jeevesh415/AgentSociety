@@ -1,36 +1,36 @@
-Examples
+示例
 ========
 
-This section contains example code demonstrating AgentSociety 2's capabilities.
+本部分包含演示 AgentSociety 2 功能的示例代码。
 
-Running Examples
+运行示例
 ----------------
 
-All examples are located in the ``packages/agentsociety2/examples/`` directory.
+所有示例都位于 ``packages/agentsociety2/examples/`` 目录中。
 
-**Prerequisites:**
+**前提条件：**
 
-1. Install AgentSociety 2: ``pip install agentsociety2``
-2. Configure LLM API credentials (see :doc:`installation`)
-3. Navigate to the examples directory
+1. 安装 AgentSociety 2: ``pip install agentsociety2``
+2. 配置 LLM API 凭证（参见 :doc:`installation`）
+3. 导航到示例目录
 
 .. code-block:: bash
 
    cd packages/agentsociety2/examples
    python basics/01_hello_agent.py
 
-Basic Examples
+基本示例
 --------------
 
-These examples demonstrate fundamental AgentSociety 2 concepts:
+这些示例演示 AgentSociety 2 的基本概念：
 
 **Hello Agent** (``basics/01_hello_agent.py``)
 
-A minimal example showing:
+一个最小示例，展示：
 
-* Creating a single agent with a personality profile
-* Setting up the SimpleSocialSpace environment
-* Using AgentSociety to coordinate agent-environment interaction
+* 创建具有个性配置文件的单个智能体
+* 设置 SimpleSocialSpace 环境
+* 使用 AgentSociety 协调智能体-环境交互
 
 .. code-block:: python
 
@@ -53,55 +53,55 @@ A minimal example showing:
    response = await society.ask("What's your favorite activity?")
    print(f"Agent: {response}")
 
-**Custom Environment Module** (``basics/02_custom_env_module.py``)
+**自定义环境模块** (``basics/02_custom_env_module.py``)
 
-Demonstrates creating custom environment modules:
+演示创建自定义环境模块：
 
-* Defining a custom environment with @tool decorators
-* Implementing observe(), step(), and tool methods
-* Registering the module with CodeGenRouter
+* 使用 @tool 装饰器定义自定义环境
+* 实现 observe()、step() 和工具方法
+* 向 CodeGenRouter 注册模块
 
-**Replay System** (``basics/03_replay_system.py``)
+**回放系统** (``basics/03_replay_system.py``)
 
-Shows comprehensive data tracking:
+展示全面的数据跟踪：
 
-* Setting up ReplayWriter for automatic data capture
-* Recording agent profiles, dialogs, and status
-* Reading back recorded data for analysis
+* 设置 ReplayWriter 用于自动数据捕获
+* 记录智能体配置文件、对话和状态
+* 读回记录的数据进行分析
 
-Game Theory Examples
+博弈论示例
 ---------------------
 
-**Prisoner's Dilemma** (``games/01_prisoners_dilemma.py``)
+**囚徒困境** (``games/01_prisoners_dilemma.py``)
 
-A classic game theory scenario:
+一个经典的博弈论场景：
 
-* Two agents with different personalities
-* Sequential decision-making with payoffs
-* Reflection on outcomes
+* 两个具有不同个性的智能体
+* 具有收益的顺序决策
+* 对结果的反思
 
-**Public Goods Game** (``games/02_public_goods.py``)
+**公共物品博弈** (``games/02_public_goods.py``)
 
-Multi-round collective action experiment:
+多轮集体行动实验：
 
-* Four agents with different personality traits
-* Contribution decisions over multiple rounds
-* Group outcome calculation
+* 四个具有不同个性特征的智能体
+* 多轮贡献决策
+* 小组结果计算
 
-Advanced Examples
+高级示例
 -----------------
 
-**Custom Agent** (``advanced/01_custom_agent.py``)
+**自定义智能体** (``advanced/01_custom_agent.py``)
 
-Extending AgentSociety 2 with custom agent types:
+使用自定义智能体类型扩展 AgentSociety 2：
 
-* Implementing required abstract methods (ask, step, dump, load)
-* Creating specialized agents for research needs
+* 实现必需的抽象方法（ask、step、dump、load）
+* 为研究需求创建专门的智能体
 
-**Multi-Router Comparison** (``advanced/02_multi_router.py``)
+**多路由器比较** (``advanced/02_multi_router.py``)
 
-Compares different reasoning strategies:
+比较不同的推理策略：
 
-* ReActRouter: Iterative reasoning and acting
-* PlanExecuteRouter: Plan-first execution
-* CodeGenRouter: Generative code execution (recommended)
+* ReActRouter: 迭代推理和行动
+* PlanExecuteRouter: 计划优先执行
+* CodeGenRouter: 生成代码执行（推荐）

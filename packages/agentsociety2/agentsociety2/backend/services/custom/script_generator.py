@@ -74,7 +74,7 @@ class ScriptGenerator:
         script_lines.extend(env_imports)
 
         if env_imports:
-            script_lines.append('from agentsociety2.env.router_react import ReActRouter')
+            script_lines.append('from agentsociety2.env.router_codegen import CodeGenRouter')
 
         script_lines.extend([
             '',
@@ -124,7 +124,7 @@ class ScriptGenerator:
         script_lines.extend([
             '',
             'async def test_envs():',
-            '    """测试自定义环境模块"""',
+            '"""测试自定义环境模块"""',
             '    print("=" * 50)',
             '    print("测试自定义环境模块")',
             '    print("=" * 50)',
@@ -165,7 +165,7 @@ class ScriptGenerator:
         script_lines.extend([
             '',
             'async def test_integration():',
-            '    """测试 Agent 与环境模块的集成"""',
+            '"""测试 Agent 与环境模块的集成"""',
             '    print("=" * 50)',
             '    print("测试 Agent 与环境集成")',
             '    print("=" * 50)',
@@ -180,8 +180,8 @@ class ScriptGenerator:
                 f'    try:',
                 f'        print("\\n--- 创建环境路由 ---")',
                 f'        env = {env_class}()',
-                f'        router = ReActRouter([env])',
-                f'        print(f"✓ 路由创建成功，注册了 {{len(router.envs)}} 个环境")',
+                f'        router = CodeGenRouter([env])',
+                f'        print(f"✓ 路由创建成功")',
                 f'',
                 f'        print("\\n--- 创建 Agent ---")',
                 f'        agent = {agent_class}(',

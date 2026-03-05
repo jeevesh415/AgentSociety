@@ -1,28 +1,28 @@
-Interacting with AgentSociety
+与 AgentSociety 交互
 ==============================
 
-This guide explains how to interact with AgentSociety 2 during experiments.
+本指南介绍如何在实验期间与 AgentSociety 2 交互。
 
-Overview
+概述
 --------
 
-AgentSociety 2 provides two main modes of interaction:
+AgentSociety 2 提供两种主要的交互模式：
 
-1. **Query Mode** (read-only): Ask questions without modifying the simulation state
-2. **Intervention Mode** (read-write): Modify agent states or environment variables
+1. **查询模式** (只读): 提问而不修改模拟状态
+2. **干预模式** (读写): 修改智能体状态或环境变量
 
-These interactions can be performed:
+这些交互可以在以下时间执行：
 
-* **During simulation**: Between steps or at specific time points
-* **After simulation**: Query the final state or collect survey data
+* **模拟期间**: 在步骤之间或特定时间点
+* **模拟后**: 查询最终状态或收集调查数据
 
-Basic Interaction Patterns
+基本交互模式
 ---------------------------
 
-The ask() Method - Read-Only Queries
+ask() 方法 - 只读查询
 ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
 
-Use ``society.ask()`` for read-only queries that don't modify the simulation:
+使用 ``society.ask()`` 进行不修改模拟的只读查询：
 
 .. code-block:: python
 
@@ -35,10 +35,10 @@ Use ``society.ask()`` for read-only queries that don't modify the simulation:
    # Query about multiple agents
    response = await society.ask("List all agents who are unhappy")
 
-The intervene() Method - Read-Write Modifications
+intervene() 方法 - 读写修改
 ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
 
-Use ``society.intervene()`` to make changes to the simulation:
+使用 ``society.intervene()`` 对模拟进行更改：
 
 .. code-block:: python
 
@@ -57,10 +57,10 @@ Use ``society.intervene()`` to make changes to the simulation:
        "Set all agents' happiness to 0.8"
    )
 
-Simulation Workflow
+模拟工作流程
 -------------------
 
-Running with Step-by-Step Control
+使用逐步控制运行
 ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
 
 .. code-block:: python
@@ -90,7 +90,7 @@ Running with Step-by-Step Control
 
    await society.close()
 
-Running with Time Control
+使用时间控制运行
 ~~~~~~~~~~~~~~~~~~~~~~~~~~
 
 .. code-block:: python
@@ -104,10 +104,10 @@ Running with Time Control
    # Or run for specific number of steps
    await society.run(num_steps=24, tick=3600)  # 24 hours
 
-Data Collection
+数据收集
 ---------------
 
-Collecting Agent Responses
+收集智能体响应
 ~~~~~~~~~~~~~~~~~~~~~~~~~~~
 
 .. code-block:: python
@@ -131,7 +131,7 @@ Collecting Agent Responses
            answer = await society.ask(f"Agent {agent.id}: {question}")
            # Save answer to database or file
 
-Using ReplayWriter for Data Collection
+使用 ReplayWriter 进行数据收集
 ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
 
 .. code-block:: python
@@ -159,10 +159,10 @@ Using ReplayWriter for Data Collection
 
    await society.close()
 
-Common Interaction Scenarios
+常见交互场景
 -----------------------------
 
-Scenario 1: Event Intervention
+场景 1: 事件干预
 ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
 
 .. code-block:: python
@@ -182,8 +182,8 @@ Scenario 1: Event Intervention
    impact = await society.ask("How did the hurricane affect everyone?")
    print(impact)
 
-Scenario 2: Policy Experiment
-~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+场景 2: 政策实验
+~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
 
 .. code-block:: python
 
@@ -209,7 +209,7 @@ Scenario 2: Policy Experiment
    control_outcome = await control_society.ask("What's the average happiness?")
    treatment_outcome = await treatment_society.ask("What's the average happiness?")
 
-Scenario 3: Data Collection at Multiple Time Points
+场景 3: 多个时间点收集数据
 ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
 
 .. code-block:: python
@@ -230,15 +230,15 @@ Scenario 3: Data Collection at Multiple Time Points
 
    # Analyze change over time
 
-Best Practices
+最佳实践
 --------------
 
-1. **Use ask() for queries**: Always use ``ask()`` when you only need information
+1. **对查询使用 ask()**: 只需要信息时始终使用 ``ask()``
 
-2. **Use intervene() for changes**: Only use ``intervene()`` when you want to modify state
+2. **对更改使用 intervene()**: 只在想修改状态时使用 ``intervene()``
 
-3. **Combine with ReplayWriter**: Enable replay recording for comprehensive data collection
+3. **结合 ReplayWriter**: 启用回放记录以进行全面的数据收集
 
-4. **Query specific agents**: Direct questions to specific agents for targeted responses
+4. **查询特定智能体**: 向特定智能体提问以获得有针对性的响应
 
-5. **Time your interventions**: Intervene at appropriate simulation times for realistic effects
+5. **适时干预**: 在适当的模拟时间进行干预以获得现实效果

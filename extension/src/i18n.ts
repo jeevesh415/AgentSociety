@@ -156,6 +156,29 @@ const translations: Record<string, Record<string, string>> = {
     'configPage.title': 'AI Social Scientist 配置',
     'configPage.noWorkspace': '请先打开一个工作区文件夹。配置将保存在当前工作区中。',
     'configPage.openWorkspace': '打开工作区',
+
+    // customModules
+    'customModules.noWorkspace': '未找到工作区文件夹',
+    'customModules.scanning': '正在扫描自定义模块...',
+    'customModules.scanSuccess': '扫描完成',
+    'customModules.scanFailed': '扫描失败: {0}',
+    'customModules.testing': '正在测试自定义模块...',
+    'customModules.testSuccess': '测试完成',
+    'customModules.testFailed': '测试失败: {0}',
+    'customModules.cleanConfirm': '确定要清理所有自定义模块配置吗？此操作无法撤销。',
+    'customModules.cleanConfirmButton': '清理',
+    'customModules.cleanFailed': '清理失败: {0}',
+    'customModules.noModules': '未发现自定义模块',
+    'customModules.listFailed': '获取模块列表失败: {0}',
+    'customModules.cleanSuccess': '清理完成',
+
+    // projectStructureProvider.ts - custom modules
+    'projectStructure.customModules': '自定义模块',
+    'projectStructure.customAgents': '自定义 Agents',
+    'projectStructure.customEnvs': '自定义环境',
+    'projectStructure.customScan': '扫描模块',
+    'projectStructure.customTest': '测试模块',
+    'projectStructure.customClean': '清空配置',
   },
   'en-US': {
     // extension.ts
@@ -304,6 +327,26 @@ const translations: Record<string, Record<string, string>> = {
     'configPage.title': 'AI Social Scientist Configuration',
     'configPage.noWorkspace': 'Please open a workspace folder first. Configuration will be saved in the current workspace.',
     'configPage.openWorkspace': 'Open Workspace',
+
+    // customModules
+    'customModules.noWorkspace': 'Workspace folder not found',
+    'customModules.scanning': 'Scanning custom modules...',
+    'customModules.scanSuccess': 'Scan completed',
+    'customModules.scanFailed': 'Scan failed: {0}',
+    'customModules.testing': 'Testing custom modules...',
+    'customModules.testSuccess': 'Test completed',
+    'customModules.testFailed': 'Test failed: {0}',
+    'customModules.cleanConfirm': 'Are you sure you want to clean all custom module configurations? This action cannot be undone.',
+    'customModules.cleanSuccess': 'Clean completed',
+    'customModules.cleanConfirmButton': 'Clean',
+    'customModules.cleanFailed': 'Clean failed: {0}',
+    'customModules.noModules': 'No custom modules found',
+    'customModules.listFailed': 'Failed to get module list: {0}',
+
+    // projectStructureProvider.ts - custom modules
+    'projectStructure.customModules': 'Custom Modules',
+    'projectStructure.customAgents': 'Custom Agents',
+    'projectStructure.customEnvs': 'Custom Environments',
   },
 };
 

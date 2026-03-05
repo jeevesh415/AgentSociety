@@ -195,6 +195,68 @@ export interface AvailableClassesResponse {
   agent_count: number;
 }
 
+// ========== Custom Module API Interfaces ==========
+
+export interface CustomModulesScanRequest {
+  workspace_path?: string;
+}
+
+export interface CustomModulesScanResponse {
+  success: boolean;
+  agents_found: number;
+  envs_found: number;
+  agents_generated: number;
+  envs_generated: number;
+  errors: string[];
+  message?: string;
+}
+
+export interface CustomModulesCleanResponse {
+  success: boolean;
+  removed_count: number;
+  message: string;
+}
+
+export interface CustomModulesTestResponse {
+  success: boolean;
+  test_output: string;
+  test_file?: string;
+  error?: string;
+  returncode?: number;
+}
+
+export interface CustomModulesListResponse {
+  success: boolean;
+  agents: Array<{
+    type: string;
+    class_name: string;
+    description: string;
+    is_custom: boolean;
+    module_path: string;
+    file_path: string;
+  }>;
+  envs: Array<{
+    type: string;
+    class_name: string;
+    description: string;
+    is_custom: boolean;
+    module_path: string;
+    file_path: string;
+  }>;
+  total_agents: number;
+  total_envs: number;
+}
+
+export interface CustomModulesStatusResponse {
+  custom_dir_exists: boolean;
+  agents_dir_exists: boolean;
+  envs_dir_exists: boolean;
+  agent_files_count: number;
+  env_files_count: number;
+  registered_agents: number;
+  registered_envs: number;
+}
+
 export class ApiClient {
   private baseUrl: string;
   private outputChannel: vscode.OutputChannel;
@@ -571,6 +633,151 @@ export class ApiClient {
       return data;
     } catch (error) {
       this.log(`Get available classes request failed: ${error}`);
+      throw error;
+    }
+  }
+
+  // ========== Custom Module APIs ==========
+
+  /**
+   * 扫描自定义模块并生成 JSON 配置
+   */
+  async scanCustomModules(request: CustomModulesScanRequest): Promise<CustomModulesScanResponse> {
+    try {
+      const url = `${this.baseUrl}/api/v1/custom/scan`;
+      this.log(`Sending custom modules scan request to ${url}`);
+
+      const response = await fetch(url, {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+        },
+        body: JSON.stringify(request),
+      });
+
+      if (!response.ok) {
+        const errorText = await response.text();
+        this.log(`Custom modules scan request failed: ${response.status}: ${errorText}`);
+        throw new Error(`HTTP ${response.status}: ${errorText}`);
+      }
+
+      const data = await response.json() as CustomModulesScanResponse;
+      this.log(`Custom modules scan response: success=${data.success}, message=${data.message}`);
+      return data;
+    } catch (error) {
+      this.log(`Custom modules scan request failed: ${error}`);
+      throw error;
+    }
+  }
+
+  /**
+   * 清理自定义模块配置
+   */
+  async cleanCustomModules(request: CustomModulesScanRequest): Promise<CustomModulesCleanResponse> {
+    try {
+      const url = `${this.baseUrl}/api/v1/custom/clean`;
+      this.log(`Sending custom modules clean request to ${url}`);
+
+      const response = await fetch(url, {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+        },
+        body: JSON.stringify(request),
+      });
+
+      if (!response.ok) {
+        const errorText = await response.text();
+        this.log(`Custom modules clean request failed: ${response.status}: ${errorText}`);
+        throw new Error(`HTTP ${response.status}: ${errorText}`);
+      }
+
+      const data = await response.json() as CustomModulesCleanResponse;
+      this.log(`Custom modules clean response: success=${data.success}, message=${data.message}`);
+      return data;
+    } catch (error) {
+      this.log(`Custom modules clean request failed: ${error}`);
+      throw error;
+    }
+  }
+
+  /**
+   * 测试自定义模块
+   */
+  async testCustomModules(request: CustomModulesScanRequest): Promise<CustomModulesTestResponse> {
+    try {
+      const url = `${this.baseUrl}/api/v1/custom/test`;
+      this.log(`Sending custom modules test request to ${url}`);
+
+      const response = await fetch(url, {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+        },
+        body: JSON.stringify(request),
+      });
+
+      if (!response.ok) {
+        const errorText = await response.text();
+        this.log(`Custom modules test request failed: ${response.status}: ${errorText}`);
+        throw new Error(`HTTP ${response.status}: ${errorText}`);
+      }
+
+      const data = await response.json() as CustomModulesTestResponse;
+      this.log(`Custom modules test response: success=${data.success}`);
+      return data;
+    } catch (error) {
+      this.log(`Custom modules test request failed: ${error}`);
+      throw error;
+    }
+  }
+
+  /**
+   * 列出已注册的自定义模块
+   */
+  async listCustomModules(): Promise<CustomModulesListResponse> {
+    try {
+      const url = `${this.baseUrl}/api/v1/custom/list`;
+      this.log(`Fetching custom modules list from ${url}`);
+
+      const response = await fetch(url);
+
+      if (!response.ok) {
+        const errorText = await response.text();
+        this.log(`Get custom modules list request failed: ${response.status}: ${errorText}`);
+        throw new Error(`HTTP ${response.status}: ${errorText}`);
+      }
+
+      const data = await response.json() as CustomModulesListResponse;
+      this.log(`Custom modules list fetched: ${data.total_agents} agents, ${data.total_envs} envs`);
+      return data;
+    } catch (error) {
+      this.log(`Get custom modules list request failed: ${error}`);
+      throw error;
+    }
+  }
+
+  /**
+   * 获取自定义模块状态
+   */
+  async getCustomModulesStatus(): Promise<CustomModulesStatusResponse> {
+    try {
+      const url = `${this.baseUrl}/api/v1/custom/status`;
+      this.log(`Fetching custom modules status from ${url}`);
+
+      const response = await fetch(url);
+
+      if (!response.ok) {
+        const errorText = await response.text();
+        this.log(`Get custom modules status request failed: ${response.status}: ${errorText}`);
+        throw new Error(`HTTP ${response.status}: ${errorText}`);
+      }
+
+      const data = await response.json() as CustomModulesStatusResponse;
+      this.log(`Custom modules status fetched`);
+      return data;
+    } catch (error) {
+      this.log(`Get custom modules status request failed: ${error}`);
       throw error;
     }
   }

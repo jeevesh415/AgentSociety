@@ -1,40 +1,39 @@
-Custom Modules
+自定义模块
 ==============
 
-AgentSociety 2 supports creating and registering custom Agent and Environment modules,
-allowing you to extend the platform with your own simulation components.
+AgentSociety 2 支持创建和注册自定义智能体和环境模块，
+允许您使用自己的模拟组件扩展平台。
 
-Overview
+概述
 --------
 
-The custom module system allows you to:
+自定义模块系统允许您：
 
-* Create custom Agent classes with specialized behaviors
-* Create custom Environment modules with domain-specific tools
-* Automatically discover and register modules via API
-* Test custom modules with auto-generated test scripts
-* Seamlessly integrate with the existing AgentSociety framework
+* 创建具有专门行为的自定义智能体类
+* 创建具有特定领域工具的自定义环境模块
+* 通过 API 自动发现和注册模块
+* 使用自动生成的测试脚本测试自定义模块
+* 与现有 AgentSociety 框架无缝集成
 
-Directory Structure
+目录结构
 -------------------
 
-Custom modules are placed in the ``custom/`` directory within your workspace::
+自定义模块放置在工作区内的 ``custom/`` 目录中::
 
    workspace/
-   ├── custom/                    # User-created directory
-   │   ├── agents/                # Custom Agent classes
+   ├── custom/                    # 用户创建的目录
+   │   ├── agents/                # 自定义智能体类
    │   │   └── my_agent.py
-   │   └── envs/                  # Custom Environment modules
+   │   └── envs/                  # 自定义环境模块
    │       └── my_env.py
-   └── .agentsociety/             # Auto-generated configs
+   └── .agentsociety/             # 自动生成的配置
        ├── agent_classes/
        └── env_modules/
 
-Creating a Custom Agent
+创建自定义智能体
 -------------------------
 
-All custom Agents must inherit from ``AgentBase``
-and implement the required methods:
+所有自定义智能体必须继承 ``AgentBase`` 并实现必需的方法：
 
 .. code-block:: python
 
@@ -71,7 +70,7 @@ and implement the required methods:
            self._id = dump_data.get("id", self._id)
            self._profile = dump_data.get("profile", self._profile)
 
-Required Methods
+必需方法
 ~~~~~~~~~~~~~~~~
 
 .. list-table::
@@ -80,21 +79,20 @@ Required Methods
    * - Method
      - Description
    * - ``mcp_description()``
-     - Return module description (class method)
+     - 返回模块描述（类方法）
    * - ``ask()``
-     - Answer questions from environment
+     - 回答环境的问题
    * - ``step()``
-     - Execute one simulation step
+     - 执行一个模拟步骤
    * - ``dump()``
-     - Serialize agent state
+     - 序列化智能体状态
    * - ``load()``
-     - Load agent state from dictionary
+     - 从字典加载智能体状态
 
-Creating a Custom Environment
+创建自定义环境
 ------------------------------
 
-Custom environments must inherit from ``EnvBase``
-and use the ``@tool`` decorator to register methods:
+自定义环境必须继承 ``EnvBase`` 并使用 ``@tool`` 装饰器注册方法：
 
 .. code-block:: python
 
@@ -129,10 +127,10 @@ and use the ``@tool`` decorator to register methods:
            """Environment step"""
            self.t = t
 
-The @tool Decorator
+@tool 装饰器
 ~~~~~~~~~~~~~~~~~~~
 
-The ``@tool`` decorator registers methods as agent-accessible tools:
+``@tool`` 装饰器将方法注册为智能体可访问的工具：
 
 .. list-table::
    :header-rows: 1
@@ -140,22 +138,22 @@ The ``@tool`` decorator registers methods as agent-accessible tools:
    * - Parameter
      - Description
    * - ``readonly=True``
-     - Tool doesn't modify environment state
+     - 工具不修改环境状态
    * - ``readonly=False``
-     - Tool can modify environment state
+     - 工具可以修改环境状态
    * - ``kind="observe"``
-     - Observation tool (single agent_id parameter, readonly=True)
+     - 观察工具（单个 agent_id 参数，readonly=True）
    * - ``kind="statistics"``
-     - Statistics tool (no parameters, readonly=True)
+     - 统计工具（无参数，readonly=True）
    * - ``kind=None``
-     - Regular tool (any parameters, can be readonly=False)
+     - 常规工具（任何参数，可以是 readonly=False）
 
-Registering Custom Modules
+注册自定义模块
 ---------------------------
 
-After creating your custom modules, register them using the API:
+创建自定义模块后，使用 API 注册它们：
 
-**Scan and Register**
+**扫描并注册**
 
 .. code-block:: bash
 
@@ -163,13 +161,13 @@ After creating your custom modules, register them using the API:
      -H "Content-Type: application/json" \
      -d '{"workspace_path": "/path/to/workspace"}'
 
-**List Registered Modules**
+**列出已注册的模块**
 
 .. code-block:: bash
 
    curl http://localhost:8001/api/v1/custom/list
 
-**Test Custom Modules**
+**测试自定义模块**
 
 .. code-block:: bash
 
@@ -177,7 +175,7 @@ After creating your custom modules, register them using the API:
      -H "Content-Type: application/json" \
      -d '{"workspace_path": "/path/to/workspace"}'
 
-API Endpoints
+API 端点
 ~~~~~~~~~~~~~
 
 .. list-table::
@@ -188,72 +186,72 @@ API Endpoints
      - Description
    * - ``/api/v1/custom/scan``
      - POST
-     - Scan and register custom modules
+     - 扫描并注册自定义模块
    * - ``/api/v1/custom/test``
      - POST
-     - Test custom modules
+     - 测试自定义模块
    * - ``/api/v1/custom/clean``
      - POST
-     - Clean custom module configs
+     - 清理自定义模块配置
    * - ``/api/v1/custom/list``
      - GET
-     - List registered custom modules
+     - 列出已注册的自定义模块
    * - ``/api/v1/custom/status``
      - GET
-     - Get module status overview
+     - 获取模块状态概述
 
-Examples
+示例
 --------
 
-Example agents and environments are available in the ``custom/`` directory:
+示例智能体和环境可在 ``custom/`` 目录中找到：
 
-* ``custom/agents/examples/simple_agent.py`` - Basic Agent example
-* ``custom/agents/examples/advanced_agent.py`` - Agent with memory and mood
-* ``custom/envs/examples/simple_env.py`` - Counter environment
-* ``custom/envs/examples/advanced_env.py`` - Resource management environment
+* ``custom/agents/examples/simple_agent.py`` - 基本智能体示例
+* ``custom/agents/examples/advanced_agent.py`` - 具有记忆和情绪的智能体
+* ``custom/envs/examples/simple_env.py`` - 计数器环境
+* ``custom/envs/examples/advanced_env.py`` - 资源管理环境
 
-These examples demonstrate best practices for creating custom modules.
+这些示例演示了创建自定义模块的最佳实践。
 
-Configuration
+配置
 -------------
 
-Set the ``WORKSPACE_PATH`` environment variable to point to your workspace:
+设置 ``WORKSPACE_PATH`` 环境变量以指向您的工作区：
 
 .. code-block:: bash
 
    export WORKSPACE_PATH=/path/to/workspace
 
-Or add to your ``.env`` file:
+或添加到您的 ``.env`` 文件：
 
 .. code-block:: ini
 
    WORKSPACE_PATH=/path/to/workspace
 
-This setting tells the system where to find the ``custom/`` directory.
+此设置告诉系统在哪里找到 ``custom/`` 目录。
 
-Best Practices
+最佳实践
 --------------
 
-**Naming Conventions**
+**命名约定**
 
-* Agent class names should end with ``Agent``
-* Environment class names should end with ``Env``
-* File names should use lowercase with underscores: ``my_agent.py``
+* 智能体类名应以 ``Agent`` 结尾
+* 环境类名应以 ``Env`` 结尾
+* 文件名应使用小写字母和下划线：``my_agent.py``
 
-**Error Handling**
+**错误处理**
 
-* Always wrap LLM calls in try-except blocks
-* Return meaningful error messages
-* Log important state changes
+* 始终将 LLM 调用包装在 try-except 块中
+* 返回有意义的错误消息
+* 记录重要的状态更改
 
-**State Management**
+**状态管理**
 
-* Use ``dump()`` and ``load()`` for state persistence
-* Record important state changes in replay
-* Keep state serializable (JSON compatible)
+* 使用 ``dump()`` 和 ``load()`` 进行状态持久化
+* 在回放中记录重要的状态更改
+* 保持状态可序列化（JSON 兼容）
 
-**Tool Design**
+**工具设计**
 
-* Use ``kind="observe"`` for read-only observations
-* Use ``kind="statistics"`` for aggregate data
-* Use ``kind=None`` with ``readonly=False`` for actions
+* 对只读观察使用 ``kind="observe"``
+* 对聚合数据使用 ``kind="statistics"``
+* 对操作使用 ``kind=None`` 和 ``readonly=False``

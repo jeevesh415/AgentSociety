@@ -1,43 +1,41 @@
-Environment Modules
+环境模块
 ===================
 
-This section covers how to create and work with environment modules.
+本部分介绍如何创建和使用环境模块。
 
-Creating Custom Modules
+创建自定义模块
 ------------------------
 
-Inherit from EnvBase
+继承 EnvBase
 ~~~~~~~~~~~~~~~~~~~~
 
-To create a custom environment module, inherit from
-``EnvBase`` and implement the required methods:
+要创建自定义环境模块，请继承 ``EnvBase`` 并实现必需的方法：
 
-Required Methods to Implement
-^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+需要实现的方法
+^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
 
-When creating a custom environment module, you must implement:
+创建自定义环境模块时，必须实现：
 
 1. **def observe(self) -> str**
 
-   Return a string description of the current state of the module.
-   This is used to generate the world description for agents.
+   返回模块当前状态的字符串描述。
+   这用于为智能体生成世界描述。
 
-   Returns:
-       A string describing the module's current state
+   返回:
+       描述模块当前状态的字符串
 
 2. **async def step(self, tick: int, t: datetime) -> None**
 
-   Execute one simulation step. This is called automatically during
-   AgentSociety simulations. Use this to update time-dependent state.
+   执行一个模拟步骤。在 AgentSociety 模拟期间自动调用。
+   使用此方法更新时间相关的状态。
 
-   Args:
-       tick: Duration of this step in seconds
-       t: Current simulation datetime after this step
+   参数:
+       tick: 此步骤的持续时间（秒）
+       t: 此步骤后的当前模拟日期时间
 
-3. **Tools decorated with @tool**
+3. **使用 @tool 装饰的工具**
 
-   Use the ``@tool`` decorator to expose methods as callable functions
-   for agents.
+   使用 ``@tool`` 装饰器将方法公开为智能体的可调用函数。
 
    .. code-block:: python
 
@@ -63,19 +61,19 @@ When creating a custom environment module, you must implement:
               self._values[agent_id] = value
               return f"Set value for agent {agent_id}"
 
-Reference Implementation
+参考实现
 ^^^^^^^^^^^^^^^^^^^^^^^^
 
-For complete reference implementations, see:
+有关完整的参考实现，请参阅：
 
-* ``SimpleSocialSpace`` - Social interaction module
-* ``PublicGoodsGame`` - Public goods game module
-* ``PrisonersDilemma`` - Prisoner's dilemma module
+* ``SimpleSocialSpace`` - 社交互动模块
+* ``PublicGoodsGame`` - 公共物品博弈模块
+* ``PrisonersDilemma`` - 囚徒困境模块
 
-The @tool Decorator
+@tool 装饰器
 ~~~~~~~~~~~~~~~~~~~
 
-The ``@tool`` decorator marks methods as callable by agents:
+``@tool`` 装饰器将方法标记为可被智能体调用：
 
 .. code-block:: python
 
@@ -86,27 +84,27 @@ The ``@tool`` decorator marks methods as callable by agents:
        """Get the status of an agent."""
        return f"Agent {agent_id} status"
 
-Parameters:
+参数：
 
-* **readonly** (bool): Whether the tool modifies the environment
-  * ``True`` = read-only, can be used in queries
-  * ``False`` = modifies state, can be used in interventions
+* **readonly** (bool): 工具是否修改环境
+  * ``True`` = 只读，可用于查询
+  * ``False`` = 修改状态，可用于干预
 
-* **kind** (str): The type of tool
-  * ``"observe"``: Single-parameter observations (requires readonly=True)
-  * ``"statistics"``: Aggregate queries (no parameters, requires readonly=True)
-  * ``None`` or omitted: Regular tool (any signature, any readonly value)
+* **kind** (str): 工具的类型
+  * ``"observe"``: 单参数观察（需要 readonly=True）
+  * ``"statistics"``: 聚合查询（无参数，需要 readonly=True）
+  * ``None`` 或省略: 常规工具（任何签名，任何 readonly 值）
 
-Tool Types
+工具类型
 ----------
 
-* **observe**: Single-parameter observations (readonly=True required)
-* **statistics**: Aggregate queries (no parameters, readonly=True required)
-* **regular**: Any other tool (can be readonly or read-write)
+* **observe**: 单参数观察（需要 readonly=True）
+* **statistics**: 聚合查询（无参数，需要 readonly=True）
+* **regular**: 任何其他工具（可以是只读或读写）
 
-See :doc:`concepts` for more details on tool types.
+有关工具类型的更多详情，请参阅 :doc:`concepts`。
 
-Registering Modules
+注册模块
 --------------------
 
 .. code-block:: python
@@ -119,7 +117,7 @@ Registering Modules
    # Or with default name (class name)
    router.register_module(MyModule())
 
-Complete Example
+完整示例
 -----------------
 
 .. code-block:: python
@@ -177,10 +175,10 @@ Complete Example
    )
    await society.init()
 
-Examples
+示例
 --------
 
-See the :mod:`agentsociety2.contrib.env` package for example modules:
+请参阅 :mod:`agentsociety2.contrib.env` 包中的示例模块：
 
 * :mod:`~agentsociety2.contrib.env.SimpleSocialSpace`
 * :mod:`~agentsociety2.contrib.env.PublicGoodsGame`

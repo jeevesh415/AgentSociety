@@ -468,6 +468,73 @@ export function activate(context: vscode.ExtensionContext) {
     }
   );
 
+  // ========== Custom Module Commands ==========
+
+  const scanCustomModulesCommand = vscode.commands.registerCommand(
+    'aiSocialScientist.scanCustomModules',
+    async () => {
+      await projectStructureProvider.scanCustomModules();
+    }
+  );
+
+  const testCustomModulesCommand = vscode.commands.registerCommand(
+    'aiSocialScientist.testCustomModules',
+    async () => {
+      await projectStructureProvider.testCustomModules();
+    }
+  );
+
+  const cleanCustomModulesCommand = vscode.commands.registerCommand(
+    'aiSocialScientist.cleanCustomModules',
+    async () => {
+      await projectStructureProvider.cleanCustomModules();
+    }
+  );
+
+  const listCustomModulesCommand = vscode.commands.registerCommand(
+    'aiSocialScientist.listCustomModules',
+    async () => {
+      const workspaceFolder = vscode.workspace.workspaceFolders?.[0];
+      if (!workspaceFolder) {
+        vscode.window.showErrorMessage(localize('customModules.noWorkspace'));
+        return;
+      }
+
+      try {
+        const response = await apiClient.listCustomModules();
+
+        if (response.success) {
+          const items: string[] = [];
+          if (response.total_agents > 0) {
+            items.push(`Custom Agents (${response.total_agents}):`);
+            response.agents.forEach(agent => {
+              items.push(`  - ${agent.class_name}: ${agent.description}`);
+            });
+          }
+          if (response.total_envs > 0) {
+            items.push(`Custom Environments (${response.total_envs}):`);
+            response.envs.forEach(env => {
+              items.push(`  - ${env.class_name}: ${env.description}`);
+            });
+          }
+          if (items.length === 0) {
+            items.push(localize('customModules.noModules'));
+          }
+
+          const doc = await vscode.workspace.openTextDocument({
+            content: items.join('\n'),
+            language: 'text'
+          });
+          await vscode.window.showTextDocument(doc);
+        } else {
+          vscode.window.showErrorMessage(localize('customModules.listFailed'));
+        }
+      } catch (error: any) {
+        vscode.window.showErrorMessage(localize('customModules.listFailed', error.message || error));
+      }
+    }
+  );
+
   // Register all commands
   context.subscriptions.push(
     initProjectCommand,
@@ -482,7 +549,11 @@ export function activate(context: vscode.ExtensionContext) {
     showBackendLogsCommand,
     showBackendStatusCommand,
     backendStatusMenuCommand,
-    openConfigPageCommand
+    openConfigPageCommand,
+    scanCustomModulesCommand,
+    testCustomModulesCommand,
+    cleanCustomModulesCommand,
+    listCustomModulesCommand
   );
 }
 

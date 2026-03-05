@@ -1,12 +1,12 @@
-Quick Start
+快速入门
 ===========
 
-This guide will help you get started with AgentSociety 2 quickly.
+本指南将帮助您快速上手 AgentSociety 2。
 
-Your First Agent
+您的第一个智能体
 ----------------
 
-Let's create a simple agent and interact with it using **AgentSociety**:
+让我们使用 **AgentSociety** 创建一个简单的智能体并与它交互：
 
 .. code-block:: python
 
@@ -18,76 +18,75 @@ Let's create a simple agent and interact with it using **AgentSociety**:
    from agentsociety2.society import AgentSociety
 
    async def main():
-       # Create an agent with a profile
+       # 创建具有配置文件的智能体
        agent = PersonAgent(
            id=1,
            profile={
                "name": "Alice",
                "age": 28,
-               "personality": "friendly and curious",
-               "bio": "A software engineer who loves hiking."
+               "personality": "友好且好奇",
+               "bio": "一名热爱徒步的软件工程师。"
            }
        )
 
-       # Create environment module with agent info
+       # 创建包含智能体信息的环境模块
        social_env = SimpleSocialSpace(
            agent_id_name_pairs=[(agent.id, agent.name)]
        )
 
-       # Create environment router
+       # 创建环境路由器
        env_router = CodeGenRouter(env_modules=[social_env])
 
-       # Create the society
+       # 创建社会
        society = AgentSociety(
            agents=[agent],
            env_router=env_router,
            start_t=datetime.now(),
        )
 
-       # Initialize (sets up agents with environment)
+       # 初始化（为智能体设置环境）
        await society.init()
 
-       # Query (read-only)
-       response = await society.ask("What's your favorite activity?")
-       print(f"Agent: {response}")
+       # 查询（只读）
+       response = await society.ask("你最喜欢的活动是什么？")
+       print(f"智能体: {response}")
 
-       # Close the society
+       # 关闭社会
        await society.close()
 
    if __name__ == "__main__":
        asyncio.run(main())
 
-Running this code will produce output like:
+运行此代码将产生类似以下输出：
 
 .. code-block:: text
 
-   Agent: I really enjoy hiking! There's something peaceful about being
-   out in nature, exploring new trails, and taking in the beautiful scenery.
-   It's a great way to clear my mind and stay active.
+   智能体: 我真的很喜欢徒步！在大自然中，探索新的步道，欣赏美丽的风景，有一种平静感。
+   这是放松心情和保持活力的好方法。
 
-Creating a Custom Environment
-------------------------------
+创建自定义环境
+--------------
 
-Environment modules allow agents to interact with specific functionality:
+环境模块允许智能体与特定功能进行交互：
 
 .. code-block:: python
 
    from agentsociety2.env import EnvBase, tool, CodeGenRouter
 
    class MyEnvironment(EnvBase):
-       """A custom environment module."""
+       """一个自定义环境模块。"""
 
        @tool(readonly=True, kind="observe")
        def get_weather(self, agent_id: int) -> str:
-           """Get the current weather."""
-           return "The weather is sunny and 25°C."
+           """获取当前天气。"""
+           return "天气晴朗，温度 25°C。"
 
        @tool(readonly=False)
        def set_mood(self, agent_id: int, mood: str) -> str:
-           """Change the mood of an agent."""
-           return f"Agent {agent_id}'s mood is now {mood}."
+           """改变智能体的情绪。"""
+           return f"智能体 {agent_id} 的情绪现在是 {mood}。"
 
-   # Use the custom module with AgentSociety
+   # 在 AgentSociety 中使用自定义模块
    agent = PersonAgent(id=1, profile={"name": "Bob"})
 
    env_router = CodeGenRouter(env_modules=[MyEnvironment()])
@@ -99,16 +98,16 @@ Environment modules allow agents to interact with specific functionality:
    )
    await society.init()
 
-   # Agent can now use the environment's tools
-   response = await society.ask("What's the weather like?")
+   # 智能体现在可以使用环境的工具
+   response = await society.ask("天气怎么样？")
    print(response)
 
    await society.close()
 
-Running an Experiment
----------------------
+运行实验
+---------
 
-Here's a complete experiment with multiple agents using AgentSociety:
+下面是一个使用 AgentSociety 的多智能体完整实验示例：
 
 .. code-block:: python
 
@@ -121,21 +120,21 @@ Here's a complete experiment with multiple agents using AgentSociety:
    from agentsociety2.society import AgentSociety
 
    async def main():
-       # Setup replay writer for tracking
+       # 设置回放写入器用于跟踪
        writer = ReplayWriter("my_experiment.db")
        await writer.initialize()
 
-       # Create agents first (needed for SimpleSocialSpace)
+       # 首先创建智能体（SimpleSocialSpace 需要）
        agents = [
            PersonAgent(
                id=i,
-               profile={"name": f"Player{i}", "personality": "competitive"},
+               profile={"name": f"Player{i}", "personality": "竞争型"},
                replay_writer=writer
            )
            for i in range(1, 4)
        ]
 
-       # Create environment router
+       # 创建环境路由器
        env_router = CodeGenRouter(
            env_modules=[SimpleSocialSpace(
                agent_id_name_pairs=[(a.id, a.name) for a in agents]
@@ -143,7 +142,7 @@ Here's a complete experiment with multiple agents using AgentSociety:
        )
        env_router.set_replay_writer(writer)
 
-       # Create the society with replay enabled
+       # 创建启用了回放的社会
        society = AgentSociety(
            agents=agents,
            env_router=env_router,
@@ -152,10 +151,10 @@ Here's a complete experiment with multiple agents using AgentSociety:
        )
        await society.init()
 
-       # Run interactions
+       # 运行交互
        for agent in agents:
            response = await society.ask(
-               f"Tell {agent._name} to introduce themselves to the group!"
+               f"告诉 {agent._name} 向小组做自我介绍！"
            )
            print(f"{agent._name}: {response}")
 
@@ -164,48 +163,48 @@ Here's a complete experiment with multiple agents using AgentSociety:
    if __name__ == "__main__":
        asyncio.run(main())
 
-Next Steps
+下一步
 ----------
 
-Now that you have the basics, explore:
+既然您已经掌握了基础知识，可以继续探索：
 
-* :doc:`agents` - Learn about agents in detail
-* :doc:`env_modules` - Create custom environment modules
-* :doc:`concepts` - Understand core concepts
-* :doc:`storage` - Learn about the replay system
-* :doc:`examples` - See more examples
+* :doc:`agents` - 详细了解智能体
+* :doc:`env_modules` - 创建自定义环境模块
+* :doc:`concepts` - 理解核心概念
+* :doc:`storage` - 了解回放系统
+* :doc:`examples` - 查看更多示例
 
-Common Patterns
+常见模式
 ---------------
 
-Read-Only Queries
-~~~~~~~~~~~~~~~~~
+只读查询
+~~~~~~~~~~~~~~~~
 
-For queries that don't modify state, use ``society.ask()``:
+对于不修改状态的查询，使用 ``society.ask()``：
 
 .. code-block:: python
 
-   # society.ask() ensures read-only access
-   response = await society.ask("What agents are in the simulation?")
+   # society.ask() 确保只读访问
+   response = await society.ask("模拟中有哪些智能体？")
 
-Making Changes
+进行修改
 ~~~~~~~~~~~~~~
 
-For actions that modify the environment, use ``society.intervene()``:
+对于修改环境的操作，使用 ``society.intervene()``：
 
 .. code-block:: python
 
-   # society.intervene() allows environment modifications
-   result = await society.intervene("Set everyone's mood to happy")
+   # society.intervene() 允许环境修改
+   result = await society.intervene("让所有人的心情变好")
 
-Querying Specific Agents
+查询特定智能体
 ~~~~~~~~~~~~~~~~~~~~~~~~~
 
-To direct questions to specific agents:
+向特定智能体提问：
 
 .. code-block:: python
 
-   # Ask a specific agent
+   # 向特定智能体提问
    response = await society.ask(
-       "Alice, what do you think about the current situation?"
+       "Alice，你对当前情况有什么看法？"
    )

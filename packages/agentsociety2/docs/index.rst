@@ -1,9 +1,7 @@
 AgentSociety 2
 ==============
 
-**AgentSociety 2** is a modern, LLM-native agent simulation platform designed
-for social science research and experimentation. It provides a flexible framework
-for creating and managing intelligent agents in simulated environments.
+**AgentSociety 2** 是一个现代化的、LLM 原生的智能体模拟平台，专为社会科学研究和实验设计。它提供了一个灵活的框架，用于在模拟环境中创建和管理智能智能体。
 
 .. image:: https://img.shields.io/pypi/v/agentsociety2.svg
    :target: https://pypi.org/project/agentsociety2/
@@ -17,62 +15,58 @@ for creating and managing intelligent agents in simulated environments.
    :target: LICENSE
    :alt: License
 
-Key Features
+核心特性
 ------------
 
-* **LLM-Driven Agents**: Create agents with personality, memory, and reasoning
-  capabilities powered by large language models.
+* **LLM 驱动的智能体**: 创建具有个性、记忆和推理能力的智能智能体，由大语言模型驱动。
 
-* **Flexible Environment Modules**: Build custom simulation environments with
-  composable tools and state management.
+* **灵活的环境模块**: 使用可组合的工具和状态管理构建自定义模拟环境。
 
-* **Async-First Design**: High-performance async architecture for efficient
-  multi-agent simulations.
+* **异步优先设计**: 高性能异步架构，实现高效的多智能体模拟。
 
-* **Replay & Analysis**: Built-in SQLite-based storage for experiment tracking
-  and analysis.
+* **回放与分析**: 基于 SQLite 的内置存储，用于实验跟踪和分析。
 
-* **Extensible**: Easy to extend with custom agents, environments, and tools.
+* **可扩展**: 轻松扩展自定义智能体、环境和工具。
 
-Installation
+安装
 ------------
 
 .. code-block:: bash
 
    pip install agentsociety2
 
-See :doc:`installation` for detailed setup instructions.
+详细安装说明请参见 :doc:`installation`。
 
-Quick Start
+快速开始
 -----------
 
 .. code-block:: python
 
    from agentsociety2 import PersonAgent, AgentSociety
 
-   # Create an agent
+   # 创建一个智能体
    agent = PersonAgent(
        id=1,
        profile={
            "name": "Alice",
            "age": 28,
-           "personality": "friendly and curious",
-           "bio": "A software engineer who loves hiking."
+           "personality": "友好且好奇",
+           "bio": "一名热爱徒步的软件工程师。"
        }
    )
 
-   # Ask the agent a question
-   response = await agent.ask("What's your favorite hobby?")
+   # 向智能体提问
+   response = await agent.ask("你最喜欢的爱好是什么？")
    print(response)
 
-See :doc:`quickstart` for more examples.
+更多示例请参见 :doc:`quickstart`。
 
-Documentation
+文档
 -------------
 
 .. toctree::
    :maxdepth: 2
-   :caption: Getting Started:
+   :caption: 入门指南:
 
    installation
    quickstart
@@ -81,7 +75,7 @@ Documentation
 
 .. toctree::
    :maxdepth: 2
-   :caption: User Guide:
+   :caption: 用户指南:
 
    agents
    env_modules
@@ -90,25 +84,25 @@ Documentation
 
 .. toctree::
    :maxdepth: 2
-   :caption: Developer Guide:
+   :caption: 开发者指南:
 
    development
    contributing
 
 .. toctree::
    :maxdepth: 2
-   :caption: Reference:
+   :caption: 参考:
 
    examples
 
-Links
+链接
 -----
 
 * **GitHub**: https://github.com/tsinghua-fib-lab/AgentSociety
 * **PyPI**: https://pypi.org/project/agentsociety2/
 * **Issues**: https://github.com/tsinghua-fib-lab/AgentSociety/issues
 
-Search
+搜索
 ------
 
 * :ref:`search`

@@ -1,72 +1,72 @@
-Contributing to AgentSociety 2
+为 AgentSociety 2 贡献
 ===============================
 
-Thank you for your interest in contributing to AgentSociety 2!
+感谢您对贡献 AgentSociety 2 的兴趣！
 
-Ways to Contribute
+贡献方式
 ------------------
 
-* **Report bugs**: Open an issue with a reproducible example
-* **Suggest features**: Share your ideas for improvements
-* **Submit code**: Open a pull request with your changes
-* **Improve docs**: Help make the documentation clearer
-* **Share examples**: Add useful examples to the collection
+* **报告错误**: 使用可重现的示例提交问题
+* **建议功能**: 分享您的改进想法
+* **提交代码**: 使用您的更改提交拉取请求
+* **改进文档**: 帮助使文档更清晰
+* **分享示例**: 向集合添加有用的示例
 
-Reporting Bugs
+报告错误
 --------------
 
-When reporting a bug, please include:
+报告错误时，请包括：
 
-* Python version
-* AgentSociety 2 version
-* Minimal reproducible example
-* Expected vs actual behavior
-* Any error messages or traceback
+* Python 版本
+* AgentSociety 2 版本
+* 最小的可重现示例
+* 预期行为与实际行为
+* 任何错误消息或回溯
 
-See the bug report template for details.
+有关详情，请参阅错误报告模板。
 
-Suggesting Features
+建议功能
 -------------------
 
-Feature suggestions are welcome! Please:
+欢迎功能建议！请：
 
-* Describe the use case clearly
-* Explain why it would be useful
-* Consider if it fits the project's scope
-* Be open to discussion
+* 清楚地描述用例
+* 解释为什么它有用
+* 考虑它是否适合项目范围
+* 愿意接受讨论
 
-Submitting Pull Requests
+提交拉取请求
 -------------------------
 
-Before submitting a PR:
+提交 PR 之前：
 
-1. Check existing issues for related discussions
-2. Fork the repository
-3. Create a branch for your work
-4. Make your changes with clear commit messages
-5. Update documentation if needed
-6. Submit your pull request
+1. 检查现有问题以获取相关讨论
+2. Fork 仓库
+3. 为您的工作创建分支
+4. 使用清晰的提交消息进行更改
+5. 如需要，更新文档
+6. 提交拉取请求
 
-PR Guidelines
+PR 指南
 ~~~~~~~~~~~~~
 
-* Keep changes focused and atomic
-* Follow the existing code style
-* Add docstrings to new functions/classes
-* Update relevant documentation
-* Ensure CI passes
+* 保持更改专注和原子化
+* 遵循现有代码风格
+* 为新函数/类添加文档字符串
+* 更新相关文档
+* 确保 CI 通过
 
-Code Review Process
+代码审查流程
 ~~~~~~~~~~~~~~~~~~~
 
-All PRs go through code review:
+所有 PR 都会经过代码审查：
 
-* Maintainers will review your changes
-* Address any feedback or requests
-* Once approved, the PR will be merged
-* Large changes may need multiple iterations
+* 维护者将审查您的更改
+* 解决任何反馈或请求
+* 批准后，PR 将被合并
+* 大型更改可能需要多次迭代
 
-Development Setup
+开发设置
 ------------------
 
 .. code-block:: bash
@@ -83,17 +83,17 @@ Development Setup
    cd packages/agentsociety2
    pre-commit install
 
-Adding New Features
+添加新功能
 -------------------
 
-When adding new features:
+添加新功能时：
 
-1. Open an issue to discuss first
-2. Implement the feature
-3. Update documentation
-4. Add examples if helpful
+1. 首先打开一个问题进行讨论
+2. 实现功能
+3. 更新文档
+4. 如有帮助，添加示例
 
-Example Structure
+示例结构
 ~~~~~~~~~~~~~~~~~
 
 .. code-block:: text
@@ -112,10 +112,10 @@ Example Structure
        ├── __init__.py
        └── implementation.py
 
-Documentation Standards
+文档标准
 ------------------------
 
-Docstrings should follow the Google style:
+文档字符串应遵循 Google 风格：
 
 .. code-block:: python
 
@@ -136,23 +136,22 @@ Docstrings should follow the Google style:
        """
        pass
 
-Community Guidelines
+社区指南
 --------------------
 
-* Be respectful and constructive
-* Welcome new contributors
-* Focus on what is best for the community
-* Show empathy towards other community members
+* 尊重和建设性
+* 欢迎新的贡献者
+* 关注对社区最有利的事情
+* 对其他社区成员表现出同理心
 
-Getting Help
+获取帮助
 ------------
 
-* **GitHub Issues**: For bugs and feature requests
-* **GitHub Discussions**: For questions and ideas
-* **Documentation**: Check the docs first
+* **GitHub Issues**: 用于错误和功能请求
+* **GitHub Discussions**: 用于问题和想法
+* **Documentation**: 首先查看文档
 
-License
+许可证
 -------
 
-By contributing to AgentSociety 2, you agree that your contributions
-will be licensed under the Apache License 2.0.
+通过贡献 AgentSociety 2，您同意您的贡献将根据 Apache License 2.0 获得许可。

@@ -1,16 +1,15 @@
-Working with Agents
+使用智能体
 ===================
 
-This section covers how to work with agents in AgentSociety 2.
+本部分介绍如何在 AgentSociety 2 中使用智能体。
 
-Creating Agents
+创建智能体
 ---------------
 
 PersonAgent
 ~~~~~~~~~~~
 
-The ``PersonAgent`` class is a ready-to-use agent
-implementation:
+``PersonAgent`` 类是一个现成的智能体实现：
 
 .. code-block:: python
 
@@ -26,60 +25,55 @@ implementation:
        }
    )
 
-The profile can contain any fields you want. The agent will use this
-information to shape its responses and decisions.
+配置文件可以包含您想要的任何字段。智能体将使用此信息来塑造其响应和决策。
 
-Custom Agents
+自定义智能体
 ~~~~~~~~~~~~~
 
-To create a custom agent, inherit from ``AgentBase``
-and implement the required abstract methods:
+要创建自定义智能体，请继承 ``AgentBase`` 并实现必需的抽象方法：
 
-Required Methods to Implement
-^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+需要实现的方法
+^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
 
-When creating a custom agent, you must implement these abstract methods from
-``AgentBase``:
+创建自定义智能体时，必须实现 ``AgentBase`` 的这些抽象方法：
 
 1. **async def ask(self, message: str, readonly: bool = True) -> str**
 
-   Process a question from the environment or user and return a response.
+   处理来自环境或用户的问题并返回响应。
 
-   Args:
-       message: The question or instruction to process
-       readonly: Whether the agent can modify the environment (False = can modify)
+   参数:
+       message: 要处理的问题或指令
+       readonly: 智能体是否可以修改环境（False = 可以修改）
 
-   Returns:
-       The agent's response as a string
+   返回:
+       智能体的响应字符串
 
 2. **async def step(self, tick: int, t: datetime) -> str**
 
-   Execute one simulation step. This is called by AgentSociety during
-   simulation runs.
+   执行一个模拟步骤。在 AgentSociety 模拟运行期间调用。
 
-   Args:
-       tick: Duration of this step in seconds
-       t: Current simulation datetime after this step
+   参数:
+       tick: 此步骤的持续时间（秒）
+       t: 此步骤后的当前模拟日期时间
 
-   Returns:
-       A description of the agent's action during this step
+   返回:
+       智能体在此步骤中的操作描述
 
 3. **async def dump(self) -> dict**
 
-   Serialize the agent's state to a dictionary for saving/loading.
+   将智能体状态序列化为字典以便保存/加载。
 
 4. **async def load(self, dump_data: dict)**
 
-   Restore the agent's state from a previously dumped dictionary.
+   从先前转储的字典中恢复智能体状态。
 
-Reference Implementation
+参考实现
 ^^^^^^^^^^^^^^^^^^^^^^^^
 
-For a complete reference, see ``PersonAgent``
-in the source code.
+有关完整参考，请参阅源代码中的 ``PersonAgent``。
 
-Example:
-^^^^^^^^
+示例:
+^^^^^^
 
 .. code-block:: python
 
@@ -112,18 +106,18 @@ Example:
            # Restore state
            self._custom_state = dump_data.get("custom_state", {})
 
-Agent Profiles
+智能体配置文件
 --------------
 
-Profile Design
-~~~~~~~~~~~~~~
+配置文件设计
+~~~~~~~~~~~~~
 
-A good agent profile should include:
+一个好的智能体配置文件应包括：
 
-* **Identity**: Name, age, role
-* **Personality**: Traits, preferences, quirks
-* **Background**: History, expertise, relationships
-* **Goals**: Motivations, desires, fears
+* **身份**: 姓名、年龄、角色
+* **个性**: 特征、偏好、怪癖
+* **背景**: 历史、专业知识、关系
+* **目标**: 动机、欲望、恐惧
 
 .. code-block:: python
 
@@ -147,11 +141,11 @@ A good agent profile should include:
        "fears": ["sea level rise", "ecosystem collapse"]
    }
 
-Interacting with Agents
+与智能体交互
 -----------------------
 
-The ask() Method
-~~~~~~~~~~~~~~~~
+ask() 方法
+~~~~~~~~~~~~~~~~~
 
 .. code-block:: python
 
@@ -160,16 +154,15 @@ The ask() Method
        readonly=True  # No side effects
    )
 
-The ``readonly`` parameter controls whether the agent can modify the
-environment:
+``readonly`` 参数控制智能体是否可以修改环境：
 
-* ``readonly=True``: Query only, no side effects
-* ``readonly=False``: May call environment tools that modify state
+* ``readonly=True``: 仅查询，无副作用
+* ``readonly=False``: 可能调用修改状态的环境工具
 
-The step() Method
+step() 方法
 ~~~~~~~~~~~~~~~~~
 
-The ``step()`` method is called automatically during AgentSociety simulations:
+``step()`` 方法在 AgentSociety 模拟期间自动调用：
 
 .. code-block:: python
 
@@ -177,7 +170,7 @@ The ``step()`` method is called automatically during AgentSociety simulations:
    # tick = duration in seconds, t = current simulation time
    action_description = await agent.step(tick=3600, t=datetime.now())
 
-Replay Tracking
+回放跟踪
 ~~~~~~~~~~~~~~~
 
 .. code-block:: python
@@ -189,10 +182,10 @@ Replay Tracking
 
    agent = PersonAgent(id=1, profile=..., replay_writer=writer)
 
-Agent Memory
+智能体记忆
 ------------
 
-AgentSociety 2 integrates with `mem0ai`_ for memory management:
+AgentSociety 2 集成了 `mem0ai`_ 用于记忆管理：
 
 .. code-block:: python
 
@@ -205,10 +198,10 @@ AgentSociety 2 integrates with `mem0ai`_ for memory management:
        enable_memory=True  # Enable memory
    )
 
-With memory enabled, agents can:
+启用记忆后，智能体可以：
 
-* Remember past interactions
-* Recall relevant information
-* Build context over time
+* 记住过去的互动
+* 回忆相关信息
+* 随着时间建立上下文
 
 .. _mem0ai: https://github.com/mem0ai/mem0

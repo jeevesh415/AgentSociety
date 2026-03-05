@@ -1,22 +1,22 @@
-Storage and Replay System
+存储和回放系统
 =========================
 
-The ReplayWriter system provides tracking of agent-environment interactions for experiment analysis.
+ReplayWriter 系统提供智能体-环境交互的跟踪，用于实验分析。
 
-Overview
+概述
 --------
 
-AgentSociety 2 includes a SQLite-based storage system that captures:
+AgentSociety 2 包含一个基于 SQLite 的存储系统，用于捕获：
 
-* **Agent Profiles**: Static characteristics and personality traits
-* **Agent Status**: Dynamic states updated during simulation
-* **Agent Dialogs**: Conversation history with LLM inputs/outputs
-* **Custom Tables**: Module-specific data
+* **智能体配置文件**: 静态特征和个性特征
+* **智能体状态**: 模拟期间更新的动态状态
+* **智能体对话**: 包含 LLM 输入/输出的对话历史
+* **自定义表**: 特定于模块的数据
 
-Basic Usage
+基本使用
 -----------
 
-**Enabling Replay Tracking:**
+**启用回放跟踪：**
 
 .. code-block:: python
 
@@ -54,7 +54,7 @@ Basic Usage
    await society.run(num_steps=100, tick=3600)
    await society.close()
 
-**Reading Data:**
+**读取数据：**
 
 .. code-block:: python
 
@@ -73,53 +73,53 @@ Basic Usage
    for status in statuses:
        print(f"Agent {status.agent_id}: {status.status}")
 
-Framework Tables
+框架表
 ----------------
 
 AgentProfile
 ~~~~~~~~~~~~
 
-Stores static agent characteristics:
+存储静态智能体特征：
 
-**Fields:**
+**字段：**
 
-* ``agent_id`` (int): Unique agent identifier
-* ``profile`` (dict): JSON-encoded profile data (name, personality, etc.)
+* ``agent_id`` (int): 唯一的智能体标识符
+* ``profile`` (dict): JSON 编码的配置文件数据（姓名、个性等）
 
 AgentStatus
 ~~~~~~~~~~~
 
-Stores dynamic agent states:
+存储动态智能体状态：
 
-**Fields:**
+**字段：**
 
-* ``agent_id`` (int): Unique agent identifier
-* ``status`` (str): Current status (``"active"``, ``"inactive"``, etc.)
-* ``current_activity`` (str): Text description of current activity
-* ``step_count`` (int): Number of simulation steps completed
+* ``agent_id`` (int): 唯一的智能体标识符
+* ``status`` (str): 当前状态（``"active"``、``"inactive"`` 等）
+* ``current_activity`` (str): 当前活动的文本描述
+* ``step_count`` (int): 已完成的模拟步数
 
 AgentDialog
 ~~~~~~~~~~~
 
-Stores conversation history:
+存储对话历史：
 
-**Fields:**
+**字段：**
 
-* ``agent_id`` (int): Agent who generated this dialog
-* ``question`` (str): The input/question to the agent or LLM
-* ``answer`` (str): The response
-* ``dialog_type`` (int): Type of dialog
-  * ``0``: Reflection (agent's internal reasoning)
-  * ``1``: Intervention (environment modification)
-* ``step`` (int): Simulation step when this occurred
-* ``timestamp`` (str): ISO format timestamp
+* ``agent_id`` (int): 生成此对话的智能体
+* ``question`` (str): 对智能体或 LLM 的输入/问题
+* ``answer`` (str): 响应
+* ``dialog_type`` (int): 对话类型
+  * ``0``: 反思（智能体的内部推理）
+  * ``1``: 干预（环境修改）
+* ``step`` (int): 发生此事件的模拟步骤
+* ``timestamp`` (str): ISO 格式的时间戳
 
-Custom Tables
+自定义表
 -------------
 
-Environment modules can register custom tables:
+环境模块可以注册自定义表：
 
-**Register a Custom Table:**
+**注册自定义表：**
 
 .. code-block:: python
 
@@ -137,7 +137,7 @@ Environment modules can register custom tables:
 
    await writer.register_table(schema)
 
-**Write to Custom Table:**
+**写入自定义表：**
 
 .. code-block:: python
 
@@ -150,7 +150,7 @@ Environment modules can register custom tables:
        }
    )
 
-**Read from Custom Table:**
+**从自定义表读取：**
 
 .. code-block:: python
 
@@ -161,10 +161,10 @@ Environment modules can register custom tables:
        filters={"agent_id": 1}
    )
 
-Data Export
+数据导出
 -----------
 
-**Export to Pandas:**
+**导出到 Pandas：**
 
 .. code-block:: python
 
@@ -178,7 +178,7 @@ Data Export
        "timestamp": d.timestamp
    } for d in dialogs])
 
-**Export to CSV:**
+**导出到 CSV：**
 
 .. code-block:: python
 

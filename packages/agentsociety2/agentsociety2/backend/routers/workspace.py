@@ -68,6 +68,58 @@ async def init_workspace(request: InitWorkspaceRequest) -> Dict[str, Any]:
         (workspace_dir / "papers").mkdir(parents=True, exist_ok=True)
         (workspace_dir / "user_data").mkdir(parents=True, exist_ok=True)
 
+        # 0.1 创建 custom/ 目录用于自定义 Agent 和环境模块
+        custom_agents_dir = workspace_dir / "custom" / "agents"
+        custom_envs_dir = workspace_dir / "custom" / "envs"
+        custom_agents_dir.mkdir(parents=True, exist_ok=True)
+        custom_envs_dir.mkdir(parents=True, exist_ok=True)
+
+        # 复制自定义模块示例文件
+        import agentsociety2 as pkg_module
+        pkg_path = Path(pkg_module.__file__).parent
+        custom_src_agents = pkg_path / "custom" / "agents"
+        custom_src_envs = pkg_path / "custom" / "envs"
+
+        # 复制 agents 示例
+        if custom_src_agents.exists():
+            examples_agents = custom_src_agents / "examples"
+            if examples_agents.exists():
+                for example_file in examples_agents.glob("*.py"):
+                    shutil.copy2(example_file, custom_agents_dir / example_file.name)
+                    logger.info(f"Copied agent example: {example_file.name}")
+
+        # 复制 envs 示例
+        if custom_src_envs.exists():
+            examples_envs = custom_src_envs / "examples"
+            if examples_envs.exists():
+                for example_file in examples_envs.glob("*.py"):
+                    shutil.copy2(example_file, custom_envs_dir / example_file.name)
+                    logger.info(f"Copied env example: {example_file.name}")
+
+        # 创建 custom/README.md
+        custom_readme = workspace_dir / "custom" / "README.md"
+        if not custom_readme.exists():
+            custom_readme_content = """# Custom Modules
+
+本目录用于存放自定义的 Agent 和环境模块。
+
+## 目录结构
+
+- `agents/` - 自定义 Agent 类
+- `envs/` - 自定义环境模块
+
+## 开发指南
+
+1. 在 `agents/` 目录下创建自定义 Agent 类，继承自 `AgentBase`
+2. 在 `envs/` 目录下创建自定义环境模块，继承自 `EnvBase`
+3. 运行"扫描"命令注册模块
+4. 运行"测试"命令验证模块功能
+
+详细文档请参考项目文档。
+"""
+            with open(custom_readme, "w", encoding="utf-8") as f:
+                f.write(custom_readme_content)
+
         # 1. 创建目录结构
         dot_agentsociety_dir = workspace_dir / ".agentsociety"
         if dot_agentsociety_dir.exists():
@@ -178,6 +230,9 @@ async def init_workspace(request: InitWorkspaceRequest) -> Dict[str, Any]:
                     "TOPIC.md",
                     "papers/",
                     "user_data/",
+                    "custom/",
+                    "custom/agents/",
+                    "custom/envs/",
                     ".agentsociety/path.md",
                     ".agentsociety/agent_classes/*.json",
                     ".agentsociety/env_modules/*.json",
