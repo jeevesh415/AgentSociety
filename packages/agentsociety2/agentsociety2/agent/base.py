@@ -18,9 +18,32 @@ from litellm import AllMessageValues
 from litellm.exceptions import RateLimitError
 from litellm.litellm_core_utils.streaming_handler import CustomStreamWrapper
 from litellm.types.utils import ModelResponse
+try:
+    from litellm.types.router import RouterRateLimitError
+except Exception:  # pragma: no cover - compatibility across litellm versions
+    RouterRateLimitError = None
 from pydantic import BaseModel, ValidationError
 
 T = TypeVar("T", bound=BaseModel)
+
+
+def _is_rate_limit_like_error(error: Exception) -> bool:
+    """
+    Return True for rate-limit related exceptions, including LiteLLM router cooldown errors.
+    """
+    if isinstance(error, RateLimitError):
+        return True
+    if RouterRateLimitError is not None and isinstance(error, RouterRateLimitError):
+        return True
+    # Fallback for version differences where RouterRateLimitError class is not importable.
+    err_type_name = type(error).__name__
+    err_text = str(error).lower()
+    return (
+        err_type_name == "RouterRateLimitError"
+        or "routerratelimiterror" in err_text
+        or "no deployments available for selected model" in err_text
+        or "try again in" in err_text
+    )
 
 __all__ = [
     "AgentBase",
@@ -734,31 +757,32 @@ Your corrected response:
                     )
                     # No delay for validation errors
 
-            except RateLimitError as e:
-                # If this is the last attempt, raise the error
-                if attempt >= max_retries:
-                    raise ValueError(
-                        f"Failed to get valid response after {max_retries + 1} attempts. Last error: {str(e)}"
-                    )
-
-                # For 429 errors, use exponential backoff
-                delay = min(base_delay * (2**attempt), max_delay)
-                self._logger.warning(
-                    f"Rate limit error (429) detected (attempt {attempt + 1}/{max_retries + 1}). "
-                    f"Retrying after {delay:.2f} seconds with exponential backoff."
-                )
-                await asyncio.sleep(delay)
-                # delete the last assistant message
-                if (
-                    conversation_messages
-                    and conversation_messages[-1]["role"] == "assistant"
-                ):
-                    conversation_messages.pop()
-
-                # record the error
-                last_error = e
-
             except Exception as e:
+                if _is_rate_limit_like_error(e):
+                    # If this is the last attempt, raise the error
+                    if attempt >= max_retries:
+                        raise ValueError(
+                            f"Failed to get valid response after {max_retries + 1} attempts. Last error: {str(e)}"
+                        )
+
+                    # For rate-limit-like errors, use exponential backoff
+                    delay = min(base_delay * (2**attempt), max_delay)
+                    self._logger.warning(
+                        f"Rate limit-like error detected (attempt {attempt + 1}/{max_retries + 1}). "
+                        f"Retrying after {delay:.2f} seconds with exponential backoff. Error: {str(e)}"
+                    )
+                    await asyncio.sleep(delay)
+                    # delete the last assistant message
+                    if (
+                        conversation_messages
+                        and conversation_messages[-1]["role"] == "assistant"
+                    ):
+                        conversation_messages.pop()
+
+                    # record the error
+                    last_error = e
+                    continue
+
                 # If this is the last attempt, raise the error
                 if attempt >= max_retries:
                     raise ValueError(

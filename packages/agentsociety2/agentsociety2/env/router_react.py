@@ -31,7 +31,7 @@ class ReActRouter(RouterBase):
         self,
         env_modules: list[EnvBase],
         max_steps: int = 10,
-        max_llm_call_retry: int = 3,
+        max_llm_call_retry: int = 10,
     ):
         super().__init__(
             env_modules=env_modules,

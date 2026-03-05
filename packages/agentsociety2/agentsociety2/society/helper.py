@@ -54,7 +54,7 @@ class AgentSocietyHelper:
         agents: Sequence[AgentBase],
         max_steps: int = 8,
         max_replans: int = 2,
-        max_llm_call_retry: int = 3,
+        max_llm_call_retry: int = 10,
     ):
         self._router, self._model_name = get_llm_router_and_model("coder")
         self._env_router = env_router

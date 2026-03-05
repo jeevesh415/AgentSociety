@@ -27,6 +27,10 @@ from litellm import AllMessageValues
 from litellm.exceptions import RateLimitError
 from litellm.litellm_core_utils.streaming_handler import CustomStreamWrapper
 from litellm.types.utils import ModelResponse
+try:
+    from litellm.types.router import RouterRateLimitError
+except Exception:  # pragma: no cover - compatibility across litellm versions
+    RouterRateLimitError = None
 
 from agentsociety2.env.base import EnvBase
 from agentsociety2.config import get_llm_router_and_model, extract_json
@@ -39,6 +43,25 @@ import json_repair
 import logging
 
 T = TypeVar("T", bound=BaseModel)
+
+
+def _is_rate_limit_like_error(error: Exception) -> bool:
+    """
+    Return True for rate-limit related exceptions, including LiteLLM router cooldown errors.
+    """
+    if isinstance(error, RateLimitError):
+        return True
+    if RouterRateLimitError is not None and isinstance(error, RouterRateLimitError):
+        return True
+    # Fallback for version differences where RouterRateLimitError class is not importable.
+    err_type_name = type(error).__name__
+    err_text = str(error).lower()
+    return (
+        err_type_name == "RouterRateLimitError"
+        or "routerratelimiterror" in err_text
+        or "no deployments available for selected model" in err_text
+        or "try again in" in err_text
+    )
 
 
 class TokenUsageStats(BaseModel):
@@ -117,7 +140,7 @@ class RouterBase(ABC):
         self,
         env_modules: list[EnvBase],
         max_steps: int = 10,
-        max_llm_call_retry: int = 3,
+        max_llm_call_retry: int = 10,
         replay_writer: Optional["ReplayWriter"] = None,
     ):
         """
@@ -412,23 +435,25 @@ class RouterBase(ABC):
 
                 return response
                 
-            except RateLimitError as e:
-                # If this is the last attempt, raise the error
-                if attempt >= max_retries:
-                    raise ValueError(
-                        f"Failed to get valid response after {max_retries + 1} attempts. Last error: {str(e)}"
-                    )
-
-                # For 429 errors, use exponential backoff
-                delay = min(base_delay * (2**attempt), max_delay)
-                logger.warning(
-                    f"Rate limit error (429) detected for model '{model}' (attempt {attempt + 1}/{max_retries + 1}). "
-                    f"Retrying after {delay:.2f} seconds with exponential backoff."
-                )
-                await asyncio.sleep(delay)
-                last_error = e
-                
             except Exception as e:
+                if _is_rate_limit_like_error(e):
+                    # If this is the last attempt, raise the error
+                    if attempt >= max_retries:
+                        raise ValueError(
+                            f"Failed to get valid response after {max_retries + 1} attempts. Last error: {str(e)}"
+                        )
+
+                    # For rate-limit-like errors, use exponential backoff
+                    delay = min(base_delay * (2**attempt), max_delay)
+                    logger.warning(
+                        f"Rate limit-like error detected for model '{model}' "
+                        f"(attempt {attempt + 1}/{max_retries + 1}). "
+                        f"Retrying after {delay:.2f} seconds with exponential backoff. Error: {str(e)}"
+                    )
+                    await asyncio.sleep(delay)
+                    last_error = e
+                    continue
+
                 # If this is the last attempt, raise the error
                 if attempt >= max_retries:
                     raise ValueError(
@@ -481,7 +506,7 @@ class RouterBase(ABC):
         model: Literal["coder", "summary"],
         model_type: Type[T],
         messages: list[AllMessageValues],
-        max_retries: int = 3,
+        max_retries: int = 10,
         base_delay: float = 1.0,
         max_delay: float = 60.0,
         error_feedback_prompt: str | None = None,
@@ -503,7 +528,7 @@ class RouterBase(ABC):
             model: The model name to use for completion ("coder" or "summary").
             model_type: The Pydantic model type to validate against.
             messages: The messages to send to the LLM.
-            max_retries: Maximum number of retry attempts (default: 3).
+            max_retries: Maximum number of retry attempts (default: 10).
             base_delay: Base delay in seconds for exponential backoff when 429 error occurs (default: 1.0).
                        Only used for 429 rate limit errors. Other errors retry immediately.
             max_delay: Maximum delay in seconds for exponential backoff (default: 60.0).
@@ -637,31 +662,32 @@ Your corrected response:
                     )
                     # No delay for validation errors
 
-            except RateLimitError as e:
-                # If this is the last attempt, raise the error
-                if attempt >= max_retries:
-                    raise ValueError(
-                        f"Failed to get valid response after {max_retries + 1} attempts. Last error: {str(e)}"
-                    )
-
-                # For 429 errors, use exponential backoff
-                delay = min(base_delay * (2**attempt), max_delay)
-                logger.warning(
-                    f"Rate limit error (429) detected (attempt {attempt + 1}/{max_retries + 1}). "
-                    f"Retrying after {delay:.2f} seconds with exponential backoff."
-                )
-                await asyncio.sleep(delay)
-                # delete the last assistant message
-                if (
-                    conversation_messages
-                    and conversation_messages[-1]["role"] == "assistant"
-                ):
-                    conversation_messages.pop()
-
-                # record the error
-                last_error = e
-
             except Exception as e:
+                if _is_rate_limit_like_error(e):
+                    # If this is the last attempt, raise the error
+                    if attempt >= max_retries:
+                        raise ValueError(
+                            f"Failed to get valid response after {max_retries + 1} attempts. Last error: {str(e)}"
+                        )
+
+                    # For rate-limit-like errors, use exponential backoff
+                    delay = min(base_delay * (2**attempt), max_delay)
+                    logger.warning(
+                        f"Rate limit-like error detected (attempt {attempt + 1}/{max_retries + 1}). "
+                        f"Retrying after {delay:.2f} seconds with exponential backoff. Error: {str(e)}"
+                    )
+                    await asyncio.sleep(delay)
+                    # delete the last assistant message
+                    if (
+                        conversation_messages
+                        and conversation_messages[-1]["role"] == "assistant"
+                    ):
+                        conversation_messages.pop()
+
+                    # record the error
+                    last_error = e
+                    continue
+
                 # If this is the last attempt, raise the error
                 if attempt >= max_retries:
                     raise ValueError(
@@ -891,17 +917,20 @@ Your generated world description:"""
                     )
                     world_description = response.choices[0].message.content or ""  # type: ignore
                     break
-                except RateLimitError as e:
-                    if attempt >= max_retries:
-                        raise e
-                    delay = min(1.0 * (2**attempt), 60.0)
-                    logger.warning(
-                        f"Rate limit error (429) detected when generating world description (attempt {attempt + 1}/{max_retries + 1}). "
-                        f"Retrying after {delay:.2f} seconds with exponential backoff."
-                    )
-                    await asyncio.sleep(delay)
-                    last_error = e
                 except Exception as e:
+                    if _is_rate_limit_like_error(e):
+                        if attempt >= max_retries:
+                            raise e
+                        delay = min(1.0 * (2**attempt), 60.0)
+                        logger.warning(
+                            f"Rate limit-like error detected when generating world description "
+                            f"(attempt {attempt + 1}/{max_retries + 1}). "
+                            f"Retrying after {delay:.2f} seconds with exponential backoff. Error: {str(e)}"
+                        )
+                        await asyncio.sleep(delay)
+                        last_error = e
+                        continue
+
                     if attempt >= max_retries:
                         raise e
                     logger.warning(
