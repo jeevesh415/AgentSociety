@@ -22,6 +22,27 @@ from agentsociety2.logger import setup_logging, get_logger
 from typing import cast
 
 
+def _setup_debugpy_if_enabled(logger) -> None:
+    """可选启用 debugpy attach（默认关闭）。"""
+    enabled = os.getenv("ENABLE_DEBUGGER", "").strip().lower()
+    if enabled not in {"1", "true", "yes", "on"}:
+        return
+
+    host = os.getenv("DEBUGPY_HOST", "localhost")
+    port = int(os.getenv("DEBUGPY_PORT", "5678"))
+
+    try:
+        import debugpy
+
+        debugpy.listen((host, port))
+        logger.info("debugpy enabled, waiting for debugger attach at %s:%s", host, port)
+        debugpy.wait_for_client()
+        logger.info("debugger attached, continuing simulation startup")
+    except Exception as e:
+        logger.exception("failed to initialize debugpy: %s", e)
+        raise
+
+
 def _calculate_gyration_radius(trajectories: list) -> float:
     """
     计算回旋半径（Radius of Gyration）
@@ -52,7 +73,7 @@ def _calculate_gyration_radius(trajectories: list) -> float:
 
 async def main(
     logger,
-    num_agents: int = 100,
+    num_agents: int = 50,
     profile_start_idx: int = 0,
 ):
     """
@@ -148,6 +169,7 @@ async def main(
                 "id": agent_id,
                 "profile": profile_text,
                 "template_mode_enabled": True,
+                "ask_intention_enabled": True,
             }
         )
         mobility_persons.append(
@@ -444,4 +466,6 @@ if __name__ == "__main__":
         log_file=f"logs/daily_mobility_benchmark-{datetime.now().strftime('%Y%m%d%H%M%S')}.log",
         log_level=logging.DEBUG,
     )
-    asyncio.run(main(logger=get_logger(), num_agents=100))
+    logger = get_logger()
+    _setup_debugpy_if_enabled(logger)
+    asyncio.run(main(logger=logger, num_agents=50))

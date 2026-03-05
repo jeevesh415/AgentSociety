@@ -1013,7 +1013,7 @@ class CodeGenRouter(RouterBase):
         env_modules: list[EnvBase],
         max_body_code_lines: int = 10,
         max_steps: int = 10,
-        max_llm_call_retry: int = 3,
+        max_llm_call_retry: int = 10,
         log_path: str = "logs/instruction_log.pkl",
         replay_writer: Optional["ReplayWriter"] = None,
         # Template cache configuration

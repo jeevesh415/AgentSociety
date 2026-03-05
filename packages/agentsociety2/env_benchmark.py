@@ -99,8 +99,13 @@ from agentsociety2.env import (
     TwoTierReActRouter,
 )
 from agentsociety2.logger import setup_logging, get_logger
+from agentsociety2.config import get_model_name
 from tqdm import tqdm
 
+
+# 仅在此处集中记录基准评测所用的模型名称（不包含任何 API Key）
+# 与 config 中 coder 模型一致，其他模块可直接从这里读取
+CODER_MODEL_NAME: str = get_model_name("coder")
 
 
 def compute_iou(set1: Set, set2: Set) -> float:
@@ -542,6 +547,9 @@ async def main(
     logger.info(f"Router: {router_class.__name__}")
     logger.info(f"Test data: {yaml_data_path}")
     logger.info(f"Agent count: {num_agents}")
+    # 在程序开始时输出当前使用的 LLM 模型，便于后续排查与对比
+    logger.info(f"Coder LLM model (CODER_MODEL_NAME): {CODER_MODEL_NAME}")
+    print(f"Coder LLM model (CODER_MODEL_NAME): {CODER_MODEL_NAME}")
     logger.info("=" * 80)
 
     # ==================== Load Profiles ====================
@@ -757,7 +765,7 @@ async def main(
         logger.info(f"  平均每次测试 Output Tokens (coder): {avg_output_tokens_per_test:,.0f}")
 
     # ==================== 保存结果 ====================
-    output_path = f"logs/instruction_test_{router_class.__name__}_{datetime.now().strftime('%Y%m%d%H%M%S')}.pkl"
+    output_path = f"logs_env/instruction_test_{router_class.__name__}_{datetime.now().strftime('%Y%m%d%H%M%S')}.pkl"
     with open(output_path, "wb") as f:
         pickle.dump(results, f)
     logger.info(f"\n  ✓ 结果已保存到: {output_path}")
@@ -789,6 +797,8 @@ async def main(
     # 同时保存摘要为 JSON 格式（汇总所有日志中打印的统计信息）
     summary = {
         "router": router_class.__name__,
+        # 当前评测使用的 coder 模型名（集中定义在本文件顶部的 CODER_MODEL_NAME 中）
+        "current_coder_model_name": CODER_MODEL_NAME,
         "total_tests": len(results),
         "successful_tests": len(successful_results),
         "failed_tests": len(failed_results),
@@ -840,13 +850,13 @@ async def main(
 
 async def _main():
     setup_logging(
-        log_file=f"logs/instruction_test_benchmark-{datetime.now().strftime('%Y%m%d%H%M%S')}.log",
+        log_file=f"logs_env/instruction_test_benchmark-{datetime.now().strftime('%Y%m%d%H%M%S')}.log",
         log_level=logging.INFO,
     )
     router_classes = {
-        "code_gen": CodeGenRouter,
-        "react": ReActRouter,
-        "plan_execute": PlanExecuteRouter,
+        # "code_gen": CodeGenRouter,
+        # "react": ReActRouter,
+        # "plan_execute": PlanExecuteRouter,
         "search_tool": SearchToolRouter,
         "two_tier_react": TwoTierReActRouter,
         "two_tier_plan_execute": TwoTierPlanExecuteRouter,

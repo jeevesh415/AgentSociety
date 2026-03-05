@@ -9,7 +9,14 @@ from typing import Literal, Optional
 from litellm.router import Router
 
 from agentsociety2.logger import get_logger, setup_litellm_logging
+
+# mem0 telemetry has per-call Posthog client creation in current upstream version,
+# which may lead to excessive background threads in long simulations.
+# Keep override capability: users can still export MEM0_TELEMETRY=true explicitly.
+os.environ.setdefault("MEM0_TELEMETRY", "False")
+
 from mem0.memory.main import MemoryConfig
+import mem0.memory.main as _mem0_main
 
 __all__ = [
     "Config",
@@ -20,6 +27,26 @@ __all__ = [
 ]
 
 logger = get_logger()
+
+
+def _is_truthy(value: str) -> bool:
+    return value.strip().lower() in {"1", "true", "yes", "on"}
+
+
+def _disable_mem0_telemetry_if_needed() -> None:
+    """
+    Force-disable mem0 telemetry capture to avoid per-call Posthog client creation.
+    """
+    if _is_truthy(os.getenv("MEM0_TELEMETRY", "False")):
+        return
+
+    def _noop_capture_event(*args, **kwargs):
+        return None
+
+    _mem0_main.capture_event = _noop_capture_event
+
+
+_disable_mem0_telemetry_if_needed()
 
 # Initialize LiteLLM logging once
 _litellm_logging_initialized = False
@@ -132,7 +159,9 @@ class Config:
     or region for better performance or cost optimization.
     """
 
-    CODER_LLM_MODEL: str = os.getenv("AGENTSOCIETY_CODER_LLM_MODEL", "glm-4.7")
+    CODER_LLM_MODEL: str = os.getenv(
+        "AGENTSOCIETY_CODER_LLM_MODEL", "glm-4.7"
+    )
     """
     Model identifier for code generation and programming tasks.
 
@@ -389,7 +418,7 @@ class Config:
                 model_list=model_list,
                 fallbacks=fallbacks,
                 cache_responses=True,
-                num_retries=5,  # 设置429错误的重试次数为5次
+                num_retries=10,  # 设置429错误的重试次数为10次
             )
         elif model_type == "default":
             # Default model with fallback to nano
@@ -442,7 +471,7 @@ class Config:
                 model_list=model_list,
                 fallbacks=fallbacks,
                 cache_responses=True,
-                num_retries=5,  # 设置429错误的重试次数为5次
+                num_retries=10,  # 设置429错误的重试次数为10次
             )
         else:  # nano
             api_key = cls.NANO_LLM_API_KEY
@@ -465,11 +494,12 @@ class Config:
                     },
                 },
             ]
+            logger.info("Nano LLM configured: model=%s api_base=%s", model, api_base)
             print(model_list)
             return Router(
                 model_list=model_list,
                 cache_responses=True,
-                num_retries=5,  # 设置429错误的重试次数为5次
+                num_retries=10,  # 设置429错误的重试次数为10次
             )
 
     @classmethod

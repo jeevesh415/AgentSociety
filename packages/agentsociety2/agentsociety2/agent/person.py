@@ -376,6 +376,7 @@ class PersonAgent(AgentBase):
         max_intentions: int = 5,  # 最大意图数量
         max_react_interactions_per_step: int = 3,  # 每个Step最多与环境交互次数
         template_mode_enabled: bool = False,  # 是否启用template模式
+        ask_intention_enabled: bool = True,  # 是否启用定期ask intention
     ):
         """
         初始化PersonAgent。
@@ -396,6 +397,7 @@ class PersonAgent(AgentBase):
             max_intentions: 最大意图数量
             max_react_interactions_per_step: 每个Step最多与环境交互次数
             template_mode_enabled: 是否启用template模式，启用后指令会被视为模板指令，支持{variable_name}语法
+            ask_intention_enabled: 是否启用每两步一次的ask intention记录
         """
         super().__init__(id=id, profile=profile, name=name, replay_writer=replay_writer)
         self._memory_user_id = f"agent-{id}"
@@ -414,6 +416,7 @@ class PersonAgent(AgentBase):
 
         # Template模式开关
         self.template_mode_enabled = template_mode_enabled
+        self.ask_intention_enabled = ask_intention_enabled
 
         # 短期记忆队列（存储最近的N条消息记录，每个元素是包含记忆文本和时间戳的字典）
         self._short_memory: list[dict[str, str]] = []
@@ -2599,7 +2602,7 @@ Your response is:
         await self._flush_cognition_memory_to_memory()
 
         # 每两步查询一次agent的意图（第0、2、4步等）
-        if self._step_count % 2 == 0:
+        if self.ask_intention_enabled and self._step_count % 2 == 0:
             await self._query_current_intention()
 
         # # 写入回放数据快照

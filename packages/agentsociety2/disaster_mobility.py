@@ -6,6 +6,10 @@ from datetime import datetime, timedelta
 
 from dotenv import load_dotenv
 
+# 先加载环境变量，再强制关闭 mem0 telemetry，避免导入 PersonAgent 时触发埋点线程。
+load_dotenv()
+os.environ["MEM0_TELEMETRY"] = "False"
+
 from agentsociety2.contrib.env.mobility_space import MobilitySpace
 from agentsociety2.contrib.env.event_space import EventSpace
 from agentsociety2.contrib.env.global_information import GlobalInformationEnv
@@ -14,23 +18,22 @@ from agentsociety2.env import CodeGenRouter
 from agentsociety2.society import AgentSociety
 from agentsociety2.logger import setup_logging, get_logger
 
-load_dotenv()
-
 
 async def main_disaster_mobility(
     logger,
-    num_agents: int = 20,
+    num_agents: int = 50,
     profile_start_idx: int = 0,
     profiles_path: str | None = None,
     map_path: str | None = None,
 ):
     """
-    灾害对出行影响实验（3天，每小时一步）
+    灾害对出行影响实验（11天，每小时一步）
 
     实验设置：
     - Day 1: 正常日常移动
-    - Day 2: 广播附近山上出现山火
-    - Day 3: 广播山火已被扑灭
+    - Day 3（当日一早）: 广播突发山火
+    - Day 4-Day 9: 每天广播“山火还在持续”
+    - Day 10（当日一早）: 广播山火已被扑灭
 
     统计量：
     - 每天所有agent的出行量总和（move_to完成次数）
@@ -39,10 +42,10 @@ async def main_disaster_mobility(
     logger.info("【灾害对出行影响实验】")
     logger.info("=" * 80)
 
-    # 时间设置：每小时一步，共3天
+    # 时间设置：每小时一步，共11天
     start_time = datetime.now().replace(year=2026, month=2, day=9, hour=0, minute=0, second=0, microsecond=0)
     time_step_seconds = 60 * 60  # 1小时
-    total_days = 3
+    total_days = 11
     steps_per_day = 24
     total_steps = total_days * steps_per_day
 
@@ -93,37 +96,6 @@ async def main_disaster_mobility(
         agent_sqlite_path = os.path.join(chroma_base_dir, f"agent_{agent_id}.db")
         os.makedirs(os.path.dirname(agent_sqlite_path), exist_ok=True)
 
-        agent_memory_config = {
-            "vector_store": {
-                "provider": "chroma",
-                "config": {
-                    "collection_name": f"agent_{agent_id}_memories",
-                    "path": agent_chroma_path,
-                },
-            },
-            "storage_config": {
-                "provider": "sqlite",
-                "path": agent_sqlite_path,
-            },
-            "llm": {
-                "provider": "openai",
-                "config": {
-                    "model": "qwen3-next-80b-a3b-instruct",
-                    "api_key": "sk-WqRUWisGS3Uh_EsonSFg_A",
-                    "openai_base_url": "https://llmapi.fiblab.net/v1",
-                },
-            },
-            "embedder": {
-                "provider": "openai",
-                "config": {
-                    "model": "bge-m3",
-                    "api_key": os.getenv("INFINI_API_KEY"),
-                    "openai_base_url": "https://cloud.infini-ai.com/maas/v1",
-                    "embedding_dims": 1024,
-                },
-            },
-        }
-
         profile_text = (
             f"My name is {agent_str_id}, "
             f"gender {profile.get('gender', 'Unknown')}, "
@@ -142,7 +114,7 @@ async def main_disaster_mobility(
             {
                 "id": agent_id,
                 "profile": profile_text,
-                "memory_config": agent_memory_config,
+                "ask_intention_enabled": False,
             }
         )
 
@@ -185,16 +157,21 @@ async def main_disaster_mobility(
     await society.init()
 
     # 广播内容设置
-    await global_info_env.set("今天一切正常，可以按照日常规律出行。")
+    await global_info_env.set("今天一切正常")
 
     # ==================== 运行仿真并统计出行量 ====================
     daily_move_counts = [0 for _ in range(total_days)]
 
     for step_idx in range(total_steps):
-        if step_idx == steps_per_day:
-            await global_info_env.set("广播：附近山上出现山火，请注意安全，广大居民尽量减少外出。")
-        elif step_idx == 2 * steps_per_day:
-            await global_info_env.set("广播：山火已被扑灭，广大居民可恢复正常外出。")
+        # Day 3 当日一早广播“突发山火”
+        if step_idx == 2 * steps_per_day:
+            await global_info_env.set("紧急广播：极端寒潮袭击我市，请广大民众注意适当减少非必要出行")
+        # Day 4 到 Day 9 每天开始时广播“山火还在持续”
+        elif step_idx % steps_per_day == 0 and 3 * steps_per_day <= step_idx < 9 * steps_per_day:
+            await global_info_env.set("广播：寒潮仍在持续，请广大民众注意适当减少非必要出行")
+        # Day 10 当日一早广播灾害结束
+        elif step_idx == 9 * steps_per_day:
+            await global_info_env.set("广播：寒潮已经结束，可恢复正常秩序")
 
         # 手动执行一步（复制 AgentSociety.step 的逻辑）
         society._t += timedelta(seconds=time_step_seconds)
