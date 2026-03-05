@@ -1,12 +1,9 @@
-.. AgentSociety 2 documentation master file, created by sphinx-quickstart.
-   You can adapt this file completely to your liking, but it should at least
-   contain the root `toctree` directive.
+AgentSociety
+=============
 
-Welcome to AgentSociety 2's Documentation!
-==========================================
-
-AgentSociety 2 is a modern, LLM-native agent simulation platform designed
-for social science research and experimentation.
+**AgentSociety 2** is a modern, LLM-native agent simulation platform designed
+for social science research and experimentation. It provides a flexible framework
+for creating and managing intelligent agents in simulated environments.
 
 .. image:: https://img.shields.io/pypi/v/agentsociety2.svg
    :target: https://pypi.org/project/agentsociety2/
@@ -20,18 +17,58 @@ for social science research and experimentation.
    :target: LICENSE
    :alt: License
 
-Quick Links
+Key Features
+------------
+
+* **LLM-Driven Agents**: Create agents with personality, memory, and reasoning
+  capabilities powered by large language models.
+
+* **Flexible Environment Modules**: Build custom simulation environments with
+  composable tools and state management.
+
+* **Async-First Design**: High-performance async architecture for efficient
+  multi-agent simulations.
+
+* **Replay & Analysis**: Built-in SQLite-based storage for experiment tracking
+  and analysis.
+
+* **Extensible**: Easy to extend with custom agents, environments, and tools.
+
+Installation
+------------
+
+.. code-block:: bash
+
+   pip install agentsociety2
+
+See :doc:`installation` for detailed setup instructions.
+
+Quick Start
 -----------
 
-* **Installation**: :doc:`installation`
-* **Quick Start**: :doc:`quickstart`
-* **Core Concepts**: :doc:`concepts`
-* **Custom Modules**: :doc:`custom_modules`
-* **Examples**: :doc:`examples`
-* **Development**: :doc:`development`
+.. code-block:: python
 
-Table of Contents
-=================
+   from agentsociety2 import PersonAgent, AgentSociety
+
+   # Create an agent
+   agent = PersonAgent(
+       id=1,
+       profile={
+           "name": "Alice",
+           "age": 28,
+           "personality": "friendly and curious",
+           "bio": "A software engineer who loves hiking."
+       }
+   )
+
+   # Ask the agent a question
+   response = await agent.ask("What's your favorite hobby?")
+   print(response)
+
+See :doc:`quickstart` for more examples.
+
+Documentation
+-------------
 
 .. toctree::
    :maxdepth: 2
@@ -64,7 +101,14 @@ Table of Contents
 
    examples
 
+Links
+-----
+
+* **GitHub**: https://github.com/tsinghua-fib-lab/AgentSociety
+* **PyPI**: https://pypi.org/project/agentsociety2/
+* **Issues**: https://github.com/tsinghua-fib-lab/AgentSociety/issues
+
 Search
-======
+------
 
 * :ref:`search`
