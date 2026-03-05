@@ -124,7 +124,7 @@ class ScriptGenerator:
         script_lines.extend([
             '',
             'async def test_envs():',
-            '"""测试自定义环境模块"""',
+            '    """测试自定义环境模块"""',
             '    print("=" * 50)',
             '    print("测试自定义环境模块")',
             '    print("=" * 50)',
