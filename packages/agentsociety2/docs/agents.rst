@@ -9,7 +9,7 @@ Creating Agents
 PersonAgent
 ~~~~~~~~~~~
 
-The :class:`~agentsociety2.agent.PersonAgent` is a ready-to-use agent
+The ``PersonAgent`` class is a ready-to-use agent
 implementation:
 
 .. code-block:: python
@@ -32,14 +32,14 @@ information to shape its responses and decisions.
 Custom Agents
 ~~~~~~~~~~~~~
 
-To create a custom agent, inherit from :class:`~agentsociety2.agent.AgentBase`
+To create a custom agent, inherit from ``AgentBase``
 and implement the required abstract methods:
 
 Required Methods to Implement
 ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
 
 When creating a custom agent, you must implement these abstract methods from
-:class:`~agentsociety2.agent.AgentBase`:
+``AgentBase``:
 
 1. **async def ask(self, message: str, readonly: bool = True) -> str**
 
@@ -75,8 +75,8 @@ When creating a custom agent, you must implement these abstract methods from
 Reference Implementation
 ^^^^^^^^^^^^^^^^^^^^^^^^
 
-For a complete reference, see :class:`~agentsociety2.agent.PersonAgent`
-in the API documentation.
+For a complete reference, see ``PersonAgent``
+in the source code.
 
 Example:
 ^^^^^^^^

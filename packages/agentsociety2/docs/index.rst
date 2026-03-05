@@ -64,9 +64,7 @@ Table of Contents
 
    examples
 
-Indices and tables
-==================
+Search
+======
 
-* :ref:`genindex`
-* :ref:`modindex`
 * :ref:`search`

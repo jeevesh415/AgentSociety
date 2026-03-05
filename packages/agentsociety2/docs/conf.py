@@ -3,13 +3,7 @@
 # For the full list of built-in configuration values, see the documentation:
 # https://www.sphinx-doc.org/en/master/usage/configuration.html
 
-import os
-import sys
 from datetime import datetime
-
-# Add the package path
-sys.path.insert(0, os.path.abspath('..'))
-sys.path.insert(0, os.path.abspath('../agentsociety2'))
 
 # -- Project information -----------------------------------------------------
 # https://www.sphinx-doc.org/en/master/usage/configuration.html#project-information
@@ -25,10 +19,7 @@ version = '2.0.0'
 
 extensions = [
     'sphinx.ext.duration',
-    'sphinx.ext.autodoc',
-    'sphinx.ext.autosummary',
     'sphinx.ext.napoleon',
-    'sphinx.ext.viewcode',
     'sphinx.ext.intersphinx',
     'myst_parser',
 ]
@@ -64,16 +55,6 @@ html_theme_options = {
 
 html_title = f'AgentSociety 2 {version} Documentation'
 html_short_title = 'AgentSociety 2'
-
-# -- Options for autodoc -----------------------------------------------------
-
-autodoc_default_options = {
-    'members': True,
-    'member-order': 'bysource',
-    'special-members': '__init__',
-    'undoc-members': True,
-    'exclude-members': '__weakref__'
-}
 
 # -- Options for intersphinx -------------------------------------------------
 

@@ -10,7 +10,7 @@ Inherit from EnvBase
 ~~~~~~~~~~~~~~~~~~~~
 
 To create a custom environment module, inherit from
-:class:`~agentsociety2.env.EnvBase` and implement the required methods:
+``EnvBase`` and implement the required methods:
 
 Required Methods to Implement
 ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
@@ -68,9 +68,9 @@ Reference Implementation
 
 For complete reference implementations, see:
 
-* :class:`~agentsociety2.contrib.env.SimpleSocialSpace` - Social interaction module
-* :class:`~agentsociety2.contrib.env.PublicGoodsGame` - Public goods game module
-* :class:`~agentsociety2.contrib.env.PrisonersDilemma` - Prisoner's dilemma module
+* ``SimpleSocialSpace`` - Social interaction module
+* ``PublicGoodsGame`` - Public goods game module
+* ``PrisonersDilemma`` - Prisoner's dilemma module
 
 The @tool Decorator
 ~~~~~~~~~~~~~~~~~~~

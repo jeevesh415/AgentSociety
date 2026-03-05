@@ -33,7 +33,7 @@ Custom modules are placed in the ``custom/`` directory within your workspace::
 Creating a Custom Agent
 -------------------------
 
-All custom Agents must inherit from :class:`~agentsociety2.agent.base.AgentBase`
+All custom Agents must inherit from ``AgentBase``
 and implement the required methods:
 
 .. code-block:: python
@@ -79,21 +79,21 @@ Required Methods
 
    * - Method
      - Description
-   * - :py:meth:`mcp_description`
+   * - ``mcp_description()``
      - Return module description (class method)
-   * - :py:meth:`ask`
+   * - ``ask()``
      - Answer questions from environment
-   * - :py:meth:`step`
+   * - ``step()``
      - Execute one simulation step
-   * - :py:meth:`dump`
+   * - ``dump()``
      - Serialize agent state
-   * - :py:meth:`load`
+   * - ``load()``
      - Load agent state from dictionary
 
 Creating a Custom Environment
 ------------------------------
 
-Custom environments must inherit from :class:`~agentsociety2.env.base.EnvBase`
+Custom environments must inherit from ``EnvBase``
 and use the ``@tool`` decorator to register methods:
 
 .. code-block:: python
@@ -248,7 +248,7 @@ Best Practices
 
 **State Management**
 
-* Use :py:meth:`dump` and :py:meth:`load` for state persistence
+* Use ``dump()`` and ``load()`` for state persistence
 * Record important state changes in replay
 * Keep state serializable (JSON compatible)
 
