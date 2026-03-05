@@ -10,7 +10,7 @@ build:
 
 python:
   install:
-    - requirements: docs/requirements.txt
+    - requirements: packages/agentsociety2/docs/requirements.txt
     - method: pip
       path: packages/agentsociety2
 
