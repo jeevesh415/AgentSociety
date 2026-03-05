@@ -11,9 +11,17 @@ requires-python = ">=3.11"
 license = { text = "Apache-2.0" }
 authors = [
     { name = "Jun Zhang", email = "zhangjun990222@gmail.com" },
+    { name = "Boyuan Sun", email = "sunboyuan0124@gmail.com" },
+    { name = "Haoyu Huang", email = "2253940186@qq.com" },
+    { name = "Keming Zhang", email = "kemingzhang@bupt.edu.cn" },
+    { name = "Yuxin Liu", email = "aph.xin@gmail.com" },
 ]
 maintainers = [
     { name = "Jun Zhang", email = "zhangjun990222@gmail.com" },
+    { name = "Boyuan Sun", email = "sunboyuan0124@gmail.com" },
+    { name = "Haoyu Huang", email = "2253940186@qq.com" },
+    { name = "Keming Zhang", email = "kemingzhang@bupt.edu.cn" },
+    { name = "Yuxin Liu", email = "aph.xin@gmail.com" },
 ]
 keywords = [
     "agents",
