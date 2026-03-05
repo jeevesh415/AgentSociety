@@ -4,7 +4,7 @@ export default {
         survey: '问卷',
         documentation: '文档',
         github: 'GitHub',
-        v2: 'V2 (测试版)',
+        v2: 'AgentSociety 2',
         llmConfigs: 'LLM',
         maps: '地图',
         agents: '智能体',
