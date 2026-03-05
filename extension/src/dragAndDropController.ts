@@ -1,8 +1,14 @@
 /**
  * 拖拽上传控制器 (Drag and Drop Controller)
- * 
+ *
  * 实现 TreeDragAndDropController 接口，处理文件拖拽到树视图节点的事件。
- * 支持将本地文件拖拽到"文献库"和"用户数据"节点进行上传。
+ * 支持将本地文件或目录拖拽到"文献库"和"用户数据"节点进行上传。
+ *
+ * 功能特性：
+ * - 递归目录复制（保留目录结构）
+ * - 大文件警告（100MB阈值）
+ * - 进度显示
+ * - 覆盖策略确认（含取消选项）
  */
 
 import * as vscode from 'vscode';
@@ -28,13 +34,23 @@ interface FileToProcess {
 type OverwriteStrategy = 'overwriteAll' | 'skipAll' | 'askEach' | 'cancel';
 
 /**
+ * 上传结果
+ */
+interface UploadResult {
+  successCount: number;
+  failCount: number;
+  skipCount: number;
+  errors: string[];
+}
+
+/**
  * 大文件阈值 (100 MB)
  */
 const LARGE_FILE_THRESHOLD = 100 * 1024 * 1024;
 
 /**
  * TreeDragAndDropController 实现
- * 
+ *
  * 处理拖拽事件：
  * - dragMimeTypes: 定义可以拖拽的数据类型（文件URI）
  * - dropMimeTypes: 定义可以接收的数据类型
@@ -76,8 +92,325 @@ export class ProjectDragAndDropController implements vscode.TreeDragAndDropContr
   readonly dropMimeTypes = ['text/uri-list'];
 
   /**
+   * 获取目标工作区文件夹
+   * 如果有多个工作区，使用包含目标节点的那个
+   */
+  private getTargetWorkspace(target: ProjectItem): vscode.WorkspaceFolder | undefined {
+    const workspaceFolders = vscode.workspace.workspaceFolders;
+    if (!workspaceFolders || workspaceFolders.length === 0) {
+      return undefined;
+    }
+
+    // 如果只有一个工作区，直接返回
+    if (workspaceFolders.length === 1) {
+      return workspaceFolders[0];
+    }
+
+    // 多工作区情况：使用 provider 的 context 判断
+    // 这里简化处理：使用第一个工作区
+    // TODO: 可以根据 target 的上下文来判断应该使用哪个工作区
+    return workspaceFolders[0];
+  }
+
+  /**
+   * 确保目标目录存在
+   * @throws 如果目录创建失败且不存在
+   */
+  private async ensureTargetDirectory(targetDirUri: vscode.Uri): Promise<void> {
+    try {
+      await vscode.workspace.fs.stat(targetDirUri);
+      // 目录已存在
+      return;
+    } catch {
+      // 目录不存在，尝试创建
+    }
+
+    try {
+      await vscode.workspace.fs.createDirectory(targetDirUri);
+      this.log('Target directory created:', targetDirUri.toString());
+    } catch (error: any) {
+      const errorMsg = localize('dragDrop.mkdirFailed', targetDirUri.fsPath);
+      this.log('Failed to create directory:', error.message);
+      throw new Error(errorMsg);
+    }
+  }
+
+  /**
+   * 显示大文件警告
+   * @returns true 表示继续上传，false 表示取消
+   */
+  private async showLargeFileWarning(
+    files: FileToProcess[]
+  ): Promise<boolean> {
+    const largeFiles = files.filter(f => f.size >= LARGE_FILE_THRESHOLD);
+
+    if (largeFiles.length === 0) {
+      return true;
+    }
+
+    const formatSize = (bytes: number): string => {
+      return (bytes / (1024 * 1024)).toFixed(1);
+    };
+
+    let message: string;
+    if (largeFiles.length === 1) {
+      const file = largeFiles[0];
+      message = localize('dragDrop.largeFileWarning', file.fileName, formatSize(file.size));
+    } else {
+      message = localize('dragDrop.largeFilesWarning', String(largeFiles.length));
+    }
+
+    const continueLabel = localize('dragDrop.overwrite'); // 复用"继续/覆盖"按钮文本
+    const cancelLabel = localize('dragDrop.cancel');
+
+    const response = await vscode.window.showWarningMessage(
+      message,
+      { modal: true },
+      continueLabel,
+      cancelLabel
+    );
+
+    return response === continueLabel;
+  }
+
+  /**
+   * 确认覆盖策略
+   * @returns 覆盖策略，'cancel' 表示取消整个操作
+   */
+  private async confirmOverwriteStrategy(
+    existingFiles: FileToProcess[],
+    totalFiles: number
+  ): Promise<OverwriteStrategy> {
+    // 如果只有一个文件且已存在，直接询问
+    if (totalFiles === 1 && existingFiles.length === 1) {
+      const file = existingFiles[0];
+      const overwriteLabel = localize('dragDrop.overwrite');
+      const skipLabel = localize('dragDrop.skip');
+      const cancelLabel = localize('dragDrop.cancel');
+
+      const response = await vscode.window.showWarningMessage(
+        localize('dragDrop.overwriteConfirm', file.fileName),
+        { modal: true },
+        overwriteLabel,
+        skipLabel,
+        cancelLabel
+      );
+
+      if (response === overwriteLabel) return 'overwriteAll';
+      if (response === skipLabel) return 'skipAll';
+      return 'cancel';
+    }
+
+    // 多文件情况：显示批量策略选项
+    if (existingFiles.length > 0) {
+      const fileNames = existingFiles.slice(0, 3).map(f => f.fileName).join('、');
+      const moreFiles = existingFiles.length > 3 ? localize('dragDrop.moreFiles', existingFiles.length - 3) : '';
+
+      const overwriteAllLabel = localize('dragDrop.overwriteAll');
+      const skipAllLabel = localize('dragDrop.skipAll');
+      const askEachLabel = localize('dragDrop.askEach');
+      const cancelLabel = localize('dragDrop.cancel');
+
+      const response = await vscode.window.showWarningMessage(
+        localize('dragDrop.fileExists', `${fileNames}${moreFiles}`),
+        { modal: true },
+        overwriteAllLabel,
+        skipAllLabel,
+        askEachLabel,
+        cancelLabel
+      );
+
+      if (response === overwriteAllLabel) return 'overwriteAll';
+      if (response === skipAllLabel) return 'skipAll';
+      if (response === askEachLabel) return 'askEach';
+      return 'cancel';
+    }
+
+    return 'overwriteAll'; // 没有已存在文件，默认覆盖
+  }
+
+  /**
+   * 递归收集目录中的所有文件
+   * @param sourceUri 源目录 URI
+   * @param targetBasePath 目标基础路径
+   * @param relativePath 相对路径（用于递归）
+   * @param files 收集的文件列表
+   */
+  private async collectDirectoryFiles(
+    sourceUri: vscode.Uri,
+    targetBasePath: string,
+    relativePath: string,
+    files: FileToProcess[],
+    token: vscode.CancellationToken
+  ): Promise<void> {
+    if (token.isCancellationRequested) {
+      return;
+    }
+
+    try {
+      const entries = await vscode.workspace.fs.readDirectory(sourceUri);
+
+      for (const [name, fileType] of entries) {
+        if (token.isCancellationRequested) {
+          return;
+        }
+
+        const entryUri = sourceUri.with({ path: `${sourceUri.path}/${name}` });
+        const entryRelativePath = relativePath ? `${relativePath}/${name}` : name;
+
+        if (fileType === vscode.FileType.Directory) {
+          // 递归处理子目录
+          await this.collectDirectoryFiles(entryUri, targetBasePath, entryRelativePath, files, token);
+        } else if (fileType === vscode.FileType.File) {
+          // 获取文件信息
+          try {
+            const stat = await vscode.workspace.fs.stat(entryUri);
+            const fileName = name || '';
+
+            if (!fileName) {
+              this.log('Empty file name in directory:', entryUri.toString());
+              continue;
+            }
+
+            // 构建目标路径
+            const targetPath = path.join(targetBasePath, entryRelativePath);
+            const targetUri = vscode.Uri.file(targetPath);
+
+            // 检查目标文件是否存在
+            let exists = false;
+            try {
+              await vscode.workspace.fs.stat(targetUri);
+              exists = true;
+            } catch {
+              exists = false;
+            }
+
+            files.push({
+              uri: entryUri,
+              fileName,
+              targetUri,
+              exists,
+              size: stat.size,
+              relativePath: entryRelativePath
+            });
+
+            this.log('Collected file from directory:', fileName, 'relativePath:', entryRelativePath);
+          } catch (error: any) {
+            this.log('Error getting file stat:', entryUri.toString(), error.message);
+          }
+        }
+      }
+    } catch (error: any) {
+      const errorMsg = localize('dragDrop.directoryReadFailed', sourceUri.fsPath);
+      this.log('Error reading directory:', sourceUri.toString(), error.message);
+      throw new Error(errorMsg);
+    }
+  }
+
+  /**
+   * 收集所有待处理的文件（支持单文件和目录）
+   * @returns 文件列表
+   */
+  private async collectFilesToProcess(
+    uris: vscode.Uri[],
+    targetDirPath: string,
+    token: vscode.CancellationToken
+  ): Promise<FileToProcess[]> {
+    const files: FileToProcess[] = [];
+
+    for (const uri of uris) {
+      if (token.isCancellationRequested) {
+        break;
+      }
+
+      try {
+        const stat = await vscode.workspace.fs.stat(uri);
+
+        if (stat.type === vscode.FileType.Directory) {
+          // 递归收集目录文件
+          const dirName = path.basename(uri.fsPath) || path.basename(uri.path) || '';
+          await this.collectDirectoryFiles(uri, targetDirPath, dirName, files, token);
+        } else if (stat.type === vscode.FileType.File) {
+          // 单个文件
+          const fileName = path.basename(uri.fsPath) || path.basename(uri.path) || '';
+
+          if (!fileName) {
+            this.log('Empty file name, skipping:', uri.toString());
+            continue;
+          }
+
+          const targetPath = path.join(targetDirPath, fileName);
+          const targetUri = vscode.Uri.file(targetPath);
+
+          let exists = false;
+          try {
+            await vscode.workspace.fs.stat(targetUri);
+            exists = true;
+          } catch {
+            exists = false;
+          }
+
+          files.push({
+            uri,
+            fileName,
+            targetUri,
+            exists,
+            size: stat.size
+          });
+
+          this.log('Collected file:', fileName, 'exists:', exists);
+        }
+      } catch (error: any) {
+        const fileName = path.basename(uri.fsPath) || path.basename(uri.path) || uri.toString();
+        const errorMsg = localize('dragDrop.fileNotAccessible', `${fileName} (${error.message})`);
+        this.log('Error processing URI:', uri.toString(), error.message);
+        throw new Error(errorMsg);
+      }
+    }
+
+    return files;
+  }
+
+  /**
+   * 显示上传结果
+   */
+  private showUploadResult(
+    successCount: number,
+    failCount: number,
+    skipCount: number,
+    errors: string[],
+    targetType: string
+  ): void {
+    const targetName = targetType === 'papers' ? localize('dragDrop.literature') : localize('dragDrop.userData');
+
+    if (successCount > 0 && failCount === 0 && skipCount === 0) {
+      vscode.window.showInformationMessage(
+        localize('dragDrop.success', String(successCount), targetName)
+      );
+    } else if (successCount > 0 || failCount > 0 || skipCount > 0) {
+      const parts: string[] = [];
+      if (successCount > 0) parts.push(localize('dragDrop.successCount', String(successCount)));
+      if (skipCount > 0) parts.push(localize('dragDrop.skipCount', String(skipCount)));
+      if (failCount > 0) parts.push(localize('dragDrop.failCount', String(failCount)));
+
+      const message = localize('dragDrop.partialSuccess', parts.join('，'));
+      if (failCount > 0) {
+        vscode.window.showWarningMessage(message);
+      } else {
+        vscode.window.showInformationMessage(message);
+      }
+
+      if (errors.length > 0) {
+        this.outputChannel.show(true);
+      }
+    } else {
+      vscode.window.showInformationMessage(localize('dragDrop.noFilesProcessed'));
+    }
+  }
+
+  /**
    * 处理拖拽放置事件
-   * 
+   *
    * @param target - 目标节点（文献库或用户数据节点）
    * @param dataTransfer - 拖拽的数据传输对象
    * @param token - 取消令牌
@@ -90,303 +423,197 @@ export class ProjectDragAndDropController implements vscode.TreeDragAndDropContr
     this.log('handleDrop called', { target: target?.label, targetType: target?.type });
 
     try {
-      // 检查目标节点是否有效
+      // 1. 验证目标节点
       if (!target) {
-        this.log('No target node provided');
         vscode.window.showWarningMessage(localize('dragDrop.noTarget'));
         return;
       }
 
-      this.log('Target node:', target.label, 'Type:', target.type);
-
-      // 只支持拖拽到"文献库"（papers）或"用户数据"（userdata）节点
       if (target.type !== 'papers' && target.type !== 'userdata') {
-        this.log('Invalid target type:', target.type);
         vscode.window.showWarningMessage(localize('dragDrop.invalidTarget', target.label));
         return;
       }
 
-      // 获取拖拽的文件URI列表
+      // 2. 解析拖拽的文件 URI
       const transferItem = dataTransfer.get('text/uri-list');
       if (!transferItem) {
-        this.log('No transfer item found in dataTransfer');
-        // 检查是否有其他可用的MIME类型
-        const availableTypes: string[] = [];
-        for (const mimeType of ['text/uri-list', 'application/vnd.code.tree.projectStructureView']) {
-          if (dataTransfer.get(mimeType)) {
-            availableTypes.push(mimeType);
-          }
-        }
-        this.log('Available MIME types:', availableTypes);
         vscode.window.showWarningMessage(localize('dragDrop.noFiles'));
         return;
       }
 
-      this.log('Transfer item found, parsing URI list...');
-
-      // 解析URI列表（可能包含多个文件，用换行符分隔）
       const uriListString = await transferItem.asString();
-      this.log('URI list string:', uriListString.substring(0, 200)); // 只记录前200个字符
-
       const uris = uriListString
         .split('\n')
         .map(uri => uri.trim())
         .filter(uri => uri.length > 0)
         .map(uri => {
           try {
-            const parsed = vscode.Uri.parse(uri);
-            this.log('Parsed URI:', parsed.toString());
-            return parsed;
-          } catch (error: any) {
-            this.log('Failed to parse URI:', uri, 'Error:', error.message);
+            return vscode.Uri.parse(uri);
+          } catch {
             return null;
           }
         })
         .filter((uri): uri is vscode.Uri => uri !== null);
 
-      this.log('Parsed URIs count:', uris.length);
-
       if (uris.length === 0) {
-        this.log('No valid URIs found');
         vscode.window.showWarningMessage(localize('dragDrop.noValidUris'));
         return;
       }
 
-      // 获取工作区路径
-      const workspaceFolder = vscode.workspace.workspaceFolders?.[0];
+      // 3. 获取目标工作区
+      const workspaceFolder = this.getTargetWorkspace(target);
       if (!workspaceFolder) {
-        this.log('No workspace folder found');
         vscode.window.showErrorMessage(localize('dragDrop.noWorkspace'));
         return;
       }
 
-      this.log('Workspace folder:', workspaceFolder.uri.toString());
-
-      // 确定目标目录URI（使用URI而不是fsPath以支持远程）
-      // 使用 path.join 构建路径，然后转换为 URI
+      // 4. 确定目标目录
       const targetDirPath = target.type === 'papers'
         ? path.join(workspaceFolder.uri.fsPath, 'papers')
         : path.join(workspaceFolder.uri.fsPath, 'user_data');
       const targetDirUri = vscode.Uri.file(targetDirPath);
 
-      // 确保目标目录存在（使用VSCode文件系统API）
+      // 5. 确保目标目录存在
       try {
-        this.log('Creating target directory:', targetDirUri.toString());
-        await vscode.workspace.fs.createDirectory(targetDirUri);
-        this.log('Target directory created or already exists');
+        await this.ensureTargetDirectory(targetDirUri);
       } catch (error: any) {
-        // 目录可能已存在，记录但不中断
-        this.log('Error creating directory (may already exist):', error.message);
+        vscode.window.showErrorMessage(error.message);
+        return;
       }
 
-      // 复制文件
-      let successCount = 0;
-      let failCount = 0;
-      let skipCount = 0;
-      const errors: string[] = [];
-
-      // 用于批量处理时的覆盖策略
-      // undefined: 未决定，需要询问
-      // true: 全部覆盖
-      // false: 全部跳过
-      let overwriteAll: boolean | undefined = undefined;
-
-      // 先检查哪些文件已存在（使用VSCode文件系统API以支持远程）
-      this.log('Starting to process files, count:', uris.length);
-      const filesToProcess: Array<{ uri: vscode.Uri; fileName: string; targetUri: vscode.Uri; exists: boolean }> = [];
-      for (const uri of uris) {
-        if (token.isCancellationRequested) {
-          this.log('Operation cancelled');
-          break;
+      // 6. 收集所有待处理文件
+      let filesToProcess: FileToProcess[] = [];
+      try {
+        filesToProcess = await this.collectFilesToProcess(uris, targetDirPath, token);
+      } catch (error: any) {
+        if (error instanceof Error) {
+          vscode.window.showErrorMessage(error.message);
         }
-
-        try {
-          this.log('Processing URI:', uri.toString());
-          // 使用VSCode文件系统API检查源文件
-          let stat: vscode.FileStat;
-          try {
-            stat = await vscode.workspace.fs.stat(uri);
-            this.log('File stat retrieved:', { type: stat.type, size: stat.size });
-          } catch (error: any) {
-            // 文件不存在或无法访问
-            const fileName = path.basename(uri.fsPath) || path.basename(uri.path) || localize('dragDrop.fileNotAccessible', '');
-            const errorMsg = localize('dragDrop.fileNotAccessible', `${fileName} (${error.message || error})`);
-            this.log('Error accessing file:', errorMsg);
-            errors.push(errorMsg);
-            failCount++;
-            continue;
-          }
-
-          // 检查是否为文件（不支持拖拽目录）
-          if (stat.type === vscode.FileType.Directory) {
-            const fileName = path.basename(uri.fsPath) || path.basename(uri.path) || '';
-            errors.push(localize('dragDrop.unsupportedDirectory', fileName));
-            failCount++;
-            continue;
-          }
-
-          // 提取文件名（优先使用fsPath，如果不可用则使用path）
-          const fileName = path.basename(uri.fsPath) || path.basename(uri.path) || '';
-          const targetPath = path.join(targetDirPath, fileName);
-          const targetUri = vscode.Uri.file(targetPath);
-
-          // 检查目标文件是否存在
-          let exists = false;
-          try {
-            await vscode.workspace.fs.stat(targetUri);
-            exists = true;
-          } catch {
-            // 文件不存在，这是正常的
-            exists = false;
-          }
-
-          filesToProcess.push({ uri, fileName, targetUri, exists });
-          this.log('File added to process list:', fileName, 'exists:', exists);
-        } catch (error: any) {
-          const fileName = path.basename(uri.fsPath) || path.basename(uri.path) || '';
-          const errorMsg = `${fileName}: ${error.message || error}`;
-          this.log('Error processing file:', errorMsg);
-          errors.push(errorMsg);
-          failCount++;
-        }
+        return;
       }
 
-      this.log('Files to process:', filesToProcess.length);
-
-      // 如果有多个文件需要覆盖确认，先询问批量操作策略
-      const existingFiles = filesToProcess.filter(f => f.exists);
-      if (existingFiles.length > 0 && filesToProcess.length > 1) {
-        const fileNames = existingFiles.slice(0, 3).map(f => f.fileName).join('、');
-        const moreFiles = existingFiles.length > 3 ? localize('dragDrop.moreFiles', existingFiles.length) : '';
-        const overwriteAllLabel = localize('dragDrop.overwriteAll');
-        const skipAllLabel = localize('dragDrop.skipAll');
-        const askEachLabel = localize('dragDrop.askEach');
-        const response = await vscode.window.showWarningMessage(
-          localize('dragDrop.fileExists', `${fileNames}${moreFiles}`),
-          { modal: true },
-          overwriteAllLabel,
-          skipAllLabel,
-          askEachLabel
-        );
-
-        if (response === overwriteAllLabel) {
-          overwriteAll = true;
-        } else if (response === skipAllLabel) {
-          overwriteAll = false;
-        }
-        // 如果选择"逐个询问"或取消，overwriteAll 保持 undefined
-      }
-
-      // 处理文件复制（使用VSCode文件系统API以支持远程）
-      this.log('Starting file copy process');
-      for (const fileInfo of filesToProcess) {
-        if (token.isCancellationRequested) {
-          this.log('Operation cancelled during copy');
-          break;
-        }
-
-        try {
-          this.log('Copying file:', fileInfo.fileName);
-          // 如果文件已存在，根据策略决定是否覆盖
-          if (fileInfo.exists) {
-            let shouldOverwrite = false;
-
-            if (overwriteAll === true) {
-              shouldOverwrite = true;
-              this.log('Overwriting (all):', fileInfo.fileName);
-            } else if (overwriteAll === false) {
-              shouldOverwrite = false;
-              this.log('Skipping (all):', fileInfo.fileName);
-            } else {
-              // 逐个询问
-              this.log('Asking user for overwrite:', fileInfo.fileName);
-              const overwriteLabel = localize('dragDrop.overwrite');
-              const skipLabel = localize('dragDrop.skip');
-              const overwrite = await vscode.window.showWarningMessage(
-                localize('dragDrop.overwriteConfirm', fileInfo.fileName),
-                { modal: true },
-                overwriteLabel,
-                skipLabel
-              );
-              shouldOverwrite = overwrite === overwriteLabel;
-              this.log('User response:', overwrite, 'shouldOverwrite:', shouldOverwrite);
-            }
-
-            if (!shouldOverwrite) {
-              skipCount++;
-              this.log('Skipped file:', fileInfo.fileName);
-              continue;
-            }
-          }
-
-          // 使用VSCode文件系统API读取源文件并写入目标文件
-          // 这样可以支持跨机器文件传输（本地文件拖拽到远程工作区）
-          this.log('Reading source file:', fileInfo.uri.toString());
-          const fileData = await vscode.workspace.fs.readFile(fileInfo.uri);
-          this.log('File read, size:', fileData.length, 'bytes');
-
-          this.log('Writing target file:', fileInfo.targetUri.toString());
-          await vscode.workspace.fs.writeFile(fileInfo.targetUri, fileData);
-          this.log('File copied successfully:', fileInfo.fileName);
-          successCount++;
-        } catch (error: any) {
-          const errorMsg = `${fileInfo.fileName}: ${error.message || error}`;
-          this.log('Error copying file:', errorMsg);
-          errors.push(errorMsg);
-          failCount++;
-        }
-      }
-
-      this.log('File copy process completed', { successCount, failCount, skipCount });
-
-      // 显示结果消息
-      const targetName = target.type === 'papers' ? localize('dragDrop.literature') : localize('dragDrop.userData');
-      this.log('Final results:', { successCount, failCount, skipCount, targetName });
-
-      if (successCount > 0 && failCount === 0 && skipCount === 0) {
-        vscode.window.showInformationMessage(
-          localize('dragDrop.success', successCount, targetName)
-        );
-        // 刷新树视图以显示新上传的文件
-        this.provider.refresh();
-      } else if (successCount > 0) {
-        const parts: string[] = [];
-        if (successCount > 0) parts.push(localize('dragDrop.successCount', successCount));
-        if (skipCount > 0) parts.push(localize('dragDrop.skipCount', skipCount));
-        if (failCount > 0) parts.push(localize('dragDrop.failCount', failCount));
-
-        const message = localize('dragDrop.partialSuccess', parts.join('，'));
-        if (failCount > 0) {
-          vscode.window.showWarningMessage(message);
-        } else {
-          vscode.window.showInformationMessage(message);
-        }
-
-        if (errors.length > 0) {
-          this.log('Upload errors:', errors);
-          // 显示详细错误信息
-          this.outputChannel.show(true);
-        }
-
-        // 如果有成功上传的文件，刷新树视图
-        if (successCount > 0) {
-          this.provider.refresh();
-        }
-      } else if (skipCount > 0 && failCount === 0) {
-        vscode.window.showInformationMessage(
-          localize('dragDrop.allSkipped', skipCount)
-        );
-      } else if (failCount > 0) {
-        const errorMessage = localize('dragDrop.allFailed', failCount);
-        vscode.window.showErrorMessage(errorMessage);
-        this.log('Upload failed:', errors);
-        // 显示详细错误信息
-        this.outputChannel.show(true);
-      } else {
-        // 所有文件都被跳过或没有文件处理
-        this.log('No files were processed');
+      if (filesToProcess.length === 0) {
         vscode.window.showInformationMessage(localize('dragDrop.noFilesProcessed'));
+        return;
       }
+
+      if (token.isCancellationRequested) {
+        return;
+      }
+
+      // 7. 大文件警告
+      const shouldContinue = await this.showLargeFileWarning(filesToProcess);
+      if (!shouldContinue) {
+        vscode.window.showInformationMessage(localize('dragDrop.cancelled'));
+        return;
+      }
+
+      // 8. 覆盖策略确认
+      const existingFiles = filesToProcess.filter(f => f.exists);
+      let overwriteStrategy: OverwriteStrategy = 'askEach';
+
+      if (existingFiles.length > 0) {
+        overwriteStrategy = await this.confirmOverwriteStrategy(existingFiles, filesToProcess.length);
+        if (overwriteStrategy === 'cancel') {
+          vscode.window.showInformationMessage(localize('dragDrop.cancelled'));
+          return;
+        }
+      }
+
+      // 9. 使用进度显示处理文件
+      const result = await vscode.window.withProgress(
+        {
+          location: vscode.ProgressLocation.Notification,
+          title: localize('dragDrop.uploading'),
+          cancellable: true
+        },
+        async (progress, progressToken) => {
+          let successCount = 0;
+          let failCount = 0;
+          let skipCount = 0;
+          const errors: string[] = [];
+
+          for (let i = 0; i < filesToProcess.length; i++) {
+            if (progressToken.isCancellationRequested) {
+              this.log('Operation cancelled by user');
+              break;
+            }
+
+            const fileInfo = filesToProcess[i];
+            progress.report({
+              message: localize('dragDrop.processing', fileInfo.fileName, String(i + 1), String(filesToProcess.length))
+            });
+
+            try {
+              // 如果文件已存在，根据策略决定
+              if (fileInfo.exists) {
+                let shouldOverwrite = false;
+
+                if (overwriteStrategy === 'overwriteAll') {
+                  shouldOverwrite = true;
+                } else if (overwriteStrategy === 'skipAll') {
+                  shouldOverwrite = false;
+                } else {
+                  // 逐个询问
+                  const overwriteLabel = localize('dragDrop.overwrite');
+                  const skipLabel = localize('dragDrop.skip');
+                  const cancelLabel = localize('dragDrop.cancel');
+
+                  const response = await vscode.window.showWarningMessage(
+                    localize('dragDrop.overwriteConfirm', fileInfo.fileName),
+                    { modal: false },
+                    overwriteLabel,
+                    skipLabel,
+                    cancelLabel
+                  );
+
+                  if (response === cancelLabel) {
+                    break;
+                  }
+                  shouldOverwrite = response === overwriteLabel;
+                }
+
+                if (!shouldOverwrite) {
+                  skipCount++;
+                  continue;
+                }
+              }
+
+              // 确保目标文件的父目录存在（用于目录结构保留）
+              if (fileInfo.relativePath && fileInfo.relativePath.includes('/')) {
+                const parentDirUri = vscode.Uri.file(path.dirname(fileInfo.targetUri.fsPath));
+                try {
+                  await vscode.workspace.fs.createDirectory(parentDirUri);
+                } catch {
+                  // 目录可能已存在，忽略
+                }
+              }
+
+              // 复制文件
+              const fileData = await vscode.workspace.fs.readFile(fileInfo.uri);
+              await vscode.workspace.fs.writeFile(fileInfo.targetUri, fileData);
+              successCount++;
+
+            } catch (error: any) {
+              const errorMsg = `${fileInfo.fileName}: ${error.message || error}`;
+              this.log('Error copying file:', errorMsg);
+              errors.push(errorMsg);
+              failCount++;
+            }
+          }
+
+          return { successCount, failCount, skipCount, errors };
+        }
+      );
+
+      // 10. 显示结果
+      this.showUploadResult(result.successCount, result.failCount, result.skipCount, result.errors, target.type);
+
+      // 11. 如果有成功，刷新视图
+      if (result.successCount > 0) {
+        this.provider.refresh();
+      }
+
     } catch (error: any) {
       const errorMsg = localize('dragDrop.error', error.message || error);
       this.log('Unexpected error:', errorMsg, error);
@@ -402,4 +629,3 @@ export class ProjectDragAndDropController implements vscode.TreeDragAndDropContr
     this.outputChannel.dispose();
   }
 }
-
