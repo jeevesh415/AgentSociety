@@ -92,6 +92,56 @@ export class ProjectDragAndDropController implements vscode.TreeDragAndDropContr
   readonly dropMimeTypes = ['text/uri-list'];
 
   /**
+   * 推断目标节点应该上传到的类型
+   * 支持拖拽到：
+   * - 'papers' 或 'userdata' 节点（父节点）
+   * - 'paper' 节点（文献库内的文件）→ 上传到 papers
+   * - 'file' 节点（用户数据内的文件）→ 根据 filePath 判断
+   *
+   * @returns 目标类型 ('papers' | 'userdata') 或 null（如果无法推断）
+   */
+  private inferTargetType(target: ProjectItem): 'papers' | 'userdata' | null {
+    // 直接目标是父节点
+    if (target.type === 'papers') {
+      return 'papers';
+    }
+    if (target.type === 'userdata') {
+      return 'userdata';
+    }
+
+    // 目标是文献库内的文件（paper 类型）
+    if (target.type === 'paper') {
+      return 'papers';
+    }
+
+    // 目标是 file 类型，需要根据其 filePath 判断
+    if (target.type === 'file' && target.filePath) {
+      const workspaceFolder = vscode.workspace.workspaceFolders?.[0];
+      if (!workspaceFolder) {
+        return null;
+      }
+
+      const workspacePath = workspaceFolder.uri.fsPath;
+      const papersDir = path.join(workspacePath, 'papers');
+      const userDataDir = path.join(workspacePath, 'user_data');
+
+      const filePath = target.filePath;
+
+      // 检查文件是否在 papers 目录下
+      if (filePath.startsWith(papersDir)) {
+        return 'papers';
+      }
+      // 检查文件是否在 user_data 目录下
+      if (filePath.startsWith(userDataDir)) {
+        return 'userdata';
+      }
+    }
+
+    // 无法推断
+    return null;
+  }
+
+  /**
    * 获取目标工作区文件夹
    * 如果有多个工作区，使用包含目标节点的那个
    */
@@ -423,16 +473,21 @@ export class ProjectDragAndDropController implements vscode.TreeDragAndDropContr
     this.log('handleDrop called', { target: target?.label, targetType: target?.type });
 
     try {
-      // 1. 验证目标节点
+      // 1. 验证目标节点并推断目标类型
       if (!target) {
         vscode.window.showWarningMessage(localize('dragDrop.noTarget'));
         return;
       }
 
-      if (target.type !== 'papers' && target.type !== 'userdata') {
+      // 推断目标类型（支持拖拽到父节点或子节点）
+      const inferredType = this.inferTargetType(target);
+      if (!inferredType) {
         vscode.window.showWarningMessage(localize('dragDrop.invalidTarget', target.label));
         return;
       }
+
+      // 使用推断出的类型
+      const targetType = inferredType;
 
       // 2. 解析拖拽的文件 URI
       const transferItem = dataTransfer.get('text/uri-list');
@@ -468,7 +523,7 @@ export class ProjectDragAndDropController implements vscode.TreeDragAndDropContr
       }
 
       // 4. 确定目标目录
-      const targetDirPath = target.type === 'papers'
+      const targetDirPath = targetType === 'papers'
         ? path.join(workspaceFolder.uri.fsPath, 'papers')
         : path.join(workspaceFolder.uri.fsPath, 'user_data');
       const targetDirUri = vscode.Uri.file(targetDirPath);
@@ -607,7 +662,7 @@ export class ProjectDragAndDropController implements vscode.TreeDragAndDropContr
       );
 
       // 10. 显示结果
-      this.showUploadResult(result.successCount, result.failCount, result.skipCount, result.errors, target.type);
+      this.showUploadResult(result.successCount, result.failCount, result.skipCount, result.errors, targetType);
 
       // 11. 如果有成功，刷新视图
       if (result.successCount > 0) {
