@@ -11,6 +11,28 @@ import { ProjectItem, ProjectStructureProvider } from './projectStructureProvide
 import { localize } from './i18n';
 
 /**
+ * 文件处理信息
+ */
+interface FileToProcess {
+  uri: vscode.Uri;
+  fileName: string;
+  targetUri: vscode.Uri;
+  exists: boolean;
+  size: number;
+  relativePath?: string;  // 用于目录结构保留
+}
+
+/**
+ * 覆盖策略类型
+ */
+type OverwriteStrategy = 'overwriteAll' | 'skipAll' | 'askEach' | 'cancel';
+
+/**
+ * 大文件阈值 (100 MB)
+ */
+const LARGE_FILE_THRESHOLD = 100 * 1024 * 1024;
+
+/**
  * TreeDragAndDropController 实现
  * 
  * 处理拖拽事件：
