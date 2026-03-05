@@ -8,7 +8,12 @@ wheelhouse/
 build/
 .python-version
 log/
-test*
+/test
+/test/
+**/test/
+**/tests/
+test_*.py
+*_test.py
 cache/
 ignore/
 *.ipynb*

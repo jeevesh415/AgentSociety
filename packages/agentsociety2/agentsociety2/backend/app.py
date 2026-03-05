@@ -11,7 +11,7 @@ from fastapi.responses import JSONResponse
 from dotenv import load_dotenv
 from pathlib import Path
 
-from agentsociety2.backend.routers import chat, mineru, literature, workspace, modules, prefill_params, experiments, replay
+from agentsociety2.backend.routers import chat, mineru, literature, workspace, modules, prefill_params, experiments, replay, custom
 
 # 加载环境变量
 _project_root = Path(__file__).resolve().parents[2]
@@ -97,6 +97,7 @@ app.include_router(modules.router)
 app.include_router(prefill_params.router)
 app.include_router(experiments.router, prefix="/api/v1")
 app.include_router(replay.router, prefix="/api/v1")
+app.include_router(custom.router)
 
 
 @app.get("/")
