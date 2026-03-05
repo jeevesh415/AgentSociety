@@ -272,12 +272,18 @@ class ScriptGenerator:
                 cwd=str(self.workspace_path)
             )
 
+            # 当测试失败时，将stderr作为error返回
+            error_msg = None
+            if result.returncode != 0:
+                error_msg = result.stderr if result.stderr else f"测试失败，返回码: {result.returncode}"
+
             return {
                 "success": result.returncode == 0,
                 "stdout": result.stdout,
                 "stderr": result.stderr,
                 "test_file": str(test_file),
-                "returncode": result.returncode
+                "returncode": result.returncode,
+                "error": error_msg
             }
 
         except subprocess.TimeoutExpired:

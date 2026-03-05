@@ -72,18 +72,18 @@ AgentSociety 2 使用 `ruff`_ 进行检查和格式化：
 .. code-block:: text
 
    agentsociety2/
-   ├── agent/           # 智能体实现
-   ├── backend/         # FastAPI 后端服务
-   ├── code_executor/   # Docker 中的代码执行
-   ├── config/          # 配置和 LLM 路由
-   ├── contrib/         # 贡献的智能体和环境
-   ├── designer/        # 实验设计器
-   ├── env/             # 环境模块和路由器
-   ├── logger/          # 日志工具
-   ├── mcp/             # Model Context Protocol 服务器
-   ├── society/         # 社会辅助工具
-   ├── storage/         # 回放存储系统
-   └── web_ui/          # Gradio Web 界面
+   ├── agent/           # Agent implementations
+   ├── backend/         # FastAPI backend service
+   ├── code_executor/   # Code execution in Docker
+   ├── config/          # Configuration and LLM routing
+   ├── contrib/         # Contributed agents and environments
+   ├── designer/        # Experiment designer
+   ├── env/             # Environment modules and routers
+   ├── logger/          # Logging utilities
+   ├── mcp/             # Model Context Protocol server
+   ├── society/         # Society helper utilities
+   ├── storage/         # Replay storage system
+   └── web_ui/          # Gradio web interface
 
 贡献
 ------------

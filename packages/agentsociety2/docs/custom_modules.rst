@@ -21,12 +21,12 @@ AgentSociety 2 支持创建和注册自定义智能体和环境模块，
 自定义模块放置在工作区内的 ``custom/`` 目录中::
 
    workspace/
-   ├── custom/                    # 用户创建的目录
-   │   ├── agents/                # 自定义智能体类
+   ├── custom/                    # User-created directory
+   │   ├── agents/                # Custom agent classes
    │   │   └── my_agent.py
-   │   └── envs/                  # 自定义环境模块
+   │   └── envs/                  # Custom environment modules
    │       └── my_env.py
-   └── .agentsociety/             # 自动生成的配置
+   └── .agentsociety/             # Auto-generated configuration
        ├── agent_classes/
        └── env_modules/
 

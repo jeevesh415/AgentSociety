@@ -65,7 +65,7 @@ AgentSociety 2 需要 LLM API 凭证。设置以下环境变量：
 
 .. code-block:: bash
 
-   # 默认 LLM（必需 - 用于大多数操作）
+   # Default LLM (Required - for most operations)
    export AGENTSOCIETY_LLM_API_KEY="your-api-key"
    export AGENTSOCIETY_LLM_API_BASE="https://api.openai.com/v1"
    export AGENTSOCIETY_LLM_MODEL="gpt-4o-mini"
@@ -77,31 +77,31 @@ AgentSociety 2 需要 LLM API 凭证。设置以下环境变量：
 
 .. code-block:: bash
 
-   # 代码生成 LLM（用于代码相关任务）
-   # 回退到: AGENTSOCIETY_LLM_API_KEY, AGENTSOCIETY_LLM_API_BASE
-   export AGENTSOCIETY_CODER_LLM_API_KEY="your-coder-api-key"      # 可选
-   export AGENTSOCIETY_CODER_LLM_API_BASE="https://api.openai.com/v1"  # 可选
-   export AGENTSOCIETY_CODER_LLM_MODEL="gpt-4o"                    # 可选
+   # Coder LLM (for code-related tasks)
+   # Falls back to: AGENTSOCIETY_LLM_API_KEY, AGENTSOCIETY_LLM_API_BASE
+   export AGENTSOCIETY_CODER_LLM_API_KEY="your-coder-api-key"      # Optional
+   export AGENTSOCIETY_CODER_LLM_API_BASE="https://api.openai.com/v1"  # Optional
+   export AGENTSOCIETY_CODER_LLM_MODEL="gpt-4o"                    # Optional
 
-   # Nano LLM（用于高频、低延迟操作）
-   # 回退到: AGENTSOCIETY_LLM_API_KEY, AGENTSOCIETY_LLM_API_BASE
-   export AGENTSOCIETY_NANO_LLM_API_KEY="your-nano-api-key"        # 可选
-   export AGENTSOCIETY_NANO_LLM_API_BASE="https://api.openai.com/v1"  # 可选
-   export AGENTSOCIETY_NANO_LLM_MODEL="gpt-4o-mini"                # 可选
+   # Nano LLM (for high-frequency, low-latency operations)
+   # Falls back to: AGENTSOCIETY_LLM_API_KEY, AGENTSOCIETY_LLM_API_BASE
+   export AGENTSOCIETY_NANO_LLM_API_KEY="your-nano-api-key"        # Optional
+   export AGENTSOCIETY_NANO_LLM_API_BASE="https://api.openai.com/v1"  # Optional
+   export AGENTSOCIETY_NANO_LLM_MODEL="gpt-4o-mini"                # Optional
 
-   # 嵌入模型（用于文本嵌入和语义搜索）
-   # 回退到: AGENTSOCIETY_LLM_API_KEY, AGENTSOCIETY_LLM_API_BASE
-   export AGENTSOCIETY_EMBEDDING_API_KEY="your-embedding-api-key"  # 可选
-   export AGENTSOCIETY_EMBEDDING_API_BASE="https://api.openai.com/v1"  # 可选
-   export AGENTSOCIETY_EMBEDDING_MODEL="text-embedding-3-small"   # 可选
-   export AGENTSOCIETY_EMBEDDING_DIMS="1536"                      # 可选
+   # Embedding model (for text embedding and semantic search)
+   # Falls back to: AGENTSOCIETY_LLM_API_KEY, AGENTSOCIETY_LLM_API_BASE
+   export AGENTSOCIETY_EMBEDDING_API_KEY="your-embedding-api-key"  # Optional
+   export AGENTSOCIETY_EMBEDDING_API_BASE="https://api.openai.com/v1"  # Optional
+   export AGENTSOCIETY_EMBEDDING_MODEL="text-embedding-3-small"   # Optional
+   export AGENTSOCIETY_EMBEDDING_DIMS="1536"                      # Optional
 
 **数据目录**
 
 .. code-block:: bash
 
-   # 用于存储智能体数据、记忆和持久文件的目录
-   # 默认值: ./agentsociety_data
+   # Directory for storing agent data, memory and persistence files
+   # Default: ./agentsociety_data
    export AGENTSOCIETY_HOME_DIR="/path/to/your/data"
 
 **使用 .env 文件**
@@ -110,12 +110,12 @@ AgentSociety 2 需要 LLM API 凭证。设置以下环境变量：
 
 .. code-block:: bash
 
-   # 必需
+   # Required
    AGENTSOCIETY_LLM_API_KEY=your-api-key
    AGENTSOCIETY_LLM_API_BASE=https://api.openai.com/v1
    AGENTSOCIETY_LLM_MODEL=gpt-4o-mini
 
-   # 可选（示例）
+   # Optional (example)
    AGENTSOCIETY_CODER_LLM_MODEL=gpt-4o
    AGENTSOCIETY_NANO_LLM_MODEL=gpt-4o-mini
    AGENTSOCIETY_EMBEDDING_MODEL=text-embedding-3-small
