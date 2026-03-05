@@ -9,6 +9,7 @@ import { ConfigPageViewProvider } from './configPageViewProvider';
 import { ApiClient } from './apiClient';
 import { PaperWatcher } from './paperWatcher';
 import { ProjectDragAndDropController } from './dragAndDropController';
+import { ParseModeManager } from './parseModeManager';
 import { localize } from './i18n';
 import { BackendManager } from './services/backendManager';
 
@@ -50,9 +51,17 @@ export function activate(context: vscode.ExtensionContext) {
   // Initialize API client
   const apiClient = new ApiClient(context);
 
+  // Initialize parse mode manager
+  const parseModeManager = new ParseModeManager(context);
+  context.subscriptions.push(parseModeManager);
+
+  // Initialize paper watcher for MinerU parsing
+  const paperWatcher = new PaperWatcher(context, apiClient, parseModeManager);
+  context.subscriptions.push(paperWatcher);
+
   // Register project structure tree view with drag and drop support
   const projectStructureProvider = new ProjectStructureProvider(context, apiClient);
-  const dragAndDropController = new ProjectDragAndDropController(projectStructureProvider);
+  const dragAndDropController = new ProjectDragAndDropController(projectStructureProvider, parseModeManager, paperWatcher);
 
   // Use createTreeView instead of registerTreeDataProvider to support drag and drop
   const treeView = vscode.window.createTreeView('projectStructureView', {
@@ -71,10 +80,6 @@ export function activate(context: vscode.ExtensionContext) {
 
   // Register tree view disposal
   context.subscriptions.push(treeView);
-
-  // Initialize paper watcher for MinerU parsing
-  // PaperWatcher will register itself in its constructor
-  new PaperWatcher(context, apiClient);
 
   // Register commands
   const initProjectCommand = vscode.commands.registerCommand(
@@ -487,4 +492,3 @@ export function deactivate() {
     backendManager.stop();
   }
 }
-

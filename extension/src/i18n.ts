@@ -82,6 +82,9 @@ const translations: Record<string, Record<string, string>> = {
     'paperWatcher.parsedFile': '解析文件: {0}',
     'paperWatcher.failed': '解析文件失败: {0}',
     'paperWatcher.error': '解析文件时出错: {0}',
+    'paperWatcher.parseMode': 'PDF解析模式',
+    'paperWatcher.autoParseEnabled': 'PDF自动解析',
+    'paperWatcher.autoParseDisabled': 'PDF手动解析',
 
     // dragAndDropController.ts
     'dragDrop.noTarget': '请拖拽到"文献库"或"用户数据"节点',
@@ -224,6 +227,9 @@ const translations: Record<string, Record<string, string>> = {
     'paperWatcher.skipped': 'Skipped file {0}, will not prompt to parse this file again',
     'paperWatcher.parsing': 'Parsing {0}...',
     'paperWatcher.success': 'Successfully parsed file: {0}',
+    'paperWatcher.parseMode': 'PDF Parse Mode',
+    'paperWatcher.autoParseEnabled': 'PDF Auto-parse',
+    'paperWatcher.autoParseDisabled': 'PDF Manual',
     'paperWatcher.parsedFile': 'Parsed file: {0}',
     'paperWatcher.failed': 'Failed to parse file: {0}',
     'paperWatcher.error': 'Error parsing file: {0}',

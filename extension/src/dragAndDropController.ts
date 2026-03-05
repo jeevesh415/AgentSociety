@@ -15,6 +15,8 @@ import * as vscode from 'vscode';
 import * as path from 'path';
 import { ProjectItem, ProjectStructureProvider } from './projectStructureProvider';
 import { localize } from './i18n';
+import { ParseModeManager } from './parseModeManager';
+import { PaperWatcher } from './paperWatcher';
 
 /**
  * 文件处理信息
@@ -60,8 +62,14 @@ export class ProjectDragAndDropController implements vscode.TreeDragAndDropContr
   /**
    * 构造函数
    * @param provider - 项目结构提供者，用于刷新视图
+   * @param parseModeManager - 解析模式管理器，用于判断是否自动解析
+   * @param paperWatcher - 论文监听器，用于触发PDF解析
    */
-  constructor(private provider: ProjectStructureProvider) {
+  constructor(
+    private provider: ProjectStructureProvider,
+    private parseModeManager: ParseModeManager,
+    private paperWatcher: PaperWatcher
+  ) {
     // 创建输出通道用于调试日志
     this.outputChannel = vscode.window.createOutputChannel('AI Social Scientist - Drag & Drop');
   }
@@ -664,7 +672,15 @@ export class ProjectDragAndDropController implements vscode.TreeDragAndDropContr
       // 10. 显示结果
       this.showUploadResult(result.successCount, result.failCount, result.skipCount, result.errors, targetType);
 
-      // 11. 如果有成功，刷新视图
+      // 11. 自动解析上传的 PDF 文件
+      if (result.successCount > 0) {
+        const uploadedFiles = filesToProcess.filter((_, index) =>
+          result.errors.length === 0 || !result.errors[index]
+        );
+        await this.parseUploadedFiles(uploadedFiles, targetType);
+      }
+
+      // 12. 如果有成功，刷新视图
       if (result.successCount > 0) {
         this.provider.refresh();
       }
@@ -674,6 +690,41 @@ export class ProjectDragAndDropController implements vscode.TreeDragAndDropContr
       this.log('Unexpected error:', errorMsg, error);
       vscode.window.showErrorMessage(errorMsg);
       this.outputChannel.show(true);
+    }
+  }
+
+  /**
+   * 解析上传的PDF文件
+   * 在自动解析模式下，上传PDF后自动调用MinerU解析
+   */
+  private async parseUploadedFiles(
+    files: FileToProcess[],
+    targetType: 'papers' | 'userdata'
+  ): Promise<void> {
+    // 仅在文献库且自动解析模式下执行
+    if (targetType !== 'papers' || !this.parseModeManager.isAutoMode()) {
+      return;
+    }
+
+    // 筛选PDF文件
+    const pdfFiles = files.filter(f => {
+      const ext = path.extname(f.fileName).toLowerCase();
+      return ext === '.pdf';
+    });
+
+    if (pdfFiles.length === 0) {
+      return;
+    }
+
+    this.log(`Auto-parsing ${pdfFiles.length} PDF files in auto mode`);
+
+    // 逐个触发解析（静默模式）
+    for (const file of pdfFiles) {
+      try {
+        await this.paperWatcher.triggerParse(file.targetUri.fsPath, true);
+      } catch (error) {
+        this.log('Failed to trigger parse for:', file.fileName, error);
+      }
     }
   }
 

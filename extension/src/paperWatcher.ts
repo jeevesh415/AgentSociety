@@ -1,8 +1,9 @@
 /**
  * Papers目录文件监听器
- * 
- * 监听papers目录下的文件变化，当发现新的PDF或Word文档时，
- * 提示用户是否使用MinerU解析该文件。
+ *
+ * 监听papers目录下的文件变化，根据解析模式处理PDF文件：
+ * - 自动模式：自动使用MinerU解析
+ * - 手动模式：提示用户是否解析
  */
 
 import * as vscode from 'vscode';
@@ -10,6 +11,7 @@ import * as path from 'path';
 import * as fs from 'fs';
 import { ApiClient } from './apiClient';
 import { localize } from './i18n';
+import { ParseModeManager } from './parseModeManager';
 
 export class PaperWatcher {
   private watcher: vscode.FileSystemWatcher | undefined;
@@ -17,8 +19,9 @@ export class PaperWatcher {
   private outputChannel: vscode.OutputChannel;
   private apiClient: ApiClient;
   private context: vscode.ExtensionContext;
+  private parseModeManager: ParseModeManager;
 
-  // 已处理的文件集合（避免重复提示）
+  // 已处理的文件集合（避免重复处理）
   private processedFiles: Set<string> = new Set();
 
   // 防抖定时器
@@ -28,14 +31,15 @@ export class PaperWatcher {
   // 支持的文件扩展名
   private readonly SUPPORTED_EXTENSIONS = ['.pdf', '.docx', '.doc'];
 
-  constructor(context: vscode.ExtensionContext, apiClient: ApiClient) {
+  constructor(context: vscode.ExtensionContext, apiClient: ApiClient, parseModeManager: ParseModeManager) {
     this.context = context;
     this.apiClient = apiClient;
+    this.parseModeManager = parseModeManager;
     this.outputChannel = vscode.window.createOutputChannel('Paper Watcher');
 
     this.setupWatcher();
 
-    // 注册清理函数 - PaperWatcher实现了dispose方法，可以直接添加到subscriptions
+    // 注册清理函数
     context.subscriptions.push(this);
   }
 
@@ -134,14 +138,57 @@ export class PaperWatcher {
         return;
       }
 
-      // 标记为已处理（避免重复提示）
+      // 标记为已处理（避免重复处理）
       this.processedFiles.add(filePath);
 
-      // 提示用户
-      await this.promptUserToParse(filePath);
+      // 根据解析模式处理
+      if (this.parseModeManager.isAutoMode()) {
+        // 自动模式：直接解析
+        this.log(`Auto-parse mode: automatically parsing ${filePath}`);
+        await this.parseFile(filePath);
+      } else {
+        // 手动模式：提示用户
+        await this.promptUserToParse(filePath);
+      }
 
     } catch (error) {
       this.log(`Error processing file change: ${error}`);
+    }
+  }
+
+  /**
+   * 手动触发解析文件（用于拖拽上传后的自动解析）
+   * @param filePath 文件路径
+   * @param silent 是否静默解析（不显示通知）
+   */
+  async triggerParse(filePath: string, silent: boolean = false): Promise<boolean> {
+    try {
+      // 检查文件扩展名
+      const ext = path.extname(filePath).toLowerCase();
+      if (!this.SUPPORTED_EXTENSIONS.includes(ext)) {
+        return false;
+      }
+
+      // 检查文件是否存在
+      if (!fs.existsSync(filePath)) {
+        return false;
+      }
+
+      // 检查是否已有解析文件
+      if (this.checkParsedFileExists(filePath)) {
+        this.log(`File ${filePath} already has parsed markdown file, skipping`);
+        return false;
+      }
+
+      // 标记为已处理
+      this.processedFiles.add(filePath);
+
+      // 解析文件
+      await this.parseFile(filePath, silent);
+      return true;
+    } catch (error) {
+      this.log(`Error in triggerParse: ${error}`);
+      return false;
     }
   }
 
@@ -179,7 +226,7 @@ export class PaperWatcher {
   }
 
   /**
-   * 提示用户是否解析文件
+   * 提示用户是否解析文件（手动模式）
    */
   private async promptUserToParse(filePath: string): Promise<void> {
     const fileName = path.basename(filePath);
@@ -211,16 +258,20 @@ export class PaperWatcher {
 
   /**
    * 解析文件
+   * @param filePath 文件路径
+   * @param silent 是否静默解析（不显示进度通知）
    */
-  private async parseFile(filePath: string): Promise<void> {
+  private async parseFile(filePath: string, silent: boolean = false): Promise<void> {
     try {
       const fileName = path.basename(filePath);
       const relativePath = path.relative(this.workspacePath, filePath);
 
       this.log(`Starting MinerU parse for file: ${filePath}`);
 
-      // 显示进度通知
-      vscode.window.showInformationMessage(localize('paperWatcher.parsing', fileName));
+      // 显示进度通知（非静默模式）
+      if (!silent) {
+        vscode.window.showInformationMessage(localize('paperWatcher.parsing', fileName));
+      }
 
       // 调用API解析文件
       const response = await this.apiClient.parseWithMinerU({
@@ -229,17 +280,32 @@ export class PaperWatcher {
       });
 
       if (response.success) {
-        const openFileLabel = localize('extension.parseMinerU.openFile');
-        const successMessage = `${localize('paperWatcher.success', fileName)}\n${localize('paperWatcher.parsedFile', response.parsed_file_path || 'N/A')}`;
-        vscode.window.showInformationMessage(
-          successMessage,
-          openFileLabel
-        ).then(selection => {
-          if (selection === openFileLabel && response.parsed_file_path) {
-            const parsedFilePath = path.join(this.workspacePath, response.parsed_file_path);
-            vscode.window.showTextDocument(vscode.Uri.file(parsedFilePath));
-          }
-        });
+        // 静默模式：仅在成功时显示简短通知
+        if (silent) {
+          this.log(`Successfully parsed file (silent): ${filePath}, result: ${response.parsed_file_path}`);
+          // 静默模式可以选择不显示通知，或显示更简洁的通知
+          vscode.window.showInformationMessage(
+            `${localize('paperWatcher.success', fileName)}`,
+            localize('extension.parseMinerU.openFile')
+          ).then(selection => {
+            if (selection === localize('extension.parseMinerU.openFile') && response.parsed_file_path) {
+              const parsedFilePath = path.join(this.workspacePath, response.parsed_file_path);
+              vscode.window.showTextDocument(vscode.Uri.file(parsedFilePath));
+            }
+          });
+        } else {
+          const openFileLabel = localize('extension.parseMinerU.openFile');
+          const successMessage = `${localize('paperWatcher.success', fileName)}\n${localize('paperWatcher.parsedFile', response.parsed_file_path || 'N/A')}`;
+          vscode.window.showInformationMessage(
+            successMessage,
+            openFileLabel
+          ).then(selection => {
+            if (selection === openFileLabel && response.parsed_file_path) {
+              const parsedFilePath = path.join(this.workspacePath, response.parsed_file_path);
+              vscode.window.showTextDocument(vscode.Uri.file(parsedFilePath));
+            }
+          });
+        }
         this.log(`Successfully parsed file: ${filePath}`);
       } else {
         vscode.window.showErrorMessage(
@@ -326,4 +392,3 @@ export class PaperWatcher {
     this.log('Paper watcher disposed');
   }
 }
-
