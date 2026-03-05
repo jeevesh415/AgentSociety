@@ -507,7 +507,7 @@ export class ProjectStructureProvider implements vscode.TreeDataProvider<Project
       return items;
     }
 
-    // Papers节点（文献库）的子节点：显示所有论文文件
+    // Papers节点（文献库）的子节点：显示所有文件和子目录
     if (element.type === 'papers') {
       const workspaceFolder = vscode.workspace.workspaceFolders?.[0];
       if (!workspaceFolder) {
@@ -518,23 +518,70 @@ export class ProjectStructureProvider implements vscode.TreeDataProvider<Project
       const items: ProjectItem[] = [];
 
       if (fs.existsSync(papersDir)) {
-        // 读取目录，过滤出PDF、Markdown和文本文件，忽略mineru_output文件夹
-        const papers = fs.readdirSync(papersDir).filter(f =>
-          f !== 'mineru_output' && (f.endsWith('.pdf') || f.endsWith('.md') || f.endsWith('.txt'))
-        );
+        // 读取目录，忽略mineru_output文件夹
+        const entries = fs.readdirSync(papersDir).filter(entry => entry !== 'mineru_output');
 
-        // 为每个论文文件创建节点
-        for (const paper of papers) {
-          items.push(new ProjectItem(
-            paper,  // 文件名作为标签
-            vscode.TreeItemCollapsibleState.None,  // 文件没有子节点
-            'paper',
-            path.join(papersDir, paper)  // 完整文件路径
-          ));
+        for (const entry of entries) {
+          const fullPath = path.join(papersDir, entry);
+          const stat = fs.statSync(fullPath);
+
+          if (stat.isFile()) {
+            // 如果是文件，创建文件节点
+            items.push(new ProjectItem(
+              entry,  // 文件名作为标签
+              vscode.TreeItemCollapsibleState.None,  // 文件没有子节点
+              'paper',
+              fullPath  // 完整文件路径
+            ));
+          } else if (stat.isDirectory()) {
+            // 如果是目录，创建可展开的目录节点
+            items.push(new ProjectItem(
+              entry,  // 目录名作为标签
+              vscode.TreeItemCollapsibleState.Collapsed,  // 可展开
+              'paper',  // 使用paper类型表示文献库子项
+              fullPath  // 存储目录路径，用于获取子节点
+            ));
+          }
         }
       }
 
       return items;
+    }
+
+    // 处理paper类型节点：如果是目录，显示其子文件和子目录
+    if (element.type === 'paper' && element.filePath) {
+      const filePath = element.filePath;
+      // 检查是否为目录
+      if (fs.existsSync(filePath) && fs.statSync(filePath).isDirectory()) {
+        const items: ProjectItem[] = [];
+        // 读取目录内容，忽略mineru_output文件夹
+        const entries = fs.readdirSync(filePath).filter(entry => entry !== 'mineru_output');
+
+        for (const entry of entries) {
+          const fullPath = path.join(filePath, entry);
+          const stat = fs.statSync(fullPath);
+
+          if (stat.isFile()) {
+            // 如果是文件，创建文件节点
+            items.push(new ProjectItem(
+              entry,  // 文件名作为标签
+              vscode.TreeItemCollapsibleState.None,  // 文件没有子节点
+              'paper',
+              fullPath  // 完整文件路径
+            ));
+          } else if (stat.isDirectory()) {
+            // 如果是目录，创建可展开的目录节点
+            items.push(new ProjectItem(
+              entry,  // 目录名作为标签
+              vscode.TreeItemCollapsibleState.Collapsed,  // 可展开
+              'paper',  // 使用paper类型
+              fullPath  // 存储目录路径，用于获取子节点
+            ));
+          }
+        }
+
+        return items;
+      }
     }
 
     // UserData节点（用户数据）的子节点：显示所有文件
