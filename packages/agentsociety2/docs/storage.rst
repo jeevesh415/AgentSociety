@@ -1,5 +1,5 @@
 Storage and Replay System
-========================
+=========================
 
 The ReplayWriter system provides tracking of agent-environment interactions for experiment analysis.
 
@@ -115,7 +115,7 @@ Stores conversation history:
 * ``timestamp`` (str): ISO format timestamp
 
 Custom Tables
-------------
+-------------
 
 Environment modules can register custom tables:
 

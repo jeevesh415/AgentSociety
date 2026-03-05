@@ -19,6 +19,7 @@ version = '2.0.0'
 
 extensions = [
     'sphinx.ext.duration',
+    'sphinx.ext.graphviz',
     'sphinx.ext.napoleon',
     'sphinx.ext.intersphinx',
     'myst_parser',

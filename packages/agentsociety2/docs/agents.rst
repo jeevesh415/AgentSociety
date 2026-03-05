@@ -178,7 +178,7 @@ The ``step()`` method is called automatically during AgentSociety simulations:
    action_description = await agent.step(tick=3600, t=datetime.now())
 
 Replay Tracking
-~~~~~~~~~~~~~~
+~~~~~~~~~~~~~~~
 
 .. code-block:: python
 

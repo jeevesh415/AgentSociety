@@ -183,7 +183,7 @@ Scenario 1: Event Intervention
    print(impact)
 
 Scenario 2: Policy Experiment
-~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
 
 .. code-block:: python
 
