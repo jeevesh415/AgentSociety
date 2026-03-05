@@ -26,6 +26,7 @@ Quick Links
 * **Installation**: :doc:`installation`
 * **Quick Start**: :doc:`quickstart`
 * **Core Concepts**: :doc:`concepts`
+* **Custom Modules**: :doc:`custom_modules`
 * **Examples**: :doc:`examples`
 * **Development**: :doc:`development`
 
@@ -48,6 +49,7 @@ Table of Contents
    agents
    env_modules
    storage
+   custom_modules
 
 .. toctree::
    :maxdepth: 2
