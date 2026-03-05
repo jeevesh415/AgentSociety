@@ -33,6 +33,9 @@ agentsociety_data/
 .agentsociety-benchmark/
 logs/
 *.txt
+!requirements.txt
+!**/requirements*.txt
+!CHANGELOG.md
 *.pb
 *.pb.*
 venv_arm/
