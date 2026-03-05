@@ -110,6 +110,15 @@ const translations: Record<string, Record<string, string>> = {
     'dragDrop.userData': '用户数据',
     'dragDrop.unsupportedDirectory': '不支持拖拽目录: {0}',
     'dragDrop.fileNotAccessible': '文件不存在或无法访问: {0}',
+    'dragDrop.uploading': '正在上传文件...',
+    'dragDrop.cancel': '取消',
+    'dragDrop.largeFileWarning': '文件 "{0}" 大小为 {1} MB，可能需要较长时间上传，是否继续？',
+    'dragDrop.largeFilesWarning': '有 {0} 个文件超过 100 MB，上传可能需要较长时间，是否继续？',
+    'dragDrop.processing': '正在处理 {0} ({1}/{2})',
+    'dragDrop.directoryReadFailed': '无法读取目录内容: {0}',
+    'dragDrop.emptyFileName': '跳过无效文件名的文件',
+    'dragDrop.cancelled': '上传已取消',
+    'dragDrop.mkdirFailed': '无法创建目标目录: {0}',
 
     // chatWebviewProvider.ts
     'chatWebview.noBackend': '无法连接到后端服务 ({0})。请确保后端服务正在运行。',
@@ -246,6 +255,15 @@ const translations: Record<string, Record<string, string>> = {
     'dragDrop.userData': 'User Data',
     'dragDrop.unsupportedDirectory': 'Directories are not supported: {0}',
     'dragDrop.fileNotAccessible': 'File does not exist or is not accessible: {0}',
+    'dragDrop.uploading': 'Uploading files...',
+    'dragDrop.cancel': 'Cancel',
+    'dragDrop.largeFileWarning': 'File "{0}" is {1} MB, upload may take a long time. Continue?',
+    'dragDrop.largeFilesWarning': '{0} files are over 100 MB, upload may take a long time. Continue?',
+    'dragDrop.processing': 'Processing {0} ({1}/{2})',
+    'dragDrop.directoryReadFailed': 'Failed to read directory: {0}',
+    'dragDrop.emptyFileName': 'Skipping file with invalid name',
+    'dragDrop.cancelled': 'Upload cancelled',
+    'dragDrop.mkdirFailed': 'Cannot create target directory: {0}',
 
     // chatWebviewProvider.ts
     'chatWebview.noBackend': 'Cannot connect to backend service ({0}). Please ensure the backend service is running.',
