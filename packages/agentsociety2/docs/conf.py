@@ -8,11 +8,11 @@ from datetime import datetime
 # -- Project information -----------------------------------------------------
 # https://www.sphinx-doc.org/en/master/usage/configuration.html#project-information
 
-project = 'AgentSociety'
+project = 'AgentSociety 2'
 copyright = f'{datetime.now().year}, FIBLAB'
 author = 'AgentSociety Team'
 release = '2.0.0'
-version = '2.0'
+version = '2.0.0'
 
 # -- General configuration ---------------------------------------------------
 # https://www.sphinx-doc.org/en/master/usage/configuration.html#general-configuration
@@ -70,8 +70,8 @@ html_theme_options = {
     },
 }
 
-html_title = f'AgentSociety {version}'
-html_short_title = 'AgentSociety'
+html_title = f'AgentSociety 2 {version}'
+html_short_title = 'AgentSociety 2'
 
 # Add logo and favicon
 html_logo = '_static/logo/1.png'

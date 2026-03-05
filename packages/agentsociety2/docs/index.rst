@@ -1,5 +1,5 @@
-AgentSociety
-=============
+AgentSociety 2
+==============
 
 **AgentSociety 2** is a modern, LLM-native agent simulation platform designed
 for social science research and experimentation. It provides a flexible framework
