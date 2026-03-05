@@ -1,4 +1,4 @@
-import { GithubOutlined, ExperimentOutlined, ApiOutlined, TeamOutlined, GlobalOutlined, NodeIndexOutlined, SettingOutlined } from "@ant-design/icons";
+import { GithubOutlined, ExperimentOutlined, ApiOutlined, TeamOutlined, GlobalOutlined, NodeIndexOutlined, SettingOutlined, RocketOutlined } from "@ant-design/icons";
 import { Menu, MenuProps, Space, Dropdown, Button } from "antd";
 import { Link } from "react-router-dom";
 import Account from "./components/Account";
@@ -67,6 +67,7 @@ const RootMenu = ({ selectedKey, style }: {
     ];
 
     menuItems.push({ key: "/Documentation", label: <Link to="https://agentsociety.readthedocs.io/en/latest/" rel="noopener noreferrer" target="_blank"><Space>{t('menu.documentation')}</Space></Link> });
+    menuItems.push({ key: "/V2", label: <Link to="https://agentsociety2.fiblab.net" rel="noopener noreferrer" target="_blank"><Space><RocketOutlined />{t('menu.v2')}</Space></Link> });
     menuItems.push({ key: "/Github", label: <Link to="https://github.com/tsinghua-fib-lab/agentsociety/" rel="noopener noreferrer" target="_blank"><Space>{t('menu.github')}<GithubOutlined /></Space></Link> });
 
     const menuStyle: React.CSSProperties = {

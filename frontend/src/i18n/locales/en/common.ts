@@ -4,6 +4,7 @@ export default {
         survey: 'Survey',
         documentation: 'Documentation',
         github: 'GitHub',
+        v2: 'V2 (Beta)',
         llmConfigs: 'LLM',
         maps: 'Maps',
         agents: 'Agents',
