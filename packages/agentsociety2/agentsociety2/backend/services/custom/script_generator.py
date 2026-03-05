@@ -165,7 +165,7 @@ class ScriptGenerator:
         script_lines.extend([
             '',
             'async def test_integration():',
-            '"""测试 Agent 与环境模块的集成"""',
+            '    """测试 Agent 与环境模块的集成"""',
             '    print("=" * 50)',
             '    print("测试 Agent 与环境集成")',
             '    print("=" * 50)',
