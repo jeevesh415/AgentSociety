@@ -44,19 +44,19 @@ AgentSociety 2
 
    from agentsociety2 import PersonAgent, AgentSociety
 
-   # 创建一个智能体
+   # Create an agent
    agent = PersonAgent(
        id=1,
        profile={
            "name": "Alice",
            "age": 28,
-           "personality": "友好且好奇",
-           "bio": "一名热爱徒步的软件工程师。"
+           "personality": "friendly and curious",
+           "bio": "A software engineer who loves hiking."
        }
    )
 
-   # 向智能体提问
-   response = await agent.ask("你最喜欢的爱好是什么？")
+   # Ask the agent a question
+   response = await agent.ask("What's your favorite hobby?")
    print(response)
 
 更多示例请参见 :doc:`quickstart`。

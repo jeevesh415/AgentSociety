@@ -184,8 +184,8 @@
 
 .. code-block:: python
 
-   # society.ask() 确保只读访问
-   response = await society.ask("模拟中有哪些智能体？")
+   # society.ask() ensures read-only access
+   response = await society.ask("What agents are in the simulation?")
 
 进行修改
 ~~~~~~~~~~~~~~
@@ -194,8 +194,8 @@
 
 .. code-block:: python
 
-   # society.intervene() 允许环境修改
-   result = await society.intervene("让所有人的心情变好")
+   # society.intervene() allows environment modifications
+   result = await society.intervene("Make everyone feel better")
 
 查询特定智能体
 ~~~~~~~~~~~~~~~~~~~~~~~~~
@@ -204,7 +204,7 @@
 
 .. code-block:: python
 
-   # 向特定智能体提问
+   # Ask a specific agent
    response = await society.ask(
-       "Alice，你对当前情况有什么看法？"
+       "Alice, what are your thoughts on the current situation?"
    )

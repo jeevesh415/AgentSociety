@@ -50,14 +50,14 @@ AgentSociety 2 围绕三个主要组件构建：
    class MyEnvironment(EnvBase):
        @tool(readonly=True, kind="observe")
        def get_weather(self, agent_id: int) -> str:
-           """获取智能体的当前天气。"""
-           return f"智能体 {agent_id} 的天气"
+           """Get current weather for agent."""
+           return f"Weather for agent {agent_id}"
 
        @tool(readonly=False)
        def set_temperature(self, temp: int) -> str:
-           """设置温度。"""
+           """Set temperature."""
            self._temperature = temp
-           return f"温度设置为 {temp}"
+           return f"Temperature set to {temp}"
 
 **参数：**
 
@@ -93,8 +93,8 @@ CodeGenRouter 通过以下方式将智能体连接到环境模块：
 
    @tool(readonly=True, kind="observe")
    def get_agent_location(self, agent_id: int) -> str:
-       """获取智能体的当前位置。"""
-       return f"智能体 {agent_id} 在位置 X"
+       """Get current location of agent."""
+       return f"Agent {agent_id} is at location X"
 
 **统计工具** (``readonly=True``, ``kind="statistics"``)
 
@@ -104,9 +104,9 @@ CodeGenRouter 通过以下方式将智能体连接到环境模块：
 
    @tool(readonly=True, kind="statistics")
    def get_average_happiness(self) -> str:
-       """获取所有智能体的平均幸福感。"""
+       """Get average happiness of all agents."""
        avg = sum(self.happiness.values()) / len(self.happiness)
-       return f"平均幸福感: {avg}"
+       return f"Average happiness: {avg}"
 
 **常规工具**
 
@@ -116,6 +116,6 @@ CodeGenRouter 通过以下方式将智能体连接到环境模块：
 
    @tool(readonly=False)
    def set_happiness(self, agent_id: int, value: float) -> str:
-       """设置智能体的幸福感水平。"""
+       """Set happiness level for agent."""
        self.happiness[agent_id] = value
-       return f"设置智能体 {agent_id} 的幸福感为 {value}"
+       return f"Set agent {agent_id}'s happiness to {value}"
