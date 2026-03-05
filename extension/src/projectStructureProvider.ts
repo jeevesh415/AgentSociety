@@ -70,8 +70,8 @@ export class ProjectItem extends vscode.TreeItem {
       'chat': 'comment-discussion', // 对话图标，表示AI Chat
       'prefillParams': 'settings', // 设置图标，表示预填充参数
       'prefillParamsGroup': 'folder', // 文件夹图标，表示预填充参数组
-      'prefillParamsEnv': 'server-environment', // 服务器环境图标，表示环境模块预置参数
-      'prefillParamsAgent': 'person', // 人员图标，表示智能体类预置参数
+      'prefillParamsEnv': 'symbol-namespace', // 命名空间图标，表示环境模块预置参数
+      'prefillParamsAgent': 'symbol-interface', // 接口图标，表示智能体类预置参数
       'settings': 'settings-gear' // 齿轮设置图标，表示配置设置
     };
     const iconId = iconMap[type] || 'file';
