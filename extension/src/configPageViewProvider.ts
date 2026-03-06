@@ -193,6 +193,7 @@ export class ConfigPageViewProvider {
       easypaperLlmModel: (envConfig?.easypaperLlmModel as string) || 'qwen3-next-80b-a3b-instruct',
       easypaperVlmModel: (envConfig?.easypaperVlmModel as string) || 'qwen3-vl-235b-a22b-thinking',
       easypaperVlmApiKey: (envConfig?.easypaperVlmApiKey as string) || '',
+      literatureSearchApiUrl: (envConfig?.literatureSearchApiUrl as string) || 'http://localhost:8002/api/v1/search',
     };
 
     // 获取工作区信息
@@ -302,6 +303,9 @@ export class ConfigPageViewProvider {
       }
       if (config.easypaperVlmApiKey !== undefined) {
         await vscodeConfig.update('env.easypaperVlmApiKey', config.easypaperVlmApiKey, vscode.ConfigurationTarget.Workspace);
+      }
+      if (config.literatureSearchApiUrl !== undefined) {
+        await vscodeConfig.update('env.literatureSearchApiUrl', config.literatureSearchApiUrl, vscode.ConfigurationTarget.Workspace);
       }
 
       // If EasyPaper URL or any model field is set, write easypaper_agentsociety.yaml to workspace for EasyPaper to use

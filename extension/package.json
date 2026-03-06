@@ -396,6 +396,12 @@
           "default": "",
           "description": "EasyPaper VLM API Key（可选，与 LLM 一致可留空）"
         },
+        "aiSocialScientist.env.literatureSearchApiUrl": {
+          "type": "string",
+          "default": "http://localhost:8002/api/v1/search",
+          "description": "文献检索后端服务 URL（可选）",
+          "markdownDescription": "文献检索后端服务的 API 地址（需单独部署）。留空时默认 `http://localhost:8002/api/v1/search`。对应环境变量 `LITERATURE_SEARCH_API_URL`。"
+        },
         "aiSocialScientist.chat.viewColumn": {
           "type": "string",
           "default": "beside",

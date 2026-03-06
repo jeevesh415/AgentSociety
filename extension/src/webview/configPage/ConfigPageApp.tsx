@@ -12,7 +12,7 @@ import {
   Select,
   Space,
 } from 'antd';
-import { SaveOutlined, KeyOutlined, ApiOutlined, DatabaseOutlined, ThunderboltOutlined, SettingOutlined, FolderOpenOutlined, FilePdfOutlined } from '@ant-design/icons';
+import { SaveOutlined, KeyOutlined, ApiOutlined, DatabaseOutlined, ThunderboltOutlined, SettingOutlined, FolderOpenOutlined, FilePdfOutlined, BookOutlined } from '@ant-design/icons';
 import type { VSCodeAPI, ConfigValues, WorkspaceInfo } from './types';
 import 'antd/dist/reset.css';
 
@@ -47,6 +47,7 @@ const DEFAULT_VALUES: ConfigValues = {
   easypaperLlmModel: 'qwen3-next-80b-a3b-instruct',
   easypaperVlmModel: 'qwen3-vl-235b-a22b-thinking',
   easypaperVlmApiKey: '',
+  literatureSearchApiUrl: 'http://localhost:8002/api/v1/search',
 };
 
 interface ConfigPageAppProps {
@@ -337,6 +338,22 @@ export const ConfigPageApp: React.FC<ConfigPageAppProps> = ({ vscode }) => {
               </Form.Item>
               <Form.Item name="easypaperVlmApiKey" label="EasyPaper VLM API Key">
                 <Input.Password placeholder="与 LLM 一致可留空" autoComplete="off" />
+              </Form.Item>
+            </Panel>
+            <Panel
+              header={
+                <Space>
+                  <BookOutlined />
+                  <span>文献检索服务（Literature Search）</span>
+                </Space>
+              }
+              key="literature"
+            >
+              <Text type="secondary" style={{ display: 'block', marginBottom: 12 }}>
+                用于 search_literature 工具检索学术文献。需单独部署文献检索后端服务。
+              </Text>
+              <Form.Item name="literatureSearchApiUrl" label="文献检索 API URL">
+                <Input placeholder="http://localhost:8002/api/v1/search" />
               </Form.Item>
             </Panel>
           </Collapse>
