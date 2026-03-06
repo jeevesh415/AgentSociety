@@ -1169,7 +1169,7 @@ export class ProjectStructureProvider implements vscode.TreeDataProvider<Project
         const entries = fs.readdirSync(synthesisDir);
         
         // 分组报告：按基础名称和时间戳分组，支持双语版本
-        const reportGroups: { [key: string]: { zh?: string; en?: string; generic?: string } } = {};
+        const reportGroups: { [key: string]: { [lang: string]: string } } = {};
         
         for (const entry of entries) {
           const fullPath = path.join(synthesisDir, entry);
