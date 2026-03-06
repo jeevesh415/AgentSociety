@@ -179,6 +179,20 @@ const translations: Record<string, Record<string, string>> = {
     'projectStructure.customScan': '扫描模块',
     'projectStructure.customTest': '测试模块',
     'projectStructure.customClean': '清空配置',
+
+    // projectStructureProvider.ts - analysis reports
+    'projectStructure.presentation': '分析报告',
+    'projectStructure.synthesis': '综合报告',
+    'projectStructure.reportHtml': 'HTML 报告',
+    'projectStructure.reportMd': 'Markdown 报告',
+    'projectStructure.analysisData': '分析数据',
+    'projectStructure.reportCharts': '图表',
+    'projectStructure.reportAssets': '资源',
+    'projectStructure.reportHtmlZh': '中文 HTML 报告',
+    'projectStructure.reportMdZh': '中文 Markdown 报告',
+    'projectStructure.reportHtmlEn': 'English HTML Report',
+    'projectStructure.reportMdEn': 'English Markdown Report',
+    'projectStructure.openReplay': '打开回放',
   },
   'en-US': {
     // extension.ts
@@ -347,6 +361,20 @@ const translations: Record<string, Record<string, string>> = {
     'projectStructure.customModules': 'Custom Modules',
     'projectStructure.customAgents': 'Custom Agents',
     'projectStructure.customEnvs': 'Custom Environments',
+
+    // projectStructureProvider.ts - analysis reports
+    'projectStructure.presentation': 'Analysis Reports',
+    'projectStructure.synthesis': 'Synthesis Reports',
+    'projectStructure.reportHtml': 'HTML Report',
+    'projectStructure.reportMd': 'Markdown Report',
+    'projectStructure.analysisData': 'Analysis Data',
+    'projectStructure.reportCharts': 'Charts',
+    'projectStructure.reportAssets': 'Assets',
+    'projectStructure.reportHtmlZh': 'Chinese HTML Report',
+    'projectStructure.reportMdZh': 'Chinese Markdown Report',
+    'projectStructure.reportHtmlEn': 'English HTML Report',
+    'projectStructure.reportMdEn': 'English Markdown Report',
+    'projectStructure.openReplay': 'Open Replay',
   },
 };
 

@@ -28,6 +28,18 @@ FILE_ANALYSIS_SUMMARY_JSON = "analysis_summary.json"
 FILE_README_MD = "README.md"
 FILE_SYNTHESIS_REPORT_PREFIX = "synthesis_report_"
 
+# Language suffixes for bilingual reports
+LANG_ZH = "zh"
+LANG_EN = "en"
+
+# Bilingual report file patterns
+FILE_REPORT_ZH_MD = f"report_{LANG_ZH}.md"
+FILE_REPORT_ZH_HTML = f"report_{LANG_ZH}.html"
+FILE_REPORT_EN_MD = f"report_{LANG_EN}.md"
+FILE_REPORT_EN_HTML = f"report_{LANG_EN}.html"
+FILE_SYNTHESIS_REPORT_ZH_SUFFIX = f"_{LANG_ZH}"
+FILE_SYNTHESIS_REPORT_EN_SUFFIX = f"_{LANG_EN}"
+
 SUPPORTED_IMAGE_FORMATS = {".png", ".jpg", ".jpeg", ".gif", ".svg", ".webp"}
 SUPPORTED_ASSET_FORMATS = SUPPORTED_IMAGE_FORMATS | {".pdf"}
 

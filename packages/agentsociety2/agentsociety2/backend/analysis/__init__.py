@@ -24,6 +24,14 @@ from .models import (
     FILE_HYPOTHESIS_MD,
     FILE_EXPERIMENT_MD,
     FILE_SQLITE,
+    LANG_ZH,
+    LANG_EN,
+    FILE_REPORT_ZH_MD,
+    FILE_REPORT_ZH_HTML,
+    FILE_REPORT_EN_MD,
+    FILE_REPORT_EN_HTML,
+    FILE_SYNTHESIS_REPORT_ZH_SUFFIX,
+    FILE_SYNTHESIS_REPORT_EN_SUFFIX,
 )
 from .agents import InsightAgent, DataExplorer
 from .tool_executor import AnalysisRunner
@@ -67,6 +75,14 @@ __all__ = [
     "FILE_HYPOTHESIS_MD",
     "FILE_EXPERIMENT_MD",
     "FILE_SQLITE",
+    "LANG_ZH",
+    "LANG_EN",
+    "FILE_REPORT_ZH_MD",
+    "FILE_REPORT_ZH_HTML",
+    "FILE_REPORT_EN_MD",
+    "FILE_REPORT_EN_HTML",
+    "FILE_SYNTHESIS_REPORT_ZH_SUFFIX",
+    "FILE_SYNTHESIS_REPORT_EN_SUFFIX",
     # 分析子智能体入口与便捷函数
     "Analyzer",
     "run_analysis",

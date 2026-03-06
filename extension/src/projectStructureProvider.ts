@@ -44,7 +44,7 @@ export class ProjectItem extends vscode.TreeItem {
   constructor(
     public readonly label: string,
     public readonly collapsibleState: vscode.TreeItemCollapsibleState,
-    public readonly type: 'topic' | 'hypothesis' | 'experiment' | 'paper' | 'file' | 'papers' | 'userdata' | 'chat' | 'prefillParams' | 'prefillParamsGroup' | 'prefillParamsEnv' | 'prefillParamsAgent' | 'settings' | 'custom' | 'customScan' | 'customTest' | 'customClean' | 'customAgentItem' | 'customEnvItem' | 'customAgentsGroup' | 'customEnvsGroup',
+    public readonly type: 'topic' | 'hypothesis' | 'experiment' | 'paper' | 'file' | 'papers' | 'userdata' | 'chat' | 'prefillParams' | 'prefillParamsGroup' | 'prefillParamsEnv' | 'prefillParamsAgent' | 'settings' | 'custom' | 'customScan' | 'customTest' | 'customClean' | 'customAgentItem' | 'customEnvItem' | 'customAgentsGroup' | 'customEnvsGroup' | 'presentation' | 'presentationHypothesis' | 'presentationExperiment' | 'synthesis' | 'reportHtml' | 'reportMd',
     public readonly filePath?: string
   ) {
     // 调用父类构造函数，初始化树节点
@@ -84,7 +84,13 @@ export class ProjectItem extends vscode.TreeItem {
       'customAgentItem': 'symbol-class', // 自定义Agent图标
       'customEnvItem': 'symbol-namespace', // 自定义环境模块图标
       'customAgentsGroup': 'folder', // Agents组图标
-      'customEnvsGroup': 'folder' // Envs组图标
+      'customEnvsGroup': 'folder', // Envs组图标
+      'presentation': 'symbol-folder', // 分析报告根图标
+      'presentationHypothesis': 'folder', // 假设文件夹
+      'presentationExperiment': 'folder', // 实验文件夹
+      'synthesis': 'symbol-misc', // 综合报告图标
+      'reportHtml': 'browser', // HTML 报告图标
+      'reportMd': 'file-code', // Markdown 报告图标
     };
     const iconId = iconMap[type] || 'file';
 
@@ -95,7 +101,21 @@ export class ProjectItem extends vscode.TreeItem {
     // 如果提供了文件路径，设置点击命令
     // 当用户点击这个节点时，会执行相应的命令打开文件
     if (filePath) {
-      if (isMarkdown) {
+      if (type === 'reportHtml' || (filePath.toLowerCase().endsWith('.html') && (type === 'presentationExperiment' || type === 'synthesis'))) {
+        // HTML 报告文件使用 live-server 预览（如果有安装）
+        this.command = {
+          command: 'liveServer.preview.open',
+          title: 'Open with Live Server',
+          arguments: [vscode.Uri.file(filePath)]
+        };
+      } else if (type === 'reportMd' && filePath.toLowerCase().endsWith('.md')) {
+        // Markdown 报告默认以预览模式打开
+        this.command = {
+          command: 'markdown.showPreview',
+          title: 'Open Preview',
+          arguments: [vscode.Uri.file(filePath)]
+        };
+      } else if (isMarkdown) {
         // Markdown 文件默认以预览模式打开
         this.command = {
           command: 'markdown.showPreview',  // VSCode内置命令：预览 Markdown 文件
@@ -629,6 +649,28 @@ export class ProjectStructureProvider implements vscode.TreeDataProvider<Project
         ));
       }
 
+      // 查找presentation目录（分析报告）
+      const presentationDir = path.join(workspacePath, 'presentation');
+      if (fs.existsSync(presentationDir)) {
+        items.push(new ProjectItem(
+          localize('projectStructure.presentation'),
+          vscode.TreeItemCollapsibleState.Collapsed,
+          'presentation',
+          undefined
+        ));
+      }
+
+      // 查找synthesis目录（综合报告）
+      const synthesisDir = path.join(workspacePath, 'synthesis');
+      if (fs.existsSync(synthesisDir)) {
+        items.push(new ProjectItem(
+          localize('projectStructure.synthesis'),
+          vscode.TreeItemCollapsibleState.Collapsed,
+          'synthesis',
+          undefined
+        ));
+      }
+
       return items;
     }
 
@@ -891,6 +933,380 @@ export class ProjectStructureProvider implements vscode.TreeDataProvider<Project
           }
 
           items.push(item);
+        }
+      }
+
+      return items;
+    }
+
+    // Presentation节点（分析报告）的子节点：显示所有假设目录
+    if (element.type === 'presentation') {
+      const workspaceFolder = vscode.workspace.workspaceFolders?.[0];
+      if (!workspaceFolder) {
+        return [];
+      }
+      const workspacePath = workspaceFolder.uri.fsPath;
+      const presentationDir = path.join(workspacePath, 'presentation');
+      const items: ProjectItem[] = [];
+
+      if (fs.existsSync(presentationDir)) {
+        // 读取目录，查找所有hypothesis_*目录
+        const entries = fs.readdirSync(presentationDir);
+        for (const entry of entries) {
+          const fullPath = path.join(presentationDir, entry);
+          const stat = fs.statSync(fullPath);
+
+          if (stat.isDirectory() && entry.startsWith('hypothesis_')) {
+            // 提取假设ID，转换为友好显示名称
+            const match = entry.match(/^hypothesis_(\d+)$/);
+            const displayName = match
+              ? `${localize('projectStructure.hypothesis')} ${match[1]}`
+              : entry;
+            items.push(new ProjectItem(
+              displayName,
+              vscode.TreeItemCollapsibleState.Collapsed,
+              'presentationHypothesis',
+              fullPath
+            ));
+          }
+        }
+      }
+
+      return items;
+    }
+
+    // PresentationHypothesis节点的子节点：显示所有实验目录
+    if (element.type === 'presentationHypothesis' && element.filePath) {
+      const items: ProjectItem[] = [];
+
+      if (fs.existsSync(element.filePath) && fs.statSync(element.filePath).isDirectory()) {
+        const entries = fs.readdirSync(element.filePath);
+        for (const entry of entries) {
+          const fullPath = path.join(element.filePath, entry);
+          const stat = fs.statSync(fullPath);
+
+          if (stat.isDirectory() && entry.startsWith('experiment_')) {
+            // 提取实验ID，转换为友好显示名称
+            const match = entry.match(/^experiment_(\d+)$/);
+            const displayName = match
+              ? `${localize('projectStructure.experiment')} ${match[1]}`
+              : entry;
+            items.push(new ProjectItem(
+              displayName,
+              vscode.TreeItemCollapsibleState.Collapsed,
+              'presentationExperiment',
+              fullPath
+            ));
+          }
+        }
+      }
+
+      return items;
+    }
+
+    // PresentationExperiment节点的子节点：显示报告文件和数据目录
+    if (element.type === 'presentationExperiment' && element.filePath) {
+      const items: ProjectItem[] = [];
+
+      if (fs.existsSync(element.filePath) && fs.statSync(element.filePath).isDirectory()) {
+        const entries = fs.readdirSync(element.filePath);
+
+        // 按优先级查找报告文件：语言特定版本优先于通用版本
+        const reportFiles: { [key: string]: string } = {};
+        for (const entry of entries) {
+          const fullPath = path.join(element.filePath, entry);
+          const stat = fs.statSync(fullPath);
+          if (stat.isFile()) {
+            reportFiles[entry] = fullPath;
+          }
+        }
+
+        // 添加中文 HTML 报告
+        if (reportFiles['report_zh.html']) {
+          const item = new ProjectItem(
+            localize('projectStructure.reportHtmlZh'),
+            vscode.TreeItemCollapsibleState.None,
+            'reportHtml',
+            reportFiles['report_zh.html']
+          );
+          item.command = {
+            command: 'liveServer.preview.open',
+            title: 'Open with Live Server',
+            arguments: [vscode.Uri.file(reportFiles['report_zh.html'])]
+          };
+          items.push(item);
+        }
+
+        // 添加英文 HTML 报告
+        if (reportFiles['report_en.html']) {
+          const item = new ProjectItem(
+            localize('projectStructure.reportHtmlEn'),
+            vscode.TreeItemCollapsibleState.None,
+            'reportHtml',
+            reportFiles['report_en.html']
+          );
+          item.command = {
+            command: 'liveServer.preview.open',
+            title: 'Open with Live Server',
+            arguments: [vscode.Uri.file(reportFiles['report_en.html'])]
+          };
+          items.push(item);
+        }
+
+        // 如果没有语言特定版本，添加通用 HTML 报告
+        if (!reportFiles['report_zh.html'] && !reportFiles['report_en.html'] && reportFiles['report.html']) {
+          const item = new ProjectItem(
+            localize('projectStructure.reportHtml'),
+            vscode.TreeItemCollapsibleState.None,
+            'reportHtml',
+            reportFiles['report.html']
+          );
+          item.command = {
+            command: 'liveServer.preview.open',
+            title: 'Open with Live Server',
+            arguments: [vscode.Uri.file(reportFiles['report.html'])]
+          };
+          items.push(item);
+        }
+
+        // 添加中文 Markdown 报告
+        if (reportFiles['report_zh.md']) {
+          const item = new ProjectItem(
+            localize('projectStructure.reportMdZh'),
+            vscode.TreeItemCollapsibleState.None,
+            'reportMd',
+            reportFiles['report_zh.md']
+          );
+          item.command = {
+            command: 'markdown.showPreview',
+            title: 'Open Preview',
+            arguments: [vscode.Uri.file(reportFiles['report_zh.md'])]
+          };
+          items.push(item);
+        }
+
+        // 添加英文 Markdown 报告
+        if (reportFiles['report_en.md']) {
+          const item = new ProjectItem(
+            localize('projectStructure.reportMdEn'),
+            vscode.TreeItemCollapsibleState.None,
+            'reportMd',
+            reportFiles['report_en.md']
+          );
+          item.command = {
+            command: 'markdown.showPreview',
+            title: 'Open Preview',
+            arguments: [vscode.Uri.file(reportFiles['report_en.md'])]
+          };
+          items.push(item);
+        }
+
+        // 如果没有语言特定版本，添加通用 Markdown 报告
+        if (!reportFiles['report_zh.md'] && !reportFiles['report_en.md'] && reportFiles['report.md']) {
+          const item = new ProjectItem(
+            localize('projectStructure.reportMd'),
+            vscode.TreeItemCollapsibleState.None,
+            'reportMd',
+            reportFiles['report.md']
+          );
+          item.command = {
+            command: 'markdown.showPreview',
+            title: 'Open Preview',
+            arguments: [vscode.Uri.file(reportFiles['report.md'])]
+          };
+          items.push(item);
+        }
+
+        // 添加 data 目录（分析数据）
+        const dataDir = path.join(element.filePath, 'data');
+        if (fs.existsSync(dataDir)) {
+          items.push(new ProjectItem(
+            localize('projectStructure.analysisData'),
+            vscode.TreeItemCollapsibleState.Collapsed,
+            'file',
+            dataDir
+          ));
+        }
+
+        // 添加 charts 目录（图表）
+        const chartsDir = path.join(element.filePath, 'charts');
+        if (fs.existsSync(chartsDir)) {
+          items.push(new ProjectItem(
+            localize('projectStructure.reportCharts'),
+            vscode.TreeItemCollapsibleState.Collapsed,
+            'file',
+            chartsDir
+          ));
+        }
+
+        // 添加 assets 目录（资源）
+        const assetsDir = path.join(element.filePath, 'assets');
+        if (fs.existsSync(assetsDir)) {
+          items.push(new ProjectItem(
+            localize('projectStructure.reportAssets'),
+            vscode.TreeItemCollapsibleState.Collapsed,
+            'file',
+            assetsDir
+          ));
+        }
+      }
+
+      return items;
+    }
+
+
+    // Synthesis节点（综合报告）的子节点：显示所有综合报告文件
+    if (element.type === 'synthesis') {
+      const workspaceFolder = vscode.workspace.workspaceFolders?.[0];
+      if (!workspaceFolder) {
+        return [];
+      }
+      const workspacePath = workspaceFolder.uri.fsPath;
+      const synthesisDir = path.join(workspacePath, 'synthesis');
+      const items: ProjectItem[] = [];
+
+      if (fs.existsSync(synthesisDir)) {
+        const entries = fs.readdirSync(synthesisDir);
+        
+        // 分组报告：按基础名称和时间戳分组，支持双语版本
+        const reportGroups: { [key: string]: { zh?: string; en?: string; generic?: string } } = {};
+        
+        for (const entry of entries) {
+          const fullPath = path.join(synthesisDir, entry);
+          const stat = fs.statSync(fullPath);
+          
+          if (stat.isFile() && entry.startsWith('synthesis_report_')) {
+            // 匹配带语言后缀的文件: synthesis_report_YYYYMMDD_HHMMSS_(zh|en).(html|md)
+            const langMatch = entry.match(/^synthesis_report_(\d+)_(zh|en)\.(html|md)$/);
+            // 匹配通用文件: synthesis_report_YYYYMMDD_HHMMSS.(html|md)
+            const genericMatch = entry.match(/^synthesis_report_(\d+)\.(html|md)$/);
+            
+            if (langMatch) {
+              const timestamp = langMatch[1];
+              const lang = langMatch[2];
+              const ext = langMatch[3];
+              const key = `${timestamp}_${ext}`;
+              
+              if (!reportGroups[key]) {
+                reportGroups[key] = {};
+              }
+              reportGroups[key][lang] = fullPath;
+            } else if (genericMatch) {
+              const timestamp = genericMatch[1];
+              const ext = genericMatch[2];
+              const key = `${timestamp}_${ext}`;
+              
+              if (!reportGroups[key]) {
+                reportGroups[key] = {};
+              }
+              reportGroups[key]['generic'] = fullPath;
+            }
+          }
+        }
+        
+        // 生成显示项：优先显示语言特定版本，如果没有则显示通用版本
+        for (const [key, paths] of Object.entries(reportGroups)) {
+          const [timestamp, ext] = key.split('_');
+          const isHtml = ext === 'html';
+          
+          if (isHtml) {
+            // 中文 HTML
+            if (paths.zh) {
+              const item = new ProjectItem(
+                `${localize('projectStructure.synthesis')} ${timestamp} (${localize('projectStructure.reportHtmlZh')})`,
+                vscode.TreeItemCollapsibleState.None,
+                'reportHtml',
+                paths.zh
+              );
+              item.command = {
+                command: 'liveServer.preview.open',
+                title: 'Open with Live Server',
+                arguments: [vscode.Uri.file(paths.zh)]
+              };
+              items.push(item);
+            }
+            
+            // 英文 HTML
+            if (paths.en) {
+              const item = new ProjectItem(
+                `${localize('projectStructure.synthesis')} ${timestamp} (${localize('projectStructure.reportHtmlEn')})`,
+                vscode.TreeItemCollapsibleState.None,
+                'reportHtml',
+                paths.en
+              );
+              item.command = {
+                command: 'liveServer.preview.open',
+                title: 'Open with Live Server',
+                arguments: [vscode.Uri.file(paths.en)]
+              };
+              items.push(item);
+            }
+            
+            // 通用 HTML（仅当没有语言特定版本时）
+            if (!paths.zh && !paths.en && paths.generic) {
+              const item = new ProjectItem(
+                `${localize('projectStructure.synthesis')} ${timestamp}`,
+                vscode.TreeItemCollapsibleState.None,
+                'reportHtml',
+                paths.generic
+              );
+              item.command = {
+                command: 'liveServer.preview.open',
+                title: 'Open with Live Server',
+                arguments: [vscode.Uri.file(paths.generic)]
+              };
+              items.push(item);
+            }
+          } else {
+            // Markdown
+            // 中文 MD
+            if (paths.zh) {
+              const item = new ProjectItem(
+                `${localize('projectStructure.synthesis')} ${timestamp} (${localize('projectStructure.reportMdZh')})`,
+                vscode.TreeItemCollapsibleState.None,
+                'reportMd',
+                paths.zh
+              );
+              item.command = {
+                command: 'markdown.showPreview',
+                title: 'Open Preview',
+                arguments: [vscode.Uri.file(paths.zh)]
+              };
+              items.push(item);
+            }
+            
+            // 英文 MD
+            if (paths.en) {
+              const item = new ProjectItem(
+                `${localize('projectStructure.synthesis')} ${timestamp} (${localize('projectStructure.reportMdEn')})`,
+                vscode.TreeItemCollapsibleState.None,
+                'reportMd',
+                paths.en
+              );
+              item.command = {
+                command: 'markdown.showPreview',
+                title: 'Open Preview',
+                arguments: [vscode.Uri.file(paths.en)]
+              };
+              items.push(item);
+            }
+            
+            // 通用 MD（仅当没有语言特定版本时）
+            if (!paths.zh && !paths.en && paths.generic) {
+              const item = new ProjectItem(
+                `${localize('projectStructure.synthesis')} ${timestamp} (${localize('projectStructure.reportMd')})`,
+                vscode.TreeItemCollapsibleState.None,
+                'reportMd',
+                paths.generic
+              );
+              item.command = {
+                command: 'markdown.showPreview',
+                title: 'Open Preview',
+                arguments: [vscode.Uri.file(paths.generic)]
+              };
+              items.push(item);
+            }
+          }
         }
       }
 
