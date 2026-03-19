@@ -1,7 +1,27 @@
+/**
+ * VSCode插件主入口文件
+ *
+ * 负责插件的激活/停用、命令注册、各个组件的初始化。
+ *
+ * 关联文件：
+ * - @extension/src/services/backendManager.ts - 后端服务进程管理
+ * - @extension/src/configPageViewProvider.ts - 配置页面Webview
+ * - @extension/src/prefillParamsViewProvider.ts - 预填充参数查看器
+ * - @extension/src/replayWebviewProvider.ts - 回放可视化Webview
+ * - @extension/src/projectStructureProvider.ts - 项目结构树视图
+ * - @extension/src/simSettingsEditorProvider.ts - SIM_SETTINGS自定义编辑器
+ * - @extension/src/apiClient.ts - 后端API通信客户端
+ * - @extension/src/envManager.ts - 环境变量(.env)管理
+ * - @extension/src/services/llmValidator.ts - LLM配置验证
+ *
+ * 后端API：
+ * - @packages/agentsociety2/agentsociety2/backend/app.py - FastAPI应用主入口
+ */
+
 import * as vscode from 'vscode';
 import * as path from 'path';
+import * as fs from 'fs';
 import { ProjectStructureProvider } from './projectStructureProvider';
-import { ChatWebviewProvider } from './chatWebviewProvider';
 import { SimSettingsEditorProvider } from './simSettingsEditorProvider';
 import { PrefillParamsViewProvider } from './prefillParamsViewProvider';
 import { ReplayWebviewProvider } from './replayWebviewProvider';
@@ -12,9 +32,13 @@ import { ProjectDragAndDropController } from './dragAndDropController';
 import { ParseModeManager } from './parseModeManager';
 import { localize } from './i18n';
 import { BackendManager } from './services/backendManager';
+import { MinerUParser } from './mineruParser';
+import { AIChatInvoker } from './aiChatInvoker';
 
 // Global backend manager instance
 let backendManager: BackendManager | null = null;
+// Global MinerU parser
+let mineruParser: MinerUParser | null = null;
 
 export function activate(context: vscode.ExtensionContext) {
   console.log(localize('extension.activate'));
@@ -51,12 +75,27 @@ export function activate(context: vscode.ExtensionContext) {
   // Initialize API client
   const apiClient = new ApiClient(context);
 
+  // Initialize MinerU parser
+  mineruParser = new MinerUParser();
+  context.subscriptions.push({
+    dispose: () => {
+      if (mineruParser) {
+        mineruParser.dispose();
+        mineruParser = null;
+      }
+    }
+  });
+
+  // Initialize AI Chat invoker
+  const aiChatInvoker = new AIChatInvoker();
+  context.subscriptions.push(aiChatInvoker);
+
   // Initialize parse mode manager
   const parseModeManager = new ParseModeManager(context);
   context.subscriptions.push(parseModeManager);
 
   // Initialize paper watcher for MinerU parsing
-  const paperWatcher = new PaperWatcher(context, apiClient, parseModeManager);
+  const paperWatcher = new PaperWatcher(context, mineruParser, parseModeManager);
   context.subscriptions.push(paperWatcher);
 
   // Register project structure tree view with drag and drop support
@@ -96,26 +135,36 @@ export function activate(context: vscode.ExtensionContext) {
     }
   );
 
-  const openChatCommand = vscode.commands.registerCommand(
-    'aiSocialScientist.openChat',
+  // Update skills command - copy latest skills to workspace
+  const updateSkillsCommand = vscode.commands.registerCommand(
+    'aiSocialScientist.updateSkills',
     async () => {
-      await ChatWebviewProvider.createOrShow(context);
+      await projectStructureProvider.updateSkills();
     }
   );
 
+  // Configure environment command - open config page for .env setup
+  const configureEnvCommand = vscode.commands.registerCommand(
+    'aiSocialScientist.configureEnv',
+    async () => {
+      ConfigPageViewProvider.createOrShow(context, vscode.ViewColumn.One);
+    }
+  );
 
-  // 删除文献命令
+  // Fix workspace directory command
+  const fixWorkspaceCommand = vscode.commands.registerCommand(
+    'aiSocialScientist.fixWorkspace',
+    async () => {
+      await projectStructureProvider.fixWorkspace();
+    }
+  );
+
+  // 删除文献命令 (使用本地文件操作)
   const deleteLiteratureCommand = vscode.commands.registerCommand(
     'aiSocialScientist.deleteLiterature',
     async (item: any) => {
       if (!item || !item.filePath) {
         vscode.window.showErrorMessage(localize('extension.deleteLiterature.noFile'));
-        return;
-      }
-
-      const workspaceFolder = vscode.workspace.workspaceFolders?.[0];
-      if (!workspaceFolder) {
-        vscode.window.showErrorMessage(localize('extension.deleteLiterature.noWorkspace'));
         return;
       }
 
@@ -132,39 +181,40 @@ export function activate(context: vscode.ExtensionContext) {
       }
 
       try {
-        const relativePath = path.relative(workspaceFolder.uri.fsPath, item.filePath);
-        // 统一使用正斜杠（后端期望的格式）
-        const normalizedPath = relativePath.replace(/\\/g, '/');
+        // Delete the file
+        fs.unlinkSync(item.filePath);
+        vscode.window.showInformationMessage(`Deleted: ${fileName}`);
 
-        const response = await apiClient.deleteLiterature({
-          file_path: normalizedPath,
-          workspace_path: workspaceFolder.uri.fsPath,
-        });
-
-        if (response.success) {
-          vscode.window.showInformationMessage(response.message);
-          projectStructureProvider.refresh();
-        } else {
-          vscode.window.showErrorMessage(response.message);
+        // Update literature_index.json if it exists
+        const workspaceFolder = vscode.workspace.workspaceFolders?.[0];
+        if (workspaceFolder) {
+          const indexPath = path.join(workspaceFolder.uri.fsPath, 'papers', 'literature_index.json');
+          if (fs.existsSync(indexPath)) {
+            try {
+              const indexData = JSON.parse(fs.readFileSync(indexPath, 'utf-8'));
+              const relativePath = path.relative(workspaceFolder.uri.fsPath, item.filePath).replace(/\\/g, '/');
+              indexData.entries = (indexData.entries || []).filter((e: any) => e.file_path !== relativePath);
+              indexData.updated_at = new Date().toISOString();
+              fs.writeFileSync(indexPath, JSON.stringify(indexData, null, 2), 'utf-8');
+            } catch (error) {
+              console.error('Failed to update literature index:', error);
+            }
+          }
         }
+
+        projectStructureProvider.refresh();
       } catch (error: any) {
         vscode.window.showErrorMessage(localize('extension.deleteLiterature.failed', error.message || error));
       }
     }
   );
 
-  // 重命名文献命令
+  // 重命名文献命令 (使用本地文件操作)
   const renameLiteratureCommand = vscode.commands.registerCommand(
     'aiSocialScientist.renameLiterature',
     async (item: any) => {
       if (!item || !item.filePath) {
         vscode.window.showErrorMessage(localize('extension.renameLiterature.noFile'));
-        return;
-      }
-
-      const workspaceFolder = vscode.workspace.workspaceFolders?.[0];
-      if (!workspaceFolder) {
-        vscode.window.showErrorMessage(localize('extension.renameLiterature.noWorkspace'));
         return;
       }
 
@@ -188,22 +238,37 @@ export function activate(context: vscode.ExtensionContext) {
       }
 
       try {
-        const relativePath = path.relative(workspaceFolder.uri.fsPath, item.filePath);
-        // 统一使用正斜杠（后端期望的格式）
-        const normalizedPath = relativePath.replace(/\\/g, '/');
+        const dirPath = path.dirname(item.filePath);
+        const newPath = path.join(dirPath, newName);
 
-        const response = await apiClient.renameLiterature({
-          file_path: normalizedPath,
-          new_name: newName,
-          workspace_path: workspaceFolder.uri.fsPath,
-        });
+        // Rename the file
+        fs.renameSync(item.filePath, newPath);
+        vscode.window.showInformationMessage(`Renamed to: ${newName}`);
 
-        if (response.success) {
-          vscode.window.showInformationMessage(response.message);
-          projectStructureProvider.refresh();
-        } else {
-          vscode.window.showErrorMessage(response.message);
+        // Update literature_index.json if it exists
+        const workspaceFolder = vscode.workspace.workspaceFolders?.[0];
+        if (workspaceFolder) {
+          const indexPath = path.join(workspaceFolder.uri.fsPath, 'papers', 'literature_index.json');
+          if (fs.existsSync(indexPath)) {
+            try {
+              const indexData = JSON.parse(fs.readFileSync(indexPath, 'utf-8'));
+              const oldRelativePath = path.relative(workspaceFolder.uri.fsPath, item.filePath).replace(/\\/g, '/');
+              const newRelativePath = path.join(path.dirname(oldRelativePath), newName).replace(/\\/g, '/');
+
+              const entry = (indexData.entries || []).find((e: any) => e.file_path === oldRelativePath);
+              if (entry) {
+                entry.file_path = newRelativePath;
+                entry.title = newName.replace(/\.(md|json)$/, '');
+                indexData.updated_at = new Date().toISOString();
+                fs.writeFileSync(indexPath, JSON.stringify(indexData, null, 2), 'utf-8');
+              }
+            } catch (error) {
+              console.error('Failed to update literature index:', error);
+            }
+          }
         }
+
+        projectStructureProvider.refresh();
       } catch (error: any) {
         vscode.window.showErrorMessage(localize('extension.renameLiterature.failed', error.message || error));
       }
@@ -237,7 +302,15 @@ export function activate(context: vscode.ExtensionContext) {
     }
   );
 
-  // 使用MinerU解析PDF命令
+  // Open AI Chat command
+  const openChatCommand = vscode.commands.registerCommand(
+    'aiSocialScientist.openChat',
+    async () => {
+      await aiChatInvoker.invokeChat();
+    }
+  );
+
+  // 使用MinerU解析PDF命令 (本地调用MinerU CLI)
   const parseWithMinerUCommand = vscode.commands.registerCommand(
     'aiSocialScientist.parseWithMinerU',
     async (item: any) => {
@@ -260,36 +333,33 @@ export function activate(context: vscode.ExtensionContext) {
         return;
       }
 
+      if (!mineruParser) {
+        vscode.window.showErrorMessage('MinerU Parser not initialized');
+        return;
+      }
+
+      const fileName = item.label || path.basename(filePath);
+      vscode.window.showInformationMessage(localize('extension.parseMinerU.parsing', fileName));
+
       try {
-        const relativePath = path.relative(workspaceFolder.uri.fsPath, filePath);
-        // 统一使用正斜杠（后端期望的格式）
-        const normalizedPath = relativePath.replace(/\\/g, '/');
-
-        const fileName = item.label || path.basename(filePath);
-        vscode.window.showInformationMessage(localize('extension.parseMinerU.parsing', fileName));
-
-        const response = await apiClient.parseWithMinerU({
-          file_path: normalizedPath,
-          workspace_path: workspaceFolder.uri.fsPath,
+        const result = await mineruParser.parse({
+          filePath,
+          workspacePath: workspaceFolder.uri.fsPath,
         });
 
-        if (response.success) {
+        if (result.success) {
           const openFileLabel = localize('extension.parseMinerU.openFile');
           vscode.window.showInformationMessage(
             localize('extension.parseMinerU.success', fileName),
             openFileLabel
-          ).then(selection => {
-            if (selection === openFileLabel && response.parsed_file_path) {
-              // 解析后的文件路径可能是相对路径，需要转换为绝对路径
-              const parsedFilePath = path.isAbsolute(response.parsed_file_path)
-                ? response.parsed_file_path
-                : path.join(workspaceFolder.uri.fsPath, response.parsed_file_path);
-              vscode.window.showTextDocument(vscode.Uri.file(parsedFilePath));
+          ).then((selection) => {
+            if (selection === openFileLabel && result.parsedFilePath) {
+              vscode.window.showTextDocument(vscode.Uri.file(result.parsedFilePath));
             }
           });
           projectStructureProvider.refresh();
         } else {
-          vscode.window.showErrorMessage(localize('extension.parseMinerU.failed', response.message));
+          vscode.window.showErrorMessage(result.message);
         }
       } catch (error: any) {
         vscode.window.showErrorMessage(localize('extension.parseMinerU.failed', error.message || error));
@@ -484,13 +554,6 @@ export function activate(context: vscode.ExtensionContext) {
     }
   );
 
-  const cleanCustomModulesCommand = vscode.commands.registerCommand(
-    'aiSocialScientist.cleanCustomModules',
-    async () => {
-      await projectStructureProvider.cleanCustomModules();
-    }
-  );
-
   const listCustomModulesCommand = vscode.commands.registerCommand(
     'aiSocialScientist.listCustomModules',
     async () => {
@@ -538,11 +601,14 @@ export function activate(context: vscode.ExtensionContext) {
   // Register all commands
   context.subscriptions.push(
     initProjectCommand,
-    openChatCommand,
+    updateSkillsCommand,
+    configureEnvCommand,
+    fixWorkspaceCommand,
     deleteLiteratureCommand,
     renameLiteratureCommand,
     parseWithMinerUCommand,
     openMarkdownInEditorCommand,
+    openChatCommand,
     startBackendCommand,
     stopBackendCommand,
     restartBackendCommand,
@@ -552,7 +618,6 @@ export function activate(context: vscode.ExtensionContext) {
     openConfigPageCommand,
     scanCustomModulesCommand,
     testCustomModulesCommand,
-    cleanCustomModulesCommand,
     listCustomModulesCommand
   );
 }

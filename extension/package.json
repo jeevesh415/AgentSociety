@@ -136,43 +136,7 @@
       }
     ],
     "menus": {
-      "view/title": [
-        {
-          "command": "aiSocialScientist.openChat",
-          "when": "view == projectStructureView",
-          "group": "navigation",
-          "icon": "$(comment-discussion)"
-        },
-        {
-          "command": "aiSocialScientist.initProject",
-          "when": "view == projectStructureView",
-          "group": "navigation"
-        },
-        {
-          "command": "aiSocialScientist.openConfigPage",
-          "when": "view == projectStructureView",
-          "group": "navigation",
-          "icon": "$(settings)"
-        },
-        {
-          "command": "aiSocialScientist.scanCustomModules",
-          "when": "view == projectStructureView",
-          "group": "customModules",
-          "icon": "$(refresh)"
-        },
-        {
-          "command": "aiSocialScientist.testCustomModules",
-          "when": "view == projectStructureView",
-          "group": "customModules",
-          "icon": "$(play)"
-        },
-        {
-          "command": "aiSocialScientist.cleanCustomModules",
-          "when": "view == projectStructureView",
-          "group": "customModules",
-          "icon": "$(trash)"
-        }
-      ],
+      "view/title": [],
       "view/item/context": [
         {
           "command": "aiSocialScientist.openReplay",

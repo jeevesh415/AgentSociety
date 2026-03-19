@@ -53,6 +53,9 @@ result_volunteer_dilemma_person_agent/
 game_log/
 *.json
 .vscode/
+!.vscode/settings.json
+!.vscode/launch.json
+!.vscode/tasks.json
 *.template
 NEXT_STEPS.md
 PUBLISH_CHECKLIST.md

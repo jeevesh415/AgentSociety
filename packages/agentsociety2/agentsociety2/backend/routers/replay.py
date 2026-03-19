@@ -1,4 +1,16 @@
-"""Replay data query API for simulation playback.
+"""
+Replay data query API for simulation playback.
+
+关联文件：
+- @extension/src/replayWebviewProvider.ts - 前端Replay Webview（调用此API）
+- @extension/src/webview/replay/ - 前端React组件
+
+API端点：
+- GET /api/v1/replay/{hypothesis_id}/{experiment_id}/info - 实验基本信息
+- GET /api/v1/replay/{hypothesis_id}/{experiment_id}/timeline - 时间线
+- GET /api/v1/replay/{hypothesis_id}/{experiment_id}/agents/* - Agent相关数据
+- GET /api/v1/replay/{hypothesis_id}/{experiment_id}/social/* - 社交媒体数据
+- GET /api/v1/replay/{hypothesis_id}/{experiment_id}/tables/* - 数据库表查询
 """
 
 from datetime import datetime
@@ -36,9 +48,10 @@ router = APIRouter(prefix="/replay", tags=["replay"])
 # =============== Data Models (Response Models) ===============
 # We reuse SQLModel classes where possible, or define Pydantic models for responses that don't match DB exactly.
 # For simplicity, we redefine some response models if they differ significantly or to decouple API from generic DB models.
-# But here, most models match nicely. 
+# But here, most models match nicely.
 # However, to maintain API compatibility (camelCase vs snake_case if any, or specific fields), let's keep existing response models
 # but map them from DB objects.
+
 
 class ExperimentInfo(BaseModel):
     """Basic information about an experiment."""
@@ -86,13 +99,16 @@ class TableContent(BaseModel):
     rows: List[Dict[str, Any]]
     total: int
 
+
 class SocialNetworkNode(BaseModel):
     user_id: int
     username: str
 
+
 class SocialNetworkEdge(BaseModel):
     source: int
     target: int
+
 
 class SocialNetwork(BaseModel):
     nodes: List[SocialNetworkNode]
@@ -185,14 +201,14 @@ async def get_db_session(db_path: Path):
     """Get an async database session context manager."""
     if not db_path.exists():
         raise HTTPException(status_code=404, detail=f"Database not found: {db_path}")
-    
+
     connection_string = f"sqlite+aiosqlite:///{db_path}"
     engine = create_async_engine(connection_string, echo=False)
     async_session = sessionmaker(engine, class_=AsyncSession, expire_on_commit=False)
-    
+
     async with async_session() as session:
         yield session
-    
+
     await engine.dispose()
 
 
@@ -210,7 +226,9 @@ async def get_experiment_info(
 
     async for session in get_db_session(db_path):
         # Total steps
-        result = await session.execute(select(func.count(func.distinct(AgentStatus.step))))
+        result = await session.execute(
+            select(func.count(func.distinct(AgentStatus.step)))
+        )
         total_steps = result.scalar() or 0
 
         result = await session.execute(select(func.min(AgentStatus.t)))
@@ -222,7 +240,9 @@ async def get_experiment_info(
 
         def _get_tables(sync_sess):
             from sqlalchemy import inspect
+
             return inspect(sync_sess.connection()).get_table_names()
+
         tables = await session.run_sync(_get_tables)
         has_social = "social_user" in tables
 
@@ -237,7 +257,9 @@ async def get_experiment_info(
         )
 
 
-@router.get("/{hypothesis_id}/{experiment_id}/timeline", response_model=List[TimelinePoint])
+@router.get(
+    "/{hypothesis_id}/{experiment_id}/timeline", response_model=List[TimelinePoint]
+)
 async def get_timeline(
     hypothesis_id: str,
     experiment_id: str,
@@ -247,14 +269,19 @@ async def get_timeline(
     db_path = get_db_path(workspace_path, hypothesis_id, experiment_id)
 
     async for session in get_db_session(db_path):
-        statement = select(AgentStatus.step, AgentStatus.t).distinct().order_by(AgentStatus.step)
+        statement = (
+            select(AgentStatus.step, AgentStatus.t)
+            .distinct()
+            .order_by(AgentStatus.step)
+        )
         result = await session.execute(statement)
         rows = result.all()
         return [TimelinePoint(step=r[0], t=r[1]) for r in rows]
 
 
 @router.get(
-    "/{hypothesis_id}/{experiment_id}/agents/profiles", response_model=List[AgentProfile]
+    "/{hypothesis_id}/{experiment_id}/agents/profiles",
+    response_model=List[AgentProfile],
 )
 async def get_agent_profiles(
     hypothesis_id: str,
@@ -270,7 +297,8 @@ async def get_agent_profiles(
 
 
 @router.get(
-    "/{hypothesis_id}/{experiment_id}/agents/status", response_model=List[AgentStatusResponse]
+    "/{hypothesis_id}/{experiment_id}/agents/status",
+    response_model=List[AgentStatusResponse],
 )
 async def get_agents_status_at_step(
     hypothesis_id: str,
@@ -335,7 +363,9 @@ async def get_agents_status_at_step(
             ]
         except OperationalError:
             # agent_position table not present (MobilitySpace not loaded)
-            result = await session.execute(select(AgentStatus).where(AgentStatus.step == step))
+            result = await session.execute(
+                select(AgentStatus).where(AgentStatus.step == step)
+            )
             statuses = result.scalars().all()
             return [
                 AgentStatusResponse(
@@ -408,7 +438,9 @@ async def get_agent_status_history(
             ]
         except OperationalError:
             result = await session.execute(
-                select(AgentStatus).where(AgentStatus.id == agent_id).order_by(AgentStatus.step)
+                select(AgentStatus)
+                .where(AgentStatus.id == agent_id)
+                .order_by(AgentStatus.step)
             )
             statuses = result.scalars().all()
             return [
@@ -442,7 +474,9 @@ async def get_agent_trajectory(
 
     async for session in get_db_session(db_path):
         try:
-            query = select(agent_position_table).where(agent_position_table.c.id == agent_id)
+            query = select(agent_position_table).where(
+                agent_position_table.c.id == agent_id
+            )
             if start_step is not None:
                 query = query.where(agent_position_table.c.step >= start_step)
             if end_step is not None:
@@ -453,7 +487,9 @@ async def get_agent_trajectory(
             return [
                 {
                     "step": row.step,
-                    "t": row.t.isoformat() if hasattr(row.t, "isoformat") else str(row.t),
+                    "t": row.t.isoformat()
+                    if hasattr(row.t, "isoformat")
+                    else str(row.t),
                     "lng": row.lng,
                     "lat": row.lat,
                 }
@@ -483,7 +519,7 @@ async def get_agent_dialogs(
         query = select(AgentDialog).where(AgentDialog.agent_id == agent_id)
         if dialog_type is not None:
             query = query.where(AgentDialog.type == dialog_type)
-        
+
         query = query.order_by(AgentDialog.step, AgentDialog.id)
         result = await session.execute(query)
         return result.scalars().all()
@@ -499,7 +535,8 @@ async def get_dialogs_at_step(
     step: int,
     workspace_path: str = Query(..., description="Workspace root path"),
     dialog_type: Optional[int] = Query(
-        None, description="Dialog type filter: 0=反思 (thought/reflection); V2 only has type 0"
+        None,
+        description="Dialog type filter: 0=反思 (thought/reflection); V2 only has type 0",
     ),
 ) -> List[AgentDialog]:
     """Get all dialog records at a specific step."""
@@ -509,7 +546,7 @@ async def get_dialogs_at_step(
         query = select(AgentDialog).where(AgentDialog.step == step)
         if dialog_type is not None:
             query = query.where(AgentDialog.type == dialog_type)
-        
+
         query = query.order_by(AgentDialog.id)
         result = await session.execute(query)
         return result.scalars().all()
@@ -542,7 +579,9 @@ async def get_social_user(
 
     async for session in get_db_session(db_path):
         try:
-            query = select(social_user_table).where(social_user_table.c.user_id == user_id)
+            query = select(social_user_table).where(
+                social_user_table.c.user_id == user_id
+            )
             result = await session.execute(query)
             row = result.one_or_none()
         except OperationalError:
@@ -561,7 +600,9 @@ async def get_social_posts(
     experiment_id: str,
     user_id: int,
     workspace_path: str = Query(..., description="Workspace root path"),
-    max_step: Optional[int] = Query(None, description="Only posts with step <= max_step (timeline step)"),
+    max_step: Optional[int] = Query(
+        None, description="Only posts with step <= max_step (timeline step)"
+    ),
     limit: int = Query(200, ge=1, le=500),
 ) -> List[SocialPost]:
     """Get posts from a social media user (table owned by social_media module)."""
@@ -569,7 +610,9 @@ async def get_social_posts(
 
     async for session in get_db_session(db_path):
         try:
-            query = select(social_post_table).where(social_post_table.c.author_id == user_id)
+            query = select(social_post_table).where(
+                social_post_table.c.author_id == user_id
+            )
             if max_step is not None:
                 query = query.where(social_post_table.c.step <= max_step)
             query = query.order_by(desc(social_post_table.c.created_at)).limit(limit)
@@ -588,7 +631,9 @@ async def get_all_social_posts(
     hypothesis_id: str,
     experiment_id: str,
     workspace_path: str = Query(..., description="Workspace root path"),
-    max_step: Optional[int] = Query(None, description="Only posts with step <= max_step (timeline step)"),
+    max_step: Optional[int] = Query(
+        None, description="Only posts with step <= max_step (timeline step)"
+    ),
     limit: int = Query(500, ge=1, le=2000),
 ) -> List[SocialPost]:
     """Get all posts from all users (table owned by social_media module)."""
@@ -599,7 +644,9 @@ async def get_all_social_posts(
             query = select(social_post_table)
             if max_step is not None:
                 query = query.where(social_post_table.c.step <= max_step)
-            query = query.order_by(desc(social_post_table.c.step), desc(social_post_table.c.created_at)).limit(limit)
+            query = query.order_by(
+                desc(social_post_table.c.step), desc(social_post_table.c.created_at)
+            ).limit(limit)
             result = await session.execute(query)
             rows = result.all()
             return [SocialPost(**_row_to_dict(r)) for r in rows]
@@ -643,7 +690,9 @@ async def get_social_direct_messages(
     experiment_id: str,
     user_id: int,
     workspace_path: str = Query(..., description="Workspace root path"),
-    max_step: Optional[int] = Query(None, description="Only messages with step <= max_step (timeline step)"),
+    max_step: Optional[int] = Query(
+        None, description="Only messages with step <= max_step (timeline step)"
+    ),
     limit: int = Query(500, ge=1, le=2000),
 ) -> List[SocialDirectMessage]:
     """Get direct messages for a user (table owned by social_media module)."""
@@ -652,7 +701,8 @@ async def get_social_direct_messages(
     async for session in get_db_session(db_path):
         try:
             query = select(social_dm_table).where(
-                (social_dm_table.c.from_user_id == user_id) | (social_dm_table.c.to_user_id == user_id)
+                (social_dm_table.c.from_user_id == user_id)
+                | (social_dm_table.c.to_user_id == user_id)
             )
             if max_step is not None:
                 query = query.where(social_dm_table.c.step <= max_step)
@@ -673,7 +723,9 @@ async def get_social_group_messages(
     experiment_id: str,
     user_id: int,
     workspace_path: str = Query(..., description="Workspace root path"),
-    max_step: Optional[int] = Query(None, description="Only messages with step <= max_step (timeline step)"),
+    max_step: Optional[int] = Query(
+        None, description="Only messages with step <= max_step (timeline step)"
+    ),
     limit: int = Query(500, ge=1, le=2000),
 ) -> List[SocialGroupMessage]:
     """Get group messages for a user (tables owned by social_media module)."""
@@ -684,12 +736,18 @@ async def get_social_group_messages(
             stmt = (
                 select(social_group_message_table, social_group_table.c.group_name)
                 .select_from(social_group_message_table)
-                .outerjoin(social_group_table, social_group_message_table.c.group_id == social_group_table.c.group_id)
+                .outerjoin(
+                    social_group_table,
+                    social_group_message_table.c.group_id
+                    == social_group_table.c.group_id,
+                )
                 .where(social_group_message_table.c.from_user_id == user_id)
             )
             if max_step is not None:
                 stmt = stmt.where(social_group_message_table.c.step <= max_step)
-            stmt = stmt.order_by(desc(social_group_message_table.c.created_at)).limit(limit)
+            stmt = stmt.order_by(desc(social_group_message_table.c.created_at)).limit(
+                limit
+            )
             result = await session.execute(stmt)
             rows = result.all()
         except OperationalError:
@@ -716,15 +774,21 @@ async def get_social_network(
 
     async for session in get_db_session(db_path):
         try:
-            users_result = await session.execute(select(social_user_table).order_by(social_user_table.c.user_id))
+            users_result = await session.execute(
+                select(social_user_table).order_by(social_user_table.c.user_id)
+            )
             users_rows = users_result.all()
-            follows_result = await session.execute(select(social_follow_table).order_by(social_follow_table.c.id))
+            follows_result = await session.execute(
+                select(social_follow_table).order_by(social_follow_table.c.id)
+            )
             follows_rows = follows_result.all()
         except OperationalError:
             return SocialNetwork(nodes=[], edges=[])
 
         nodes = [
-            SocialNetworkNode(user_id=r._mapping["user_id"], username=r._mapping["username"])
+            SocialNetworkNode(
+                user_id=r._mapping["user_id"], username=r._mapping["username"]
+            )
             for r in users_rows
         ]
         latest_actions: Dict[tuple[int, int], str] = {}
@@ -759,12 +823,16 @@ async def get_social_activity_at_step(
     async for session in get_db_session(db_path):
         try:
             result = await session.execute(
-                select(social_dm_table.c.to_user_id).where(social_dm_table.c.step == step).distinct()
+                select(social_dm_table.c.to_user_id)
+                .where(social_dm_table.c.step == step)
+                .distinct()
             )
             received_dm = list({r[0] for r in result.all()})
 
             result = await session.execute(
-                select(social_dm_table.c.from_user_id).where(social_dm_table.c.step == step).distinct()
+                select(social_dm_table.c.from_user_id)
+                .where(social_dm_table.c.step == step)
+                .distinct()
             )
             sent_dm = list({r[0] for r in result.all()})
 
@@ -787,6 +855,7 @@ async def get_social_activity_at_step(
 
 # =============== Database Inspection Endpoints ===============
 
+
 @router.get("/{hypothesis_id}/{experiment_id}/tables", response_model=TableList)
 async def get_tables(
     hypothesis_id: str,
@@ -795,13 +864,14 @@ async def get_tables(
 ) -> TableList:
     """Get list of all tables in the database."""
     db_path = get_db_path(workspace_path, hypothesis_id, experiment_id)
-    
+
     # Inspection usually requires standard SQLAlchemy inspection, easier with async engine
     async for session in get_db_session(db_path):
         # We can run an inspection on the engine connection
         def get_all_tables(sync_session):
-             # sync_session is a sqlalchemy.orm.Session
+            # sync_session is a sqlalchemy.orm.Session
             from sqlalchemy import inspect
+
             inspector = inspect(sync_session.connection())
             return inspector.get_table_names()
 
@@ -809,7 +879,9 @@ async def get_tables(
         return TableList(tables=tables)
 
 
-@router.get("/{hypothesis_id}/{experiment_id}/tables/{table_name}", response_model=TableContent)
+@router.get(
+    "/{hypothesis_id}/{experiment_id}/tables/{table_name}", response_model=TableContent
+)
 async def get_table_content(
     hypothesis_id: str,
     experiment_id: str,
@@ -820,25 +892,25 @@ async def get_table_content(
 ) -> TableContent:
     """Get content of a specific table."""
     db_path = get_db_path(workspace_path, hypothesis_id, experiment_id)
-    
+
     async for session in get_db_session(db_path):
         # Use simple text SQL for dynamic table content to avoid schema reflection overhead/complexity
         # Get columns
-        # Use PRAGMA or just select * limit 0? 
+        # Use PRAGMA or just select * limit 0?
         # Using raw sql is easiest here for generic table
-        
+
         offset = (page - 1) * page_size
-        
+
         # Get total count
         count_sql = f"SELECT COUNT(*) FROM {table_name}"
         total_result = await session.execute(text(count_sql))
         total = total_result.scalar() or 0
-        
+
         # Get data
         data_sql = f"SELECT * FROM {table_name} LIMIT {page_size} OFFSET {offset}"
         result = await session.execute(text(data_sql))
-        
+
         columns = list(result.keys())
         rows = [dict(row._mapping) for row in result.all()]
-        
+
         return TableContent(columns=columns, rows=rows, total=total)

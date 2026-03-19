@@ -104,7 +104,37 @@
 
    await society.close()
 
-运行实验
+使用 CLI 运行实验
+---------
+
+AgentSociety 2 提供了一个强大的 CLI 用于运行实验。
+
+**前台运行（调试）:**
+
+.. code-block:: bash
+
+   python -m agentsociety2.society.cli \
+       --config my_experiment/init/init_config.json \
+       --steps my_experiment/init/steps.yaml \
+       --run-dir my_experiment/run \
+       --log-level DEBUG
+
+**后台运行（生产）:**
+
+.. code-block:: bash
+
+   python -m agentsociety2.society.cli \
+       --config my_experiment/init/init_config.json \
+       --steps my_experiment/init/steps.yaml \
+       --run-dir my_experiment/run \
+       --log-level INFO \
+       --log-file my_experiment/run/output.log &
+
+**重要**: 后台运行时必须指定 ``--log-file`` 参数。
+
+更多详情请参见 :doc:`cli`。
+
+运行实验（代码方式）
 ---------
 
 下面是一个使用 AgentSociety 的多智能体完整实验示例：

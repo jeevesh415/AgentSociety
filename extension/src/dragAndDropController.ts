@@ -9,6 +9,12 @@
  * - 大文件警告（100MB阈值）
  * - 进度显示
  * - 覆盖策略确认（含取消选项）
+ *
+ * 关联文件：
+ * - @extension/src/extension.ts - 主入口，将DragAndDropController注册到TreeView
+ * - @extension/src/projectStructureProvider.ts - 树视图数据提供者
+ * - @extension/src/paperWatcher.ts - 文件上传后触发解析
+ * - @extension/src/parseModeManager.ts - 解析模式管理
  */
 
 import * as vscode from 'vscode';
@@ -254,8 +260,8 @@ export class ProjectDragAndDropController implements vscode.TreeDragAndDropContr
         cancelLabel
       );
 
-      if (response === overwriteLabel) return 'overwriteAll';
-      if (response === skipLabel) return 'skipAll';
+      if (response === overwriteLabel) {return 'overwriteAll';}
+      if (response === skipLabel) {return 'skipAll';}
       return 'cancel';
     }
 
@@ -278,9 +284,9 @@ export class ProjectDragAndDropController implements vscode.TreeDragAndDropContr
         cancelLabel
       );
 
-      if (response === overwriteAllLabel) return 'overwriteAll';
-      if (response === skipAllLabel) return 'skipAll';
-      if (response === askEachLabel) return 'askEach';
+      if (response === overwriteAllLabel) {return 'overwriteAll';}
+      if (response === skipAllLabel) {return 'skipAll';}
+      if (response === askEachLabel) {return 'askEach';}
       return 'cancel';
     }
 
@@ -447,9 +453,9 @@ export class ProjectDragAndDropController implements vscode.TreeDragAndDropContr
       );
     } else if (successCount > 0 || failCount > 0 || skipCount > 0) {
       const parts: string[] = [];
-      if (successCount > 0) parts.push(localize('dragDrop.successCount', String(successCount)));
-      if (skipCount > 0) parts.push(localize('dragDrop.skipCount', String(skipCount)));
-      if (failCount > 0) parts.push(localize('dragDrop.failCount', String(failCount)));
+      if (successCount > 0) {parts.push(localize('dragDrop.successCount', String(successCount)));}
+      if (skipCount > 0) {parts.push(localize('dragDrop.skipCount', String(skipCount)));}
+      if (failCount > 0) {parts.push(localize('dragDrop.failCount', String(failCount)));}
 
       const message = localize('dragDrop.partialSuccess', parts.join('，'));
       if (failCount > 0) {

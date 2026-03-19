@@ -15,12 +15,13 @@ from agentsociety2.designer.exp_designer import (
     ExperimentDesign,
 )
 from agentsociety2.logger import get_logger
-from agentsociety2.mcp import (
+from agentsociety2.registry import (
     AgentInitConfig,
     CreateInstanceRequest,
     EnvModuleInitConfig,
+    get_registered_agent_modules,
+    get_registered_env_modules,
 )
-from agentsociety2.mcp.registry import REGISTERED_AGENT_MODULES, REGISTERED_ENV_MODULES
 from mcp import ClientSession
 from mcp.client.streamable_http import streamablehttp_client
 from pydantic import BaseModel, Field
@@ -94,7 +95,7 @@ class ConfigBuilder:
             ValueError: 当模块类型不在注册表中，或没有提供任何模块时
         """
         modules = []
-        reg_types = [mt for mt, _ in REGISTERED_ENV_MODULES]
+        reg_types = [mt for mt, _ in get_registered_env_modules()]
 
         for mod_type in env_types:
             if mod_type not in reg_types:
@@ -170,7 +171,7 @@ class ConfigBuilder:
         Returns:
             Agent配置列表
         """
-        registered_types = [at for at, _ in REGISTERED_AGENT_MODULES]
+        registered_types = [at for at, _ in get_registered_agent_modules()]
 
         if len(agent_types) != 1:
             raise ValueError(

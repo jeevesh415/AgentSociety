@@ -3,7 +3,6 @@ const path = require('path');
 module.exports = {
   mode: 'development',
   entry: {
-    chat: './src/webview/chat/index.tsx',
     simSettings: './src/webview/simSettings/index.tsx',
     prefillParams: './src/webview/prefillParams/index.tsx',
     replay: './src/webview/replay/index.tsx',

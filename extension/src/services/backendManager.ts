@@ -3,6 +3,15 @@
  *
  * 负责启动、停止和管理 FastAPI 后端服务进程。
  * 支持自动启动、健康检查、进程状态管理和日志输出。
+ *
+ * 关联文件：
+ * - @extension/src/extension.ts - 主入口，创建并管理BackendManager实例
+ * - @extension/src/envManager.ts - 读取.env配置（Python路径、端口等）
+ * - @extension/src/portUtils.ts - 动态端口分配工具
+ *
+ * 后端启动：
+ * - @packages/agentsociety2/agentsociety2/backend/run.py - Python启动脚本
+ * - @packages/agentsociety2/agentsociety2/backend/app.py - FastAPI应用
  */
 
 import * as vscode from 'vscode';
@@ -10,6 +19,8 @@ import * as path from 'path';
 import * as fs from 'fs';
 import { spawn, ChildProcess, execSync } from 'child_process';
 import { localize } from '../i18n';
+import { EnvManager } from '../envManager';
+import { findAvailablePort, isPortAvailable } from '../portUtils';
 
 export interface BackendStatus {
   isRunning: boolean;
@@ -33,6 +44,7 @@ export class BackendManager {
   private context: vscode.ExtensionContext;
   private healthCheckInterval: NodeJS.Timeout | null = null;
   private isStarting = false;
+  private allocatedPort: number | null = null; // Track dynamically allocated port
 
   constructor(context: vscode.ExtensionContext) {
     this.context = context;
@@ -45,23 +57,9 @@ export class BackendManager {
     this.statusBarItem.tooltip = localize('backendManager.statusBar.tooltip');
     this.config = this.loadConfig();
 
-    // 监听配置变化
-    context.subscriptions.push(
-      vscode.workspace.onDidChangeConfiguration((e) => {
-        if (
-          e.affectsConfiguration('aiSocialScientist.backend') ||
-          e.affectsConfiguration('aiSocialScientist.env')
-        ) {
-          this.config = this.loadConfig();
-          this.log('Configuration updated');
-          // 如果服务正在运行，需要重启以应用新配置
-          if (this.process) {
-            this.log('Configuration changed, restarting backend...');
-            this.restart();
-          }
-        }
-      })
-    );
+    // 注意：不再监听 .env 文件变化来自动重启后端
+    // 这是因为写入端口到 .env 会触发变化，导致死循环重启
+    // 如需重启，用户应手动执行重启命令
 
     // 监听工作区文件夹变化（工作区切换时重新加载配置）
     context.subscriptions.push(
@@ -78,6 +76,75 @@ export class BackendManager {
 
     context.subscriptions.push(this.statusBarItem);
     this.updateStatusBar('stopped');
+
+    // 检查并清理可能存在的遗留后端进程
+    this.checkAndCleanupOrphanedProcess();
+  }
+
+  /**
+   * 检查并清理孤立的后端进程
+   * 如果.env中记录的PID对应的进程不存在，则清理记录
+   */
+  private async checkAndCleanupOrphanedProcess(): Promise<void> {
+    const workspaceFolder = vscode.workspace.workspaceFolders?.[0];
+    if (!workspaceFolder) {
+      return;
+    }
+
+    const envPath = path.join(workspaceFolder.uri.fsPath, '.env');
+    if (!fs.existsSync(envPath)) {
+      return;
+    }
+
+    const content = fs.readFileSync(envPath, 'utf-8');
+    const lines = content.split('\n');
+
+    for (const line of lines) {
+      const trimmed = line.trim();
+      if (trimmed.startsWith('BACKEND_PID=')) {
+        const match = trimmed.match(/^BACKEND_PID=(\d+)/);
+        if (match) {
+          const pid = parseInt(match[1], 10);
+          try {
+            // 检查进程是否存在
+            process.kill(pid, 0);
+            // 进程存在，尝试进行健康检查
+            const envManager = new EnvManager();
+            const envConfig = envManager.readEnv();
+            const host = envConfig.backendHost || '127.0.0.1';
+            const port = envConfig.backendPort || 8001;
+            const backendUrl = `http://${host}:${port}`;
+
+            try {
+              const response = await fetch(`${backendUrl}/health`, {
+                method: 'GET',
+                signal: AbortSignal.timeout(3000),
+              });
+              if (response.ok) {
+                // 后端仍在运行，保留PID记录
+                this.log(`Existing backend process found (PID: ${pid}, Port: ${port})`);
+                this.allocatedPort = port;
+                this.updateStatusBar('running');
+                this.startHealthCheck();
+              } else {
+                // 健康检查失败，清理记录
+                this.log(`Backend process (PID: ${pid}) exists but health check failed, cleaning up...`);
+                this.cleanupBackendEnv();
+              }
+            } catch {
+              // 无法连接，清理记录
+              this.log(`Cannot connect to backend (PID: ${pid}), cleaning up...`);
+              this.cleanupBackendEnv();
+            }
+          } catch {
+            // 进程不存在，清理记录
+            this.log(`Orphaned backend PID ${pid} found, cleaning up...`);
+            this.cleanupBackendEnv();
+          }
+        }
+        break;
+      }
+    }
   }
 
   private log(message: string, level: 'info' | 'error' | 'warn' = 'info'): void {
@@ -87,39 +154,33 @@ export class BackendManager {
   }
 
   /**
-   * 显示配置错误消息，并提供打开设置的选项
+   * 显示配置错误消息，并提供打开 .env 文件的选项
    */
   private async showConfigError(message: string): Promise<void> {
-    const openSettingsLabel = localize('backendManager.openSettings');
-    const result = await vscode.window.showErrorMessage(message, openSettingsLabel);
-    if (result === openSettingsLabel) {
-      // 打开设置页面并过滤到 aiSocialScientist 配置
-      await vscode.commands.executeCommand('workbench.action.openSettings', '@aiSocialScientist');
+    const openEnvLabel = 'Open .env file';
+    const result = await vscode.window.showErrorMessage(message, openEnvLabel);
+    if (result === openEnvLabel) {
+      // 打开 .env 文件
+      const workspaceFolder = vscode.workspace.workspaceFolders?.[0];
+      if (workspaceFolder) {
+        const envPath = vscode.Uri.file(path.join(workspaceFolder.uri.fsPath, '.env'));
+        await vscode.commands.executeCommand('vscode.open', envPath);
+      }
     }
   }
 
   /**
    * 加载配置并映射为环境变量
+   *
+   * 仅从 .env 文件加载配置
    */
   private loadConfig(): BackendConfig {
-    const config = vscode.workspace.getConfiguration('aiSocialScientist');
-    const backendConfig = config.get('backend', {}) as any;
-    const envConfig = config.get('env', {}) as any;
-
-    // 检测 Python 路径
-    let pythonPath = backendConfig?.pythonPath || '';
-    if (!pythonPath) {
-      // 尝试检测 python3 或 python
-      pythonPath = this.detectPythonPath();
-    }
-
-    // 确定工作目录 - 始终使用工作区相对路径
     const workspaceFolder = vscode.workspace.workspaceFolders?.[0];
     if (!workspaceFolder) {
       // 没有工作区时返回一个默认配置，不抛出错误
       this.log('No workspace folder found, using default configuration');
       return {
-        pythonPath,
+        pythonPath: this.detectPythonPath(),
         workingDirectory: '',
         autoStart: false,  // 没有工作区时不自动启动
         env: {}
@@ -127,13 +188,21 @@ export class BackendManager {
     }
     const workingDirectory = workspaceFolder.uri.fsPath;
 
+    // 从 .env 文件加载配置
+    const envManager = new EnvManager();
+    const envConfig = envManager.readEnv();
+
+    // 检测 Python 路径
+    const pythonPath = envConfig.pythonPath || this.detectPythonPath();
+
     // 映射环境变量
     const env: Record<string, string> = {};
 
     // 后端服务配置
-    if (envConfig?.backendHost) env.BACKEND_HOST = envConfig.backendHost;
-    if (envConfig?.backendPort) env.BACKEND_PORT = String(envConfig.backendPort);
-    if (envConfig?.backendLogLevel) env.BACKEND_LOG_LEVEL = envConfig.backendLogLevel;
+    env.BACKEND_HOST = envConfig.backendHost || '127.0.0.1';
+    env.BACKEND_PORT = String(envConfig.backendPort ?? 8001);
+    env.BACKEND_LOG_LEVEL = envConfig.backendLogLevel || 'info';
+    env.PYTHON_PATH = envConfig.pythonPath || '';
 
     // 基础配置 - 始终使用工作区相对路径
     // AGENTSOCIETY_HOME_DIR 相对于工作区根目录
@@ -142,39 +211,40 @@ export class BackendManager {
     env.WORKSPACE_PATH = workspaceFolder.uri.fsPath;
 
     // LLM 配置
-    if (envConfig?.llmApiKey) env.AGENTSOCIETY_LLM_API_KEY = envConfig.llmApiKey;
-    if (envConfig?.llmApiBase) env.AGENTSOCIETY_LLM_API_BASE = envConfig.llmApiBase;
-    if (envConfig?.llmModel) env.AGENTSOCIETY_LLM_MODEL = envConfig.llmModel;
+    if (envConfig.llmApiKey) env.AGENTSOCIETY_LLM_API_KEY = envConfig.llmApiKey;
+    if (envConfig.llmApiBase) env.AGENTSOCIETY_LLM_API_BASE = envConfig.llmApiBase;
+    if (envConfig.llmModel) env.AGENTSOCIETY_LLM_MODEL = envConfig.llmModel;
 
     // Coder LLM 配置
-    if (envConfig?.coderLlmApiKey) env.AGENTSOCIETY_CODER_LLM_API_KEY = envConfig.coderLlmApiKey;
-    if (envConfig?.coderLlmApiBase) env.AGENTSOCIETY_CODER_LLM_API_BASE = envConfig.coderLlmApiBase;
-    if (envConfig?.coderLlmModel) env.AGENTSOCIETY_CODER_LLM_MODEL = envConfig.coderLlmModel;
+    if (envConfig.coderLlmApiKey) env.AGENTSOCIETY_CODER_LLM_API_KEY = envConfig.coderLlmApiKey;
+    if (envConfig.coderLlmApiBase) env.AGENTSOCIETY_CODER_LLM_API_BASE = envConfig.coderLlmApiBase;
+    if (envConfig.coderLlmModel) env.AGENTSOCIETY_CODER_LLM_MODEL = envConfig.coderLlmModel;
 
     // Nano LLM 配置
-    if (envConfig?.nanoLlmApiKey) env.AGENTSOCIETY_NANO_LLM_API_KEY = envConfig.nanoLlmApiKey;
-    if (envConfig?.nanoLlmApiBase) env.AGENTSOCIETY_NANO_LLM_API_BASE = envConfig.nanoLlmApiBase;
-    if (envConfig?.nanoLlmModel) env.AGENTSOCIETY_NANO_LLM_MODEL = envConfig.nanoLlmModel;
+    if (envConfig.nanoLlmApiKey) env.AGENTSOCIETY_NANO_LLM_API_KEY = envConfig.nanoLlmApiKey;
+    if (envConfig.nanoLlmApiBase) env.AGENTSOCIETY_NANO_LLM_API_BASE = envConfig.nanoLlmApiBase;
+    if (envConfig.nanoLlmModel) env.AGENTSOCIETY_NANO_LLM_MODEL = envConfig.nanoLlmModel;
 
     // Embedding 配置
-    if (envConfig?.embeddingApiKey) env.AGENTSOCIETY_EMBEDDING_API_KEY = envConfig.embeddingApiKey;
-    if (envConfig?.embeddingApiBase) env.AGENTSOCIETY_EMBEDDING_API_BASE = envConfig.embeddingApiBase;
-    if (envConfig?.embeddingModel) env.AGENTSOCIETY_EMBEDDING_MODEL = envConfig.embeddingModel;
-    if (envConfig?.embeddingDims) env.AGENTSOCIETY_EMBEDDING_DIMS = String(envConfig.embeddingDims);
+    if (envConfig.embeddingApiKey) env.AGENTSOCIETY_EMBEDDING_API_KEY = envConfig.embeddingApiKey;
+    if (envConfig.embeddingApiBase) env.AGENTSOCIETY_EMBEDDING_API_BASE = envConfig.embeddingApiBase;
+    if (envConfig.embeddingModel) env.AGENTSOCIETY_EMBEDDING_MODEL = envConfig.embeddingModel;
+    if (envConfig.embeddingDims) env.AGENTSOCIETY_EMBEDDING_DIMS = String(envConfig.embeddingDims);
 
     // Web Search 配置
-    if (envConfig?.webSearchApiUrl) env.WEB_SEARCH_API_URL = envConfig.webSearchApiUrl;
-    if (envConfig?.webSearchApiToken) env.WEB_SEARCH_API_TOKEN = envConfig.webSearchApiToken;
-    if (envConfig?.miroflowDefaultLlm) env.MIROFLOW_DEFAULT_LLM = envConfig.miroflowDefaultLlm;
-    if (envConfig?.miroflowDefaultAgent) env.MIROFLOW_DEFAULT_AGENT = envConfig.miroflowDefaultAgent;
+    if (envConfig.webSearchApiUrl) env.WEB_SEARCH_API_URL = envConfig.webSearchApiUrl;
+    if (envConfig.webSearchApiToken) env.WEB_SEARCH_API_TOKEN = envConfig.webSearchApiToken;
+    if (envConfig.miroflowDefaultLlm) env.MIROFLOW_DEFAULT_LLM = envConfig.miroflowDefaultLlm;
+    if (envConfig.miroflowDefaultAgent) env.MIROFLOW_DEFAULT_AGENT = envConfig.miroflowDefaultAgent;
 
     // EasyPaper (for generate_paper tool)
-    if (envConfig?.easypaperApiUrl) env.EASYPAPER_API_URL = envConfig.easypaperApiUrl;
+    if (envConfig.easypaperApiUrl) env.EASYPAPER_API_URL = envConfig.easypaperApiUrl;
+    if (envConfig.literatureSearchApiUrl) env.LITERATURE_SEARCH_API_URL = envConfig.literatureSearchApiUrl;
 
     return {
       pythonPath,
       workingDirectory,
-      autoStart: backendConfig?.autoStart !== false,
+      autoStart: true,  // 默认自动启动
       env,
     };
   }
@@ -253,8 +323,11 @@ export class BackendManager {
    * 健康检查
    */
   async healthCheck(): Promise<boolean> {
-    const config = vscode.workspace.getConfiguration('aiSocialScientist');
-    const backendUrl = config.get<string>('backendUrl', 'http://localhost:8001');
+    const envManager = new EnvManager();
+    const envConfig = envManager.readEnv();
+    const host = envConfig.backendHost || '127.0.0.1';
+    const port = envConfig.backendPort || 8001;
+    const backendUrl = `http://${host}:${port}`;
 
     try {
       const response = await fetch(`${backendUrl}/health`, {
@@ -287,7 +360,7 @@ export class BackendManager {
     try {
       // 验证 Python 路径
       if (!this.config.pythonPath) {
-        const errorMessage = localize('backendManager.configInsufficient') + ': Python path not found. Please set aiSocialScientist.backend.pythonPath';
+        const errorMessage = localize('backendManager.configInsufficient') + ': Python path not found. Please set PYTHON_PATH in .env file';
         this.log(errorMessage, 'error');
         this.isStarting = false;
         this.updateStatusBar('error');
@@ -307,7 +380,7 @@ export class BackendManager {
 
       // 验证必需的配置
       if (!this.config.env.AGENTSOCIETY_LLM_API_KEY) {
-        const errorMessage = localize('backendManager.configInsufficient') + ': LLM API key is required. Please set aiSocialScientist.env.llmApiKey';
+        const errorMessage = localize('backendManager.configInsufficient') + ': LLM API key is required. Please set AGENTSOCIETY_LLM_API_KEY in .env file';
         this.log(errorMessage, 'error');
         this.isStarting = false;
         this.updateStatusBar('error');
@@ -315,14 +388,24 @@ export class BackendManager {
         return false;
       }
 
+      // 分配动态端口
+      this.log('Allocating available port...');
+      const port = await this.allocatePort();
+      this.allocatedPort = port;
+      this.log(`Allocated port: ${port}`);
+
+      // 将端口写入.env文件
+      await this.writePortToEnv(port);
+
       this.log('Starting backend service...');
       this.log(`Python path: ${this.config.pythonPath}`);
       this.log(`Working directory: ${this.config.workingDirectory}`);
 
-      // 合并环境变量
+      // 合并环境变量，使用动态分配的端口
       const env = {
         ...process.env,
         ...this.config.env,
+        BACKEND_PORT: String(port),
       };
 
       // 启动后端进程
@@ -332,6 +415,11 @@ export class BackendManager {
         env,
         stdio: ['ignore', 'pipe', 'pipe'],
       });
+
+      // 将进程PID写入.env文件用于生命周期管理
+      if (this.process.pid) {
+        await this.writePidToEnv(this.process.pid);
+      }
 
       // 处理 stdout
       this.process.stdout?.on('data', (data: Buffer) => {
@@ -352,6 +440,11 @@ export class BackendManager {
         this.log(`Backend process exited with code ${code}, signal ${signal}`);
         this.process = null;
         this.isStarting = false;
+        this.allocatedPort = null;
+
+        // 清理.env文件中的PID和端口信息
+        this.cleanupBackendEnv();
+
         this.updateStatusBar('stopped');
 
         if (code !== 0 && code !== null) {
@@ -367,6 +460,11 @@ export class BackendManager {
         this.log(`Failed to start backend: ${error.message}`, 'error');
         this.process = null;
         this.isStarting = false;
+        this.allocatedPort = null;
+
+        // 清理.env文件中的PID和端口信息
+        this.cleanupBackendEnv();
+
         this.updateStatusBar('error');
 
         // 检查是否是配置相关的错误（如找不到 Python 可执行文件）
@@ -414,7 +512,11 @@ export class BackendManager {
     } catch (error: any) {
       this.log(`Failed to start backend: ${error.message}`, 'error');
       this.isStarting = false;
+      this.allocatedPort = null;
       this.updateStatusBar('error');
+
+      // 清理.env文件中的PID和端口信息
+      this.cleanupBackendEnv();
 
       // 检查是否是配置相关的错误
       const errorMessage = error.message || 'Unknown error';
@@ -422,7 +524,7 @@ export class BackendManager {
         errorMessage.includes('Python path') ||
         errorMessage.includes('LLM API key') ||
         errorMessage.includes('Working directory') ||
-        errorMessage.includes('aiSocialScientist');
+        errorMessage.includes('.env');
 
       if (isConfigError) {
         await this.showConfigError(`Failed to start backend service: ${errorMessage}`);
@@ -491,6 +593,11 @@ export class BackendManager {
     }
 
     this.process = null;
+    this.allocatedPort = null;
+
+    // 清理.env文件中的后端相关字段
+    this.cleanupBackendEnv();
+
     this.log('Backend service stopped');
   }
 
@@ -530,20 +637,175 @@ export class BackendManager {
   }
 
   /**
+   * 分配可用端口
+   * 首先检查.env文件中配置的端口是否可用，如果不可用则随机分配新端口
+   */
+  private async allocatePort(): Promise<number> {
+    const envManager = new EnvManager();
+    const envConfig = envManager.readEnv();
+    const configuredPort = envConfig.backendPort || 8001;
+
+    // 首先检查配置的端口是否可用
+    if (await isPortAvailable(configuredPort)) {
+      this.log(`Configured port ${configuredPort} is available`);
+      return configuredPort;
+    }
+
+    // 配置的端口不可用，查找可用端口
+    this.log(`Configured port ${configuredPort} is not available, finding alternative...`);
+    const newPort = await findAvailablePort();
+    this.log(`Found available port: ${newPort}`);
+    return newPort;
+  }
+
+  /**
+   * 将分配的端口写入.env文件
+   */
+  private async writePortToEnv(port: number): Promise<void> {
+    const envManager = new EnvManager();
+    envManager.writeEnv({ backendPort: port });
+    this.log(`Wrote port ${port} to .env file`);
+  }
+
+  /**
+   * 将后端进程PID写入.env文件用于生命周期追踪
+   */
+  private async writePidToEnv(pid: number): Promise<void> {
+    const workspaceFolder = vscode.workspace.workspaceFolders?.[0];
+    if (!workspaceFolder) {
+      return;
+    }
+
+    const envPath = path.join(workspaceFolder.uri.fsPath, '.env');
+
+    // 读取现有.env内容，移除末尾空行
+    let content = '';
+    if (fs.existsSync(envPath)) {
+      content = fs.readFileSync(envPath, 'utf-8').trimEnd();
+    }
+
+    // 添加或更新BACKEND_PID
+    const lines = content.split('\n');
+    let pidUpdated = false;
+    const newLines: string[] = [];
+
+    for (const line of lines) {
+      const trimmed = line.trim();
+      if (trimmed.startsWith('BACKEND_PID=')) {
+        newLines.push(`BACKEND_PID=${pid}`);
+        pidUpdated = true;
+      } else {
+        newLines.push(line);
+      }
+    }
+
+    if (!pidUpdated) {
+      newLines.push(`BACKEND_PID=${pid}`);
+    }
+
+    fs.writeFileSync(envPath, newLines.join('\n') + '\n', 'utf-8');
+    this.log(`Wrote PID ${pid} to .env file`);
+  }
+
+  /**
+   * 清理.env文件中的后端相关字段（PID和端口）
+   */
+  private cleanupBackendEnv(): void {
+    const workspaceFolder = vscode.workspace.workspaceFolders?.[0];
+    if (!workspaceFolder) {
+      return;
+    }
+
+    const envPath = path.join(workspaceFolder.uri.fsPath, '.env');
+    if (!fs.existsSync(envPath)) {
+      return;
+    }
+
+    // 移除末尾空行
+    const content = fs.readFileSync(envPath, 'utf-8').trimEnd();
+    const lines = content.split('\n');
+    const newLines: string[] = [];
+
+    for (const line of lines) {
+      const trimmed = line.trim();
+      // 移除BACKEND_PID行
+      if (trimmed.startsWith('BACKEND_PID=')) {
+        continue;
+      }
+      newLines.push(line);
+    }
+
+    // 只在有内容时写入，并添加末尾换行符
+    if (newLines.length > 0) {
+      fs.writeFileSync(envPath, newLines.join('\n') + '\n', 'utf-8');
+    } else {
+      fs.writeFileSync(envPath, '', 'utf-8');
+    }
+    this.log('Cleaned up backend fields from .env file');
+  }
+
+  /**
+   * 检查.env文件中的后端进程是否仍在运行
+   * 用于生命周期管理
+   */
+  async checkBackendProcessByEnv(): Promise<boolean> {
+    const workspaceFolder = vscode.workspace.workspaceFolders?.[0];
+    if (!workspaceFolder) {
+      return false;
+    }
+
+    const envPath = path.join(workspaceFolder.uri.fsPath, '.env');
+    if (!fs.existsSync(envPath)) {
+      return false;
+    }
+
+    const content = fs.readFileSync(envPath, 'utf-8');
+    const lines = content.split('\n');
+
+    for (const line of lines) {
+      const trimmed = line.trim();
+      if (trimmed.startsWith('BACKEND_PID=')) {
+        const match = trimmed.match(/^BACKEND_PID=(\d+)/);
+        if (match) {
+          const pid = parseInt(match[1], 10);
+          try {
+            // 检查进程是否存在
+            process.kill(pid, 0);
+            this.log(`Backend process with PID ${pid} is still running`);
+            return true;
+          } catch {
+            this.log(`Backend process with PID ${pid} is no longer running`);
+            return false;
+          }
+        }
+      }
+    }
+
+    return false;
+  }
+
+  /**
    * 获取后端状态
    */
   async getStatus(): Promise<BackendStatus> {
     const isRunning = await this.isRunning();
-    const config = vscode.workspace.getConfiguration('aiSocialScientist');
-    const backendUrl = config.get<string>('backendUrl', 'http://localhost:8001');
-    const portMatch = backendUrl.match(/:(\d+)/);
-    const port = portMatch ? parseInt(portMatch[1], 10) : undefined;
+    // 使用动态分配的端口，如果未分配则读取.env中的配置
+    const port = this.allocatedPort ?? await this.getPortFromEnv();
 
     return {
       isRunning,
       pid: this.process?.pid,
       port,
     };
+  }
+
+  /**
+   * 从.env文件读取端口
+   */
+  private async getPortFromEnv(): Promise<number> {
+    const envManager = new EnvManager();
+    const envConfig = envManager.readEnv();
+    return envConfig.backendPort || 8001;
   }
 
   /**

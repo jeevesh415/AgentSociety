@@ -18,10 +18,6 @@ from .config_builder import (
     load_design,
     build,
 )
-from .exp_executor import (
-    ExperimentExecutor,
-    ExperimentResult,
-)
 from .exp_pipeline import run_pipeline
 
 __all__ = [
@@ -37,9 +33,6 @@ __all__ = [
     "ExperimentConfig",
     "load_design",
     "build",
-    # 执行
-    "ExperimentExecutor",
-    "ExperimentResult",
     # 一键串联
     "run_pipeline",
 ]

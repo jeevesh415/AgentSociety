@@ -2,6 +2,14 @@
  * ReplayWebviewProvider - Simulation Replay Webview Provider
  *
  * Provides a webview for replaying and visualizing simulation data.
+ *
+ * 关联文件：
+ * - @extension/src/extension.ts - 主入口，注册命令 'aiSocialScientist.openReplay'
+ * - @extension/src/webview/replay/ - 前端React组件 (编译后为replay.js)
+ *
+ * 后端API：
+ * - @packages/agentsociety2/agentsociety2/backend/routers/replay.py - /api/v1/replay/*
+ * - @packages/agentsociety2/agentsociety2/backend/routers/experiments.py - /api/v1/experiments/*
  */
 
 import * as vscode from 'vscode';

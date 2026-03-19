@@ -4,6 +4,11 @@
  * 管理 PDF 文件上传后的自动解析模式，提供状态栏按钮切换
  * - 自动模式：上传 PDF 后自动使用 MinerU 解析
  * - 手动模式：上传 PDF 后提示用户是否解析
+ *
+ * 关联文件：
+ * - @extension/src/extension.ts - 主入口，创建ParseModeManager实例
+ * - @extension/src/paperWatcher.ts - 文件监听器，根据解析模式处理PDF
+ * - @extension/src/mineruParser.ts - MinerU本地解析器（备用）
  */
 
 import * as vscode from 'vscode';

@@ -13,6 +13,69 @@ AgentSociety 2 包含一个基于 SQLite 的存储系统，用于捕获：
 * **智能体对话**: 包含 LLM 输入/输出的对话历史
 * **自定义表**: 特定于模块的数据
 
+存储架构
+~~~~~~~~~~~~~~~~~
+
+.. graphviz::
+
+   digraph storage_architecture {
+       rankdir=TB;
+       node [shape=box, style=rounded];
+
+       subgraph cluster_db {
+           label = "SQLite 数据库 (experiment.db)";
+           style=filled;
+           color=lightblue;
+
+           Profile [label="agent_profile\n静态配置"];
+           Status [label="agent_status\n动态状态"];
+           Dialog [label="agent_dialog\n对话历史"];
+           Custom [label="自定义表\n模块数据"];
+       }
+
+       ReplayWriter [label="ReplayWriter"];
+       Agent [label="智能体"];
+       Env [label="环境模块"];
+
+       Agent --> ReplayWriter;
+       Env --> ReplayWriter;
+       ReplayWriter --> Profile;
+       ReplayWriter --> Status;
+       ReplayWriter --> Dialog;
+       ReplayWriter --> Custom;
+
+       Profile [shape=folder, style=filled];
+       Status [shape=folder, style=filled];
+       Dialog [shape=folder, style=filled];
+       Custom [shape=folder, style=filled];
+   }
+
+数据写入流程
+~~~~~~~~~~~~~~~~~
+
+.. graphviz::
+
+   digraph write_flow {
+       rankdir=LR;
+       node [shape=box, style=rounded];
+
+       Agent [label="智能体行动"];
+       ReplayWriter [label="ReplayWriter.write()"];
+       Validator [label="数据验证"];
+       SQLite [label="SQLite 写入"];
+       Disk [(磁盘存储)];
+
+       Agent -> ReplayWriter;
+       ReplayWriter -> Validator;
+       Validator -> SQLite;
+       SQLite -> Disk;
+   }
+
+* **智能体配置文件**: 静态特征和个性特征
+* **智能体状态**: 模拟期间更新的动态状态
+* **智能体对话**: 包含 LLM 输入/输出的对话历史
+* **自定义表**: 特定于模块的数据
+
 基本使用
 -----------
 

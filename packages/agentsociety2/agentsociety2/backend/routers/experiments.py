@@ -1,10 +1,20 @@
-"""实验数据API
+"""
+实验数据API
 
 提供实验结果数据的查询接口，支持：
 - 获取实验时间线
 - 获取agent状态
 - 获取实验指标
 - 兼容V1前端API格式
+
+关联文件：
+- @extension/src/replayWebviewProvider.ts - 前端Replay Webview（调用此API）
+
+API端点：
+- GET /api/v1/experiments/{hypothesis_id}/{experiment_id}/info - 实验信息
+- GET /api/v1/experiments/{hypothesis_id}/{experiment_id}/timeline - 时间线
+- GET /api/v1/experiments/{hypothesis_id}/{experiment_id}/agents/* - Agent数据
+- GET /api/v1/experiments/{hypothesis_id}/{experiment_id}/state - 最新状态
 """
 
 from __future__ import annotations
@@ -32,6 +42,7 @@ router = APIRouter(prefix="/experiments", tags=["experiments"])
 
 class TimePoint(BaseModel):
     """时间点"""
+
     day: int
     t: int  # 当天秒数 (0-86400)
     timestamp: str
@@ -39,6 +50,7 @@ class TimePoint(BaseModel):
 
 class AgentProfile(BaseModel):
     """Agent配置文件"""
+
     id: int
     name: Optional[str] = None
     profile: Optional[Dict[str, Any]] = None
@@ -46,6 +58,7 @@ class AgentProfile(BaseModel):
 
 class AgentStatus(BaseModel):
     """Agent状态"""
+
     id: int
     day: int
     t: int
@@ -58,6 +71,7 @@ class AgentStatus(BaseModel):
 
 class ExperimentInfo(BaseModel):
     """实验信息"""
+
     experiment_id: str
     hypothesis_id: str
     status: str
@@ -69,6 +83,7 @@ class ExperimentInfo(BaseModel):
 
 class StepExecution(BaseModel):
     """步骤执行记录"""
+
     id: int
     step_index: int
     step_type: str
@@ -90,7 +105,9 @@ def _get_experiment_path(
     experiment_id: str,
 ) -> Path:
     """获取实验目录路径"""
-    return workspace_path / f"hypothesis_{hypothesis_id}" / f"experiment_{experiment_id}"
+    return (
+        workspace_path / f"hypothesis_{hypothesis_id}" / f"experiment_{experiment_id}"
+    )
 
 
 def _get_db_connection(db_path: Path) -> sqlite3.Connection:
@@ -226,11 +243,13 @@ async def get_timeline(
                     first_time = current_time
 
                 day, t = _datetime_to_day_t(current_time, first_time)
-                timeline.append(TimePoint(
-                    day=day,
-                    t=t,
-                    timestamp=current_time_str,
-                ))
+                timeline.append(
+                    TimePoint(
+                        day=day,
+                        t=t,
+                        timestamp=current_time_str,
+                    )
+                )
             except ValueError:
                 continue
 
@@ -271,11 +290,13 @@ async def get_agents(
         dump_data = agent_data.get("dump", {})
         profile = dump_data.get("profile", {})
 
-        agents.append(AgentProfile(
-            id=agent_data.get("id", 0),
-            name=profile.get("name", f"Agent_{agent_data.get('id', 0)}"),
-            profile=profile,
-        ))
+        agents.append(
+            AgentProfile(
+                id=agent_data.get("id", 0),
+                name=profile.get("name", f"Agent_{agent_data.get('id', 0)}"),
+                profile=profile,
+            )
+        )
 
     return agents
 
@@ -339,16 +360,18 @@ async def get_agent_status(
                     lng = position.get("lng") or position.get("longitude")
                     lat = position.get("lat") or position.get("latitude")
 
-                    statuses.append(AgentStatus(
-                        id=agent_id,
-                        day=current_day,
-                        t=current_t,
-                        lng=lng,
-                        lat=lat,
-                        parent_id=dump_data.get("parent_id"),
-                        action=dump_data.get("current_action"),
-                        status=dump_data.get("status", {}),
-                    ))
+                    statuses.append(
+                        AgentStatus(
+                            id=agent_id,
+                            day=current_day,
+                            t=current_t,
+                            lng=lng,
+                            lat=lat,
+                            parent_id=dump_data.get("parent_id"),
+                            action=dump_data.get("current_action"),
+                            status=dump_data.get("status", {}),
+                        )
+                    )
                     break
 
         except ValueError:
@@ -380,23 +403,34 @@ async def get_step_executions(
 
     steps = []
     for row in cursor.fetchall():
-        step_id, step_index, step_type, step_config_json, start_time, end_time, success, result = row
+        (
+            step_id,
+            step_index,
+            step_type,
+            step_config_json,
+            start_time,
+            end_time,
+            success,
+            result,
+        ) = row
 
         try:
             step_config = json.loads(step_config_json)
         except json.JSONDecodeError:
             step_config = {}
 
-        steps.append(StepExecution(
-            id=step_id,
-            step_index=step_index,
-            step_type=step_type,
-            step_config=step_config,
-            start_time=start_time,
-            end_time=end_time,
-            success=bool(success),
-            result=result,
-        ))
+        steps.append(
+            StepExecution(
+                id=step_id,
+                step_index=step_index,
+                step_type=step_type,
+                step_config=step_config,
+                start_time=start_time,
+                end_time=end_time,
+                success=bool(success),
+                result=result,
+            )
+        )
 
     conn.close()
     return steps
@@ -453,11 +487,13 @@ async def list_artifacts(
 
     artifacts = []
     for file_path in sorted(artifacts_dir.glob("*.md")):
-        artifacts.append({
-            "name": file_path.name,
-            "path": str(file_path),
-            "type": "ask" if file_path.name.startswith("ask_") else "intervene",
-        })
+        artifacts.append(
+            {
+                "name": file_path.name,
+                "path": str(file_path),
+                "type": "ask" if file_path.name.startswith("ask_") else "intervene",
+            }
+        )
 
     return artifacts
 

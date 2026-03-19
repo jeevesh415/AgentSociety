@@ -16,8 +16,8 @@ from pydantic import BaseModel, Field
 import json_repair
 
 from agentsociety2.logger import get_logger
-from agentsociety2.designer.agent_processing import AgentFileProcessor, AgentSelector
-from agentsociety2.designer.literature_search import (
+from agentsociety2.skills.agent import AgentFileProcessor, AgentSelector
+from agentsociety2.skills.literature import (
     search_literature,
     filter_relevant_literature,
     format_literature_info,
@@ -779,13 +779,13 @@ class ExperimentDesigner:
 
     def _get_modules_info(self) -> tuple[Dict[str, str], Dict[str, str]]:
         """获取环境模块和 Agent 类型的信息"""
-        from agentsociety2.mcp.registry import (
-            REGISTERED_ENV_MODULES,
-            REGISTERED_AGENT_MODULES,
+        from agentsociety2.registry import (
+            get_registered_env_modules,
+            get_registered_agent_modules,
         )
 
         env_modules_info = {}
-        for module_type, module_class in REGISTERED_ENV_MODULES:
+        for module_type, module_class in get_registered_env_modules():
             try:
                 env_modules_info[module_type] = module_class.mcp_description()
             except Exception as e:
@@ -793,7 +793,7 @@ class ExperimentDesigner:
                 env_modules_info[module_type] = f"Module type: {module_type}, Class: {module_class.__name__}"
 
         agents_info = {}
-        for agent_type, agent_class in REGISTERED_AGENT_MODULES:
+        for agent_type, agent_class in get_registered_agent_modules():
             try:
                 agents_info[agent_type] = agent_class.mcp_description()
             except Exception as e:

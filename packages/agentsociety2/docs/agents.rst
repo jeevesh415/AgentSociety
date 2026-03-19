@@ -166,7 +166,7 @@ step() 方法
 
 .. code-block:: python
 
-   # Called by AgentSociety.run() or AgentSociety.run_to()
+   # Called by AgentSociety.run()
    # tick = duration in seconds, t = current simulation time
    action_description = await agent.step(tick=3600, t=datetime.now())
 

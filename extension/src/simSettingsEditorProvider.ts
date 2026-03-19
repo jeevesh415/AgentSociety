@@ -1,15 +1,15 @@
 /**
  * SIM Settings 编辑器提供者 (SIM Settings Editor Provider)
- * 
+ *
  * 这个类负责创建和管理VSCode中的SIM_SETTINGS.json文件的自定义编辑器。
- * 
+ *
  * VSCode插件开发核心概念：
  * 1. CustomTextEditorProvider: VSCode提供的接口，用于为特定文件类型创建自定义编辑器
  * 2. Webview: VSCode中用于显示自定义HTML内容的容器，类似于一个内嵌的浏览器
  * 3. WebviewPanel: Webview的容器面板，可以显示在编辑器的不同位置
  * 4. 消息传递: Webview和扩展主进程之间通过postMessage/onDidReceiveMessage进行双向通信
  * 5. Disposable: VSCode的资源管理机制，所有需要清理的资源都应该实现Disposable接口
- * 
+ *
  * 工作流程：
  * 1. 用户打开SIM_SETTINGS.json文件 → resolveCustomTextEditor() 创建自定义编辑器
  * 2. 页面加载 → React组件挂载并发送requestData命令请求数据
@@ -18,6 +18,15 @@
  * 5. 用户修改设置 → Webview通过postMessage发送save命令
  * 6. 保存文件 → 扩展更新文档内容
  * 7. 文件变化 → 扩展监听文档变化并更新Webview
+ *
+ * 关联文件：
+ * - @extension/src/extension.ts - 主入口，注册CustomEditorProvider
+ * - @extension/src/apiClient.ts - 调用后端API获取可用的类和参数
+ * - @extension/src/webview/simSettings/ - 前端React组件 (编译后为simSettings.js)
+ *
+ * 后端API：
+ * - @packages/agentsociety2/agentsociety2/backend/routers/prefill_params.py - /api/v1/prefill-params
+ * - @packages/agentsociety2/agentsociety2/backend/routers/modules.py - /api/v1/modules
  */
 
 import * as vscode from 'vscode';

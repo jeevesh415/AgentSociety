@@ -122,6 +122,18 @@ AgentSociety 2 需要 LLM API 凭证。设置以下环境变量：
    AGENTSOCIETY_EMBEDDING_DIMS=1536
    AGENTSOCIETY_HOME_DIR=./agentsociety_data
 
+**遥测设置**
+
+AgentSociety 2 会自动禁用所有遥测服务以防止外部连接：
+
+.. code-block:: bash
+
+   # 以下设置由框架自动配置，无需手动设置
+   MEM0_TELEMETRY=False
+   ANONYMIZED_TELEMETRY=False
+
+这些设置禁用了 mem0 和 ChromaDB 的遥测功能，防止连接到 Posthog/Facebook 等外部服务。
+
 支持的 LLM 提供商
 ------------------------
 

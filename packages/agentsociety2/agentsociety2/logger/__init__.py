@@ -40,22 +40,36 @@ class ColoredFormatter(logging.Formatter):
         logging.CRITICAL: "\x1b[91;1m",  # 粗体亮红，最高优先级
     }
     _reset = "\x1b[0m"
-    _fmt = "[%(asctime)s] %(levelname)-7s %(message)s"
+
+    def __init__(self, fmt: str | None = None, datefmt: str | None = None):
+        """初始化 ColoredFormatter
+
+        Args:
+            fmt: 日志格式，默认为 "[%(asctime)s] %(levelname)-7s %(message)s"
+            datefmt: 时间格式，默认为 "%Y-%m-%d %H:%M:%S"
+        """
+        super().__init__(fmt=fmt or "[%(asctime)s] %(levelname)-7s %(message)s", datefmt=datefmt or "%Y-%m-%d %H:%M:%S")
 
     def format(self, record: logging.LogRecord) -> str:
+        # 保存原始消息
         orig_msg, orig_args = record.msg, record.args
+        # 缩短消息
         msg = _shorten(record.getMessage(), record.levelno)
         record.msg, record.args = msg, ()
 
+        # 先使用父类方法格式化（包含时间）
+        formatted = super().format(record)
+
+        # 添加颜色
         use_color = hasattr(sys.stdout, "isatty") and sys.stdout.isatty()
-        fmt = (
-            (self._colors.get(record.levelno, "") + self._fmt + self._reset)
-            if use_color
-            else self._fmt
-        )
-        out = logging.Formatter(fmt, datefmt="%H:%M:%S").format(record)
+        if use_color:
+            color = self._colors.get(record.levelno, "")
+            # 为整行添加颜色（时间、级别、消息）
+            formatted = color + formatted + self._reset
+
+        # 恢复原始消息
         record.msg, record.args = orig_msg, orig_args
-        return out
+        return formatted
 
 
 def get_logger():
@@ -72,6 +86,36 @@ def get_logger():
         handler.setFormatter(ColoredFormatter())
         logger.addHandler(handler)
     return logger
+
+
+def add_file_handler(log_file: str, level: int = logging.INFO) -> None:
+    """添加文件日志处理器
+
+    Args:
+        log_file: 日志文件路径
+        level: 日志级别，默认为 INFO
+    """
+    logger = logging.getLogger("agentsociety")
+
+    # 检查是否已经有相同文件的文件处理器
+    for handler in logger.handlers:
+        if isinstance(handler, logging.FileHandler) and handler.baseFilename == os.path.abspath(log_file):
+            return  # 已存在，不重复添加
+
+    # 创建日志目录（如果不存在）
+    log_dir = os.path.dirname(log_file)
+    if log_dir:
+        os.makedirs(log_dir, exist_ok=True)
+
+    # 创建文件处理器（使用不带颜色的简单格式）
+    file_handler = logging.FileHandler(log_file, mode="a", encoding="utf-8")
+    file_handler.setLevel(level)
+    # 文件中使用简单格式，不带颜色
+    file_formatter = logging.Formatter(
+        "[%(asctime)s] %(levelname)-7s %(message)s", datefmt="%Y-%m-%d %H:%M:%S"
+    )
+    file_handler.setFormatter(file_formatter)
+    logger.addHandler(file_handler)
 
 
 def set_logger_level(level: str):

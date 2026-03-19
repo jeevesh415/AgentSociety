@@ -137,3 +137,17 @@ msgstr "And many more..."
 #: ../../installation.rst:137
 msgid "查看 `litellm 文档`_ 获取完整列表。"
 msgstr "See the `litellm documentation`_ for a complete list."
+
+#: ../../installation.rst:125
+msgid "**遥测设置**"
+msgstr "**Telemetry Settings**"
+
+#: ../../installation.rst:127
+msgid "AgentSociety 2 会自动禁用所有遥测服务以防止外部连接："
+msgstr "AgentSociety 2 automatically disables all telemetry services to prevent external connections:"
+
+#: ../../installation.rst:140
+msgid "这些设置禁用了 mem0 和 ChromaDB 的遥测功能，防止连接到 Posthog/Facebook 等外部服务。"
+msgstr ""
+"These settings disable telemetry for mem0 and ChromaDB, preventing connections to "
+"external services like Posthog/Facebook."

@@ -137,3 +137,7 @@ msgstr "**Query specific agents**: Ask specific agents for targeted responses"
 #: ../../interaction.rst:244
 msgid "**适时干预**: 在适当的模拟时间进行干预以获得现实效果"
 msgstr "**Intervene at appropriate times**: Intervene at appropriate simulation times for realistic effects"
+
+#: ../../interaction.rst:57
+msgid "交互模式对比"
+msgstr "Interaction Mode Comparison"

@@ -87,6 +87,7 @@
   },
   "prefillParams": {
     "title": "Prefill Parameters",
+    "groupTitle": "Environment & Agents",
     "loading": "Loading prefill parameters...",
     "error": "Error",
     "refresh": "Refresh",
@@ -101,11 +102,19 @@
       "noPrefillParams": "This class does not have any prefill parameters configured.",
       "hasPrefill": "Has prefill parameters",
       "envModule": "Environment Module",
-      "agent": "Agent"
+      "agent": "Agent",
+      "builtin": "Built-in",
+      "custom": "Custom",
+      "test": "Test"
+    },
+    "test": {
+      "success": "Test Passed",
+      "failed": "Test Failed"
     },
     "errorMessages": {
       "loadFailed": "Failed to load data",
-      "noWorkspace": "No workspace folder found"
+      "noWorkspace": "No workspace folder found",
+      "backendDisconnected": "Backend service is not connected, please start the backend service first"
     }
   },
   "replay": {
@@ -181,6 +190,136 @@
       "mapIntegration": "Map Integration",
       "mapIntegrationHint": "For interactive map visualization with DeckGL and Mapbox, install the required dependencies:",
       "installHint": "npm install deck.gl react-map-gl mapbox-gl"
+    }
+  },
+  "configPage": {
+    "title": "AI Social Scientist Configuration Wizard",
+    "description": "Configure your environment step by step, each step can be saved individually",
+    "steps": {
+      "llm": {
+        "title": "LLM Configuration",
+        "description": "Configure Large Language Model API"
+      },
+      "backend": {
+        "title": "Backend Service",
+        "description": "Configure backend service address"
+      },
+      "coder": {
+        "title": "Code Generation LLM",
+        "description": "Dedicated model for code generation (optional)"
+      },
+      "advanced": {
+        "title": "Advanced Features",
+        "description": "Embedding, search, etc. (optional)"
+      },
+      "finish": {
+        "title": "Finish",
+        "description": "Complete configuration"
+      }
+    },
+    "noWorkspace": "No workspace detected",
+    "noWorkspaceHint": "Please open a workspace folder first (File > Open Folder)",
+    "save": "Save",
+    "validate": "Validate",
+    "validating": "Validating...",
+    "validationSuccess": "Validation Successful",
+    "validationFailed": "Validation Failed",
+    "startBackend": "Start Backend Service",
+    "previous": "Previous",
+    "next": "Next",
+    "llm": {
+      "apiKey": "LLM API Key",
+      "apiKeyRequired": "LLM API Key *",
+      "apiKeyRequiredHint": "For core functions like default chat, analysis, etc.",
+      "apiKeyPlaceholder": "sk-xxx or your API key",
+      "apiBase": "LLM API Base URL",
+      "apiBasePlaceholder": "https://cloud.infini-ai.com/maas/v1",
+      "modelName": "LLM Model Name",
+      "modelPlaceholder": "qwen3-next-80b-a3b-instruct"
+    },
+    "backend": {
+      "title": "Backend Service Configuration",
+      "hint": "Port will be auto-allocated, Python path auto-detects if empty",
+      "pythonPath": "Python Path (optional, auto-detect if empty)",
+      "pythonPathPlaceholder": "python3 or /usr/bin/python3"
+    },
+    "coder": {
+      "title": "Code Generation LLM (optional)",
+      "hint": "Dedicated model for code generation, falls back to default LLM if empty",
+      "apiKey": "Code Generation LLM API Key",
+      "apiKeyPlaceholder": "Leave empty to use default",
+      "apiBase": "Code Generation LLM API Base URL",
+      "apiBasePlaceholder": "Leave empty to use default",
+      "model": "Code Generation LLM Model",
+      "modelPlaceholder": "glm-4.7"
+    },
+    "advanced": {
+      "embedding": {
+        "title": "Embedding Model",
+        "hint": "For text embedding, falls back to default LLM if empty",
+        "apiKey": "Embedding API Key",
+        "apiKeyPlaceholder": "Leave empty to use default LLM key",
+        "apiBase": "Embedding API Base URL",
+        "apiBasePlaceholder": "Leave empty to use default LLM URL",
+        "model": "Embedding Model Name",
+        "modelPlaceholder": "bge-m3",
+        "dims": "Vector Dimensions",
+        "dimsPlaceholder": "1024"
+      },
+      "nano": {
+        "title": "High-Frequency LLM (optional)",
+        "hint": "Lightweight model for high-frequency fast operations",
+        "apiKey": "High-Frequency LLM API Key",
+        "apiKeyPlaceholder": "Leave empty to use default",
+        "apiBase": "High-Frequency LLM API Base URL",
+        "apiBasePlaceholder": "Leave empty to use default",
+        "model": "High-Frequency LLM Model",
+        "modelPlaceholder": "qwen3-next-80b-a3b-instruct"
+      },
+      "easypaper": {
+        "title": "EasyPaper (optional)",
+        "hint": "Paper PDF typesetting service",
+        "apiUrl": "EasyPaper API URL",
+        "apiUrlPlaceholder": "http://localhost:8004",
+        "llmApiKey": "EasyPaper General LLM API Key",
+        "llmApiKeyPlaceholder": "Leave empty if same as default LLM",
+        "llmModel": "EasyPaper LLM Model",
+        "llmModelPlaceholder": "qwen3-next-80b-a3b-instruct",
+        "vlmModel": "EasyPaper VLM Model",
+        "vlmModelPlaceholder": "qwen3-vl-235b-a22b-thinking",
+        "vlmApiKey": "EasyPaper VLM API Key",
+        "vlmApiKeyPlaceholder": "Leave empty if same as LLM API Key"
+      },
+      "literature": {
+        "title": "Literature Search Service (optional)",
+        "apiUrl": "Literature Search API URL",
+        "apiUrlPlaceholder": "http://localhost:8002/api/v1/search"
+      }
+    },
+    "finish": {
+      "title": "Configuration Complete!",
+      "description": "All configurations have been saved to the workspace's <code>.env</code> file.",
+      "hint": "Click the button below to start the backend service."
+    },
+    "notifications": {
+      "saveSuccess": "Save Successful",
+      "saveSuccessDesc": "Configuration has been saved to .env file",
+      "saveFailed": "Save Failed",
+      "llmKeyRequired": "LLM API Key Required",
+      "llmKeyRequiredDesc": "Please enter LLM API key to continue",
+      "apiKeyMissing": "Please enter LLM API Key",
+      "apiBaseMissing": "Please enter LLM API Base URL"
+    },
+    "validation": {
+      "failed": "Validation failed, please check API key and base URL",
+      "emptyApiKey": "API Key or Base URL is empty",
+      "invalidKey": "API Key is invalid or expired",
+      "invalidUrl": "API address is incorrect. Please check if the address includes /v1 path",
+      "serverError": "Server error",
+      "requestFailed": "Request failed",
+      "connectionFailed": "Cannot connect to API address. Please check network or API address",
+      "timeout": "Request timed out, please check network connection or API address",
+      "unknownError": "Unknown error"
     }
   }
 }

@@ -11,10 +11,10 @@ load_dotenv()
 
 from agentsociety2.designer.exp_designer import ExperimentDesigner
 from agentsociety2.designer.config_builder import build
-from agentsociety2.designer.exp_executor import (
-    ExperimentExecutor,
-    settings as exec_settings,
-)
+from agentsociety2.skills.experiment import ExperimentExecutor
+
+# Default experiment settings
+DEFAULT_NUM_STEPS = 10
 
 
 async def run_pipeline() -> None:
@@ -69,11 +69,11 @@ async def run_pipeline() -> None:
 
         experiments = []
         for config_entry in successful_configs:
-            num_steps = config_entry.get("num_steps", exec_settings.default_num_steps)
+            num_steps = config_entry.get("num_steps", DEFAULT_NUM_STEPS)
             name = config_entry.get("experiment_name", "Unknown")
 
             if (
-                num_steps == exec_settings.default_num_steps
+                num_steps == DEFAULT_NUM_STEPS
                 and "num_steps" not in config_entry
             ):
                 print(f"警告: 实验 '{name}' 未指定轮数，使用默认值 {num_steps}")

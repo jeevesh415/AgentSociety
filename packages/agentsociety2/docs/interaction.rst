@@ -16,6 +16,47 @@ AgentSociety 2 提供两种主要的交互模式：
 * **模拟期间**: 在步骤之间或特定时间点
 * **模拟后**: 查询最终状态或收集调查数据
 
+交互模式对比
+~~~~~~~~~~~~~~~~~
+
+.. graphviz::
+
+   digraph interaction_modes {
+       rankdir=TB;
+       node [shape=box, style=rounded];
+
+       Society [label="AgentSociety"];
+       Ask [label="ask() 方法", shape=ellipse];
+       Intervene [label="intervene() 方法", shape=ellipse];
+
+       subgraph cluster_ask {
+           label = "查询模式";
+           style=filled;
+           color=lightgreen;
+           Query [label="查询状态"];
+           Read [label="只读操作"];
+           NoModify [label="不修改环境"];
+       }
+
+       subgraph cluster_intervene {
+           label = "干预模式";
+           style=filled;
+           color=lightcoral;
+           Modify [label="修改状态"];
+           Write [label="读写操作"];
+           Change [label="改变环境"];
+       }
+
+       Society -> Ask;
+       Society -> Intervene;
+       Ask -> Query;
+       Ask -> Read;
+       Ask -> NoModify;
+       Intervene -> Modify;
+       Intervene -> Write;
+       Intervene -> Change;
+   }
+
 基本交互模式
 ---------------------------
 
@@ -89,20 +130,6 @@ intervene() 方法 - 读写修改
            await society.intervene("Broadcast emergency alert")
 
    await society.close()
-
-使用时间控制运行
-~~~~~~~~~~~~~~~~~~~~~~~~~~
-
-.. code-block:: python
-
-   from datetime import datetime, timedelta
-
-   # Run until specific end time
-   end_time = datetime.now() + timedelta(days=1)
-   await society.run_to(end_t=end_time, tick=3600)
-
-   # Or run for specific number of steps
-   await society.run(num_steps=24, tick=3600)  # 24 hours
 
 数据收集
 ---------------

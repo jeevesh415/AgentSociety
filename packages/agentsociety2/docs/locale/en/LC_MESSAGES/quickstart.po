@@ -109,3 +109,27 @@ msgstr "Querying Specific Agents"
 #: ../../quickstart.rst:203
 msgid "向特定智能体提问："
 msgstr "Ask a specific agent:"
+
+#: ../../quickstart.rst:108
+msgid "使用 CLI 运行实验"
+msgstr "Running Experiments with CLI"
+
+#: ../../quickstart.rst:110
+msgid "**前台运行（调试）:**"
+msgstr "**Foreground Execution (Debug):**"
+
+#: ../../quickstart.rst:128
+msgid "**后台运行（生产）:**"
+msgstr "**Background Execution (Production):**"
+
+#: ../../quickstart.rst:137
+msgid "**重要**: 后台运行时必须指定 ``--log-file`` 参数。"
+msgstr "**Important**: When running in background, you must specify the ``--log-file`` parameter."
+
+#: ../../quickstart.rst:139
+msgid "更多详情请参见 :doc:`cli`。"
+msgstr "See :doc:`cli` for more details."
+
+#: ../../quickstart.rst:142
+msgid "运行实验（代码方式）"
+msgstr "Running Experiments (Code)"

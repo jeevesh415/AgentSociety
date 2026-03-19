@@ -1,23 +1,25 @@
+/**
+ * API客户端 - 用于与FastAPI后端通信
+ *
+ * 关联文件：
+ * - @extension/src/extension.ts - 主入口，创建ApiClient实例并传递给各组件
+ * - @extension/src/prefillParamsViewProvider.ts - 使用ApiClient获取预填充参数
+ * - @extension/src/projectStructureProvider.ts - 使用ApiClient进行项目初始化、模块扫描
+ * - @extension/src/replayWebviewProvider.ts - 使用ApiClient获取回放数据（直接fetch，不通过此类）
+ *
+ * 后端API路由：
+ * - @packages/agentsociety2/agentsociety2/backend/routers/prefill_params.py - /api/v1/prefill-params
+ * - @packages/agentsociety2/agentsociety2/backend/routers/experiments.py - /api/v1/experiments
+ * - @packages/agentsociety2/agentsociety2/backend/routers/replay.py - /api/v1/replay
+ * - @packages/agentsociety2/agentsociety2/backend/routers/custom.py - /api/v1/custom
+ * - @packages/agentsociety2/agentsociety2/backend/routers/modules.py - /api/v1/modules
+ */
+
 import * as vscode from 'vscode';
 
 /**
  * API客户端 - 用于与FastAPI后端通信
  */
-export interface ChatMessage {
-  role: 'system' | 'user' | 'assistant' | 'tool';
-  content?: string;
-  tool_calls?: Array<{
-    id: string;
-    type: string;
-    function: {
-      name: string;
-      arguments: string;
-    };
-  }>;
-  tool_call_id?: string;
-  name?: string;
-  data?: Record<string, any>; // Tool result data (e.g., literature search results)
-}
 
 /**
  * SSE事件类型
@@ -70,25 +72,6 @@ export interface HeartbeatSSEEvent {
  * SSE事件联合类型
  */
 export type SSEEvent = MessageSSEEvent | ToolSSEEvent | CompleteSSEEvent | HeartbeatSSEEvent;
-
-export interface CompletionRequest {
-  messages: ChatMessage[];
-  workspace_path: string;
-}
-
-export interface CompletionResponse {
-  success: boolean;
-  messages: ChatMessage[];
-  final_answer?: string;
-  tool_calls?: Array<{
-    id: string;
-    name: string;
-    arguments: Record<string, any>;
-  }>;
-  is_complete: boolean;
-  turn_count: number;
-  message?: string;
-}
 
 export interface MinerUParseRequest {
   file_path: string;
@@ -185,6 +168,7 @@ export interface ClassInfo {
   class_name: string;
   description: string;
   has_prefill?: boolean;
+  is_custom?: boolean;
 }
 
 export interface AvailableClassesResponse {
@@ -199,6 +183,12 @@ export interface AvailableClassesResponse {
 
 export interface CustomModulesScanRequest {
   workspace_path?: string;
+}
+
+export interface CustomModulesTestRequest {
+  workspace_path?: string;
+  module_kind?: 'agent' | 'env_module';
+  module_class_name?: string;
 }
 
 export interface CustomModulesScanResponse {
@@ -217,12 +207,23 @@ export interface CustomModulesCleanResponse {
   message: string;
 }
 
+export interface ModuleTestResult {
+  name: string;
+  success: boolean;
+  output: string;
+  error?: string;
+}
+
 export interface CustomModulesTestResponse {
   success: boolean;
   test_output: string;
-  test_file?: string;
   error?: string;
   returncode?: number;
+  // 结构化测试结果
+  results?: ModuleTestResult[];
+  total_tests?: number;
+  passed_tests?: number;
+  failed_tests?: number;
 }
 
 export interface CustomModulesListResponse {
@@ -258,24 +259,40 @@ export interface CustomModulesStatusResponse {
 }
 
 export class ApiClient {
-  private baseUrl: string;
   private outputChannel: vscode.OutputChannel;
 
   constructor(context: vscode.ExtensionContext) {
-    // 从配置读取后端URL，默认为 http://localhost:8001
-    const config = vscode.workspace.getConfiguration('aiSocialScientist');
-    this.baseUrl = config.get<string>('backendUrl', 'http://localhost:8001');
     this.outputChannel = vscode.window.createOutputChannel('AI Social Scientist API');
+  }
 
-    // 监听配置变化
-    context.subscriptions.push(
-      vscode.workspace.onDidChangeConfiguration(e => {
-        if (e.affectsConfiguration('aiSocialScientist.backendUrl')) {
-          this.baseUrl = config.get<string>('backendUrl', 'http://localhost:8001');
-          this.log(`Backend URL updated to: ${this.baseUrl}`);
-        }
-      })
-    );
+  /**
+   * 获取后端URL（动态从.env文件读取）
+   * 这样可以确保连接到实际运行的后端端口
+   */
+  private getBackendUrl(): string {
+    try {
+      // 动态导入 EnvManager 避免循环依赖
+      const envManager = require('./envManager');
+      const EnvManagerClass = envManager.EnvManager || envManager.default;
+      if (EnvManagerClass) {
+        const manager = new EnvManagerClass();
+        const envConfig = manager.readEnv();
+        const host = envConfig.backendHost || '127.0.0.1';
+        const port = envConfig.backendPort || 8001;
+        return `http://${host}:${port}`;
+      }
+    } catch (error) {
+      this.log(`Failed to read backend URL from .env: ${error}`);
+    }
+    // 后备方案：使用默认值
+    return 'http://127.0.0.1:8001';
+  }
+
+  /**
+   * 获取后端URL（公开方法）
+   */
+  getBaseUrl(): string {
+    return this.getBackendUrl();
   }
 
   private log(message: string): void {
@@ -284,10 +301,32 @@ export class ApiClient {
   }
 
   /**
-   * 获取后端URL
+   * 处理fetch错误，提供更友好的错误消息
    */
-  getBaseUrl(): string {
-    return this.baseUrl;
+  private handleFetchError(error: unknown, context: string): Error {
+    const errorStr = String(error);
+
+    // 检测连接错误
+    if (
+      errorStr.includes('ECONNREFUSED') ||
+      errorStr.includes('fetch failed') ||
+      errorStr.includes('NetworkError') ||
+      errorStr.includes('Failed to fetch')
+    ) {
+      return new Error('后端服务未连接，请先启动后端服务');
+    }
+
+    // 检测超时
+    if (errorStr.includes('timeout') || errorStr.includes('TimeoutError')) {
+      return new Error('后端服务响应超时，请检查服务状态');
+    }
+
+    // 其他错误
+    if (error instanceof Error) {
+      return new Error(`${context}: ${error.message}`);
+    }
+
+    return new Error(`${context}: ${errorStr}`);
   }
 
   /**
@@ -295,7 +334,7 @@ export class ApiClient {
    */
   async healthCheck(): Promise<boolean> {
     try {
-      const response = await fetch(`${this.baseUrl}/health`);
+      const response = await fetch(`${this.getBackendUrl()}/health`);
       return response.ok;
     } catch (error) {
       this.log(`Health check failed: ${error}`);
@@ -304,92 +343,11 @@ export class ApiClient {
   }
 
   /**
-   * 发送对话请求（支持流式和非流式）
-   * 注意：后端现在只支持流式SSE响应，非流式请求已废弃
-   */
-  async chat(
-    request: CompletionRequest,
-    onStreamEvent: (event: SSEEvent) => void
-  ): Promise<CompletionResponse | null> {
-    try {
-      const url = `${this.baseUrl}/api/v1/chat/completion`;
-      this.log(`Sending chat request to ${url}`);
-
-      // 流式请求
-      this.log(`[SSE Client] 发送流式请求到 ${url}`);
-      const response = await fetch(url, {
-        method: 'POST',
-        headers: {
-          'Content-Type': 'application/json',
-        },
-        body: JSON.stringify(request),
-      });
-
-      if (!response.ok) {
-        const errorText = await response.text();
-        this.log(`[SSE Client] HTTP错误: ${response.status}: ${errorText}`);
-        throw new Error(`HTTP ${response.status}: ${errorText}`);
-      }
-
-      this.log(`[SSE Client] 开始读取SSE流`);
-      // 读取SSE流
-      const reader = response.body?.getReader();
-      const decoder = new TextDecoder();
-
-      if (!reader) {
-        this.log(`[SSE Client] 错误: Response body不可读`);
-        throw new Error('Response body is not readable');
-      }
-
-      let buffer = '';
-      let eventCount = 0;
-      while (true) {
-        const { done, value } = await reader.read();
-        if (done) {
-          this.log(`[SSE Client] SSE流读取完成，共处理${eventCount}个事件`);
-          break;
-        }
-
-        buffer += decoder.decode(value, { stream: true });
-        const lines = buffer.split('\n');
-        buffer = lines.pop() || '';
-
-        for (const line of lines) {
-          if (line.startsWith('data: ')) {
-            const data = line.slice(6);
-            if (data === '[DONE]') {
-              this.log(`[SSE Client] 收到[DONE]标记，流式传输结束`);
-              return null;
-            }
-            try {
-              const event = JSON.parse(data) as SSEEvent;
-              eventCount++;
-              this.log(`[SSE Client] 解析事件 #${eventCount}: type=${event.type}`);
-              if (onStreamEvent) {
-                onStreamEvent(event);
-              }
-            } catch (e) {
-              this.log(`[SSE Client] 解析SSE事件失败: ${data}, 错误: ${e}`);
-            }
-          }
-        }
-      }
-
-      this.log(`[SSE Client] SSE流处理完成，返回null`);
-      return null;
-    } catch (error) {
-      this.log(`Chat request failed: ${error}`);
-      throw error;
-    }
-  }
-
-
-  /**
    * 使用MinerU解析文档
    */
   async parseWithMinerU(request: MinerUParseRequest): Promise<MinerUParseResponse> {
     try {
-      const url = `${this.baseUrl}/api/v1/mineru/parse`;
+      const url = `${this.getBackendUrl()}/api/v1/mineru/parse`;
       this.log(`Sending MinerU parse request to ${url} for file: ${request.file_path}`);
 
       const response = await fetch(url, {
@@ -420,7 +378,7 @@ export class ApiClient {
    */
   async deleteLiterature(request: LiteratureDeleteRequest): Promise<LiteratureDeleteResponse> {
     try {
-      const url = `${this.baseUrl}/api/v1/literature/delete`;
+      const url = `${this.getBackendUrl()}/api/v1/literature/delete`;
       this.log(`Sending delete literature request to ${url} for file: ${request.file_path}`);
 
       const response = await fetch(url, {
@@ -451,7 +409,7 @@ export class ApiClient {
    */
   async renameLiterature(request: LiteratureRenameRequest): Promise<LiteratureRenameResponse> {
     try {
-      const url = `${this.baseUrl}/api/v1/literature/rename`;
+      const url = `${this.getBackendUrl()}/api/v1/literature/rename`;
       this.log(`Sending rename literature request to ${url} for file: ${request.file_path}`);
 
       const response = await fetch(url, {
@@ -482,7 +440,7 @@ export class ApiClient {
    */
   async getAgentClasses(): Promise<AgentsListResponse> {
     try {
-      const url = `${this.baseUrl}/api/v1/modules/agent_classes`;
+      const url = `${this.getBackendUrl()}/api/v1/modules/agent_classes`;
       this.log(`Fetching agent classes from ${url}`);
 
       const response = await fetch(url);
@@ -507,7 +465,7 @@ export class ApiClient {
    */
   async getEnvModules(): Promise<EnvModulesListResponse> {
     try {
-      const url = `${this.baseUrl}/api/v1/modules/env_module_classes`;
+      const url = `${this.getBackendUrl()}/api/v1/modules/env_module_classes`;
       this.log(`Fetching env module classes from ${url}`);
 
       const response = await fetch(url);
@@ -532,7 +490,7 @@ export class ApiClient {
    */
   async initWorkspace(request: WorkspaceInitRequest): Promise<WorkspaceInitResponse> {
     try {
-      const url = `${this.baseUrl}/api/v1/workspace/init`;
+      const url = `${this.getBackendUrl()}/api/v1/workspace/init`;
       this.log(`Sending workspace init request to ${url} for path: ${request.workspace_path}`);
 
       const response = await fetch(url, {
@@ -563,7 +521,7 @@ export class ApiClient {
    */
   async getPrefillParams(workspace_path: string): Promise<PrefillParamsResponse> {
     try {
-      const url = `${this.baseUrl}/api/v1/prefill-params?workspace_path=${encodeURIComponent(workspace_path)}`;
+      const url = `${this.getBackendUrl()}/api/v1/prefill-params?workspace_path=${encodeURIComponent(workspace_path)}`;
       this.log(`Fetching prefill params from ${url}`);
 
       const response = await fetch(url);
@@ -579,7 +537,7 @@ export class ApiClient {
       return data;
     } catch (error) {
       this.log(`Get prefill params request failed: ${error}`);
-      throw error;
+      throw this.handleFetchError(error, '获取预填充参数失败');
     }
   }
 
@@ -592,7 +550,7 @@ export class ApiClient {
     class_name: string
   ): Promise<ClassPrefillParamsResponse> {
     try {
-      const url = `${this.baseUrl}/api/v1/prefill-params/${class_kind}/${class_name}?workspace_path=${encodeURIComponent(workspace_path)}`;
+      const url = `${this.getBackendUrl()}/api/v1/prefill-params/${class_kind}/${class_name}?workspace_path=${encodeURIComponent(workspace_path)}`;
       this.log(`Fetching class prefill params from ${url}`);
 
       const response = await fetch(url);
@@ -617,7 +575,7 @@ export class ApiClient {
    */
   async getAvailableClasses(workspace_path: string): Promise<AvailableClassesResponse> {
     try {
-      const url = `${this.baseUrl}/api/v1/prefill-params/classes?workspace_path=${encodeURIComponent(workspace_path)}`;
+      const url = `${this.getBackendUrl()}/api/v1/custom/classes?workspace_path=${encodeURIComponent(workspace_path)}`;
       this.log(`Fetching available classes from ${url}`);
 
       const response = await fetch(url);
@@ -633,7 +591,7 @@ export class ApiClient {
       return data;
     } catch (error) {
       this.log(`Get available classes request failed: ${error}`);
-      throw error;
+      throw this.handleFetchError(error, '获取类列表失败');
     }
   }
 
@@ -644,7 +602,7 @@ export class ApiClient {
    */
   async scanCustomModules(request: CustomModulesScanRequest): Promise<CustomModulesScanResponse> {
     try {
-      const url = `${this.baseUrl}/api/v1/custom/scan`;
+      const url = `${this.getBackendUrl()}/api/v1/custom/scan`;
       this.log(`Sending custom modules scan request to ${url}`);
 
       const response = await fetch(url, {
@@ -666,7 +624,7 @@ export class ApiClient {
       return data;
     } catch (error) {
       this.log(`Custom modules scan request failed: ${error}`);
-      throw error;
+      throw this.handleFetchError(error, '扫描模块失败');
     }
   }
 
@@ -675,7 +633,7 @@ export class ApiClient {
    */
   async cleanCustomModules(request: CustomModulesScanRequest): Promise<CustomModulesCleanResponse> {
     try {
-      const url = `${this.baseUrl}/api/v1/custom/clean`;
+      const url = `${this.getBackendUrl()}/api/v1/custom/clean`;
       this.log(`Sending custom modules clean request to ${url}`);
 
       const response = await fetch(url, {
@@ -697,16 +655,18 @@ export class ApiClient {
       return data;
     } catch (error) {
       this.log(`Custom modules clean request failed: ${error}`);
-      throw error;
+      throw this.handleFetchError(error, '清理模块失败');
     }
   }
 
   /**
    * 测试自定义模块
+   * @param.request 包含 workspace_path，可选的 module_kind 和 module_class_name
+   * 如果指定 module_kind 和 module_class_name，则只测试指定模块
    */
-  async testCustomModules(request: CustomModulesScanRequest): Promise<CustomModulesTestResponse> {
+  async testCustomModules(request: CustomModulesTestRequest): Promise<CustomModulesTestResponse> {
     try {
-      const url = `${this.baseUrl}/api/v1/custom/test`;
+      const url = `${this.getBackendUrl()}/api/v1/custom/test`;
       this.log(`Sending custom modules test request to ${url}`);
 
       const response = await fetch(url, {
@@ -728,7 +688,7 @@ export class ApiClient {
       return data;
     } catch (error) {
       this.log(`Custom modules test request failed: ${error}`);
-      throw error;
+      throw this.handleFetchError(error, '测试模块失败');
     }
   }
 
@@ -737,7 +697,7 @@ export class ApiClient {
    */
   async listCustomModules(): Promise<CustomModulesListResponse> {
     try {
-      const url = `${this.baseUrl}/api/v1/custom/list`;
+      const url = `${this.getBackendUrl()}/api/v1/custom/list`;
       this.log(`Fetching custom modules list from ${url}`);
 
       const response = await fetch(url);
@@ -753,7 +713,7 @@ export class ApiClient {
       return data;
     } catch (error) {
       this.log(`Get custom modules list request failed: ${error}`);
-      throw error;
+      throw this.handleFetchError(error, '获取模块列表失败');
     }
   }
 
@@ -762,7 +722,7 @@ export class ApiClient {
    */
   async getCustomModulesStatus(): Promise<CustomModulesStatusResponse> {
     try {
-      const url = `${this.baseUrl}/api/v1/custom/status`;
+      const url = `${this.getBackendUrl()}/api/v1/custom/status`;
       this.log(`Fetching custom modules status from ${url}`);
 
       const response = await fetch(url);
@@ -778,7 +738,7 @@ export class ApiClient {
       return data;
     } catch (error) {
       this.log(`Get custom modules status request failed: ${error}`);
-      throw error;
+      throw this.handleFetchError(error, '获取模块状态失败');
     }
   }
 }

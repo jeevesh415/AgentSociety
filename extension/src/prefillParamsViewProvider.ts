@@ -1,13 +1,22 @@
 /**
  * 预填充参数视图提供者 (Prefill Parameters View Provider)
- * 
+ *
  * 这个类负责创建和管理VSCode中的预填充参数查看窗口（只读）。
  * 使用WebviewPanel模式，类似ChatWebviewProvider，作为项目结构视图中的一个入口。
- * 
+ *
  * 功能：
- * 1. 显示所有可用的Agent类和Env Module类
+ * 1. 显示所有可用的Agent类和Env Module类（通过Tab页切换）
  * 2. 显示每个类的预填充参数（只读）
  * 3. 支持搜索和筛选
+ *
+ * 关联文件：
+ * - @extension/src/extension.ts - 主入口，注册命令 'agentsociety.viewPrefillParams'
+ * - @extension/src/apiClient.ts - 调用后端API获取预填充参数
+ * - @extension/src/webview/prefillParams/ - 前端React组件 (编译后为prefillParams.js)
+ *
+ * 后端API：
+ * - @packages/agentsociety2/agentsociety2/backend/routers/prefill_params.py - /api/v1/prefill-params
+ * - @packages/agentsociety2/agentsociety2/backend/routers/modules.py - /api/v1/modules (获取可用类)
  */
 
 import * as vscode from 'vscode';
@@ -47,11 +56,6 @@ export class PrefillParamsViewProvider {
   private readonly _apiClient: ApiClient;
 
   /**
-   * 过滤类型（可选）
-   */
-  private readonly _filterKind?: 'env_module' | 'agent';
-
-  /**
    * 可清理资源列表
    */
   private _disposables: vscode.Disposable[] = [];
@@ -67,22 +71,11 @@ export class PrefillParamsViewProvider {
     // 如果已经有一个面板打开，直接显示它（单例模式）
     if (PrefillParamsViewProvider.currentPanel) {
       PrefillParamsViewProvider.currentPanel._panel.reveal(vscode.ViewColumn.Beside);
-      // 如果指定了kind，更新当前面板的过滤
-      if (kind) {
-        PrefillParamsViewProvider.currentPanel._panel.webview.postMessage({
-          command: 'setFilterKind',
-          kind: kind,
-        });
-      }
       return;
     }
 
-    // 创建新的WebviewPanel
-    const title = kind === 'env_module'
-      ? localize('prefillParams.envModuleTitle')
-      : kind === 'agent'
-        ? localize('prefillParams.agentTitle')
-        : localize('prefillParams.title');
+    // 创建新的WebviewPanel - 统一的标题
+    const title = localize('prefillParams.groupTitle'); // 环境与智能体
 
     const panel = vscode.window.createWebviewPanel(
       PrefillParamsViewProvider.viewType,
@@ -98,7 +91,7 @@ export class PrefillParamsViewProvider {
     );
 
     // 创建PrefillParamsViewProvider实例并保存为当前面板
-    PrefillParamsViewProvider.currentPanel = new PrefillParamsViewProvider(panel, context, apiClient, kind);
+    PrefillParamsViewProvider.currentPanel = new PrefillParamsViewProvider(panel, context, apiClient);
   }
 
   /**
@@ -107,14 +100,12 @@ export class PrefillParamsViewProvider {
   private constructor(
     panel: vscode.WebviewPanel,
     context: vscode.ExtensionContext,
-    apiClient: ApiClient,
-    filterKind?: 'env_module' | 'agent'
+    apiClient: ApiClient
   ) {
     this._panel = panel;
     this._extensionUri = context.extensionUri;
     this._extensionPath = context.extensionPath;
     this._apiClient = apiClient;
-    this._filterKind = filterKind;
 
     // 设置Webview的HTML内容
     this._panel.webview.html = this._getHtmlForWebview(this._panel.webview);
@@ -132,10 +123,8 @@ export class PrefillParamsViewProvider {
           case 'refresh':
             await this._handleRequestData();
             break;
-          case 'setFilterKind':
-            // 更新过滤类型（用于单例模式下的切换）
-            (this as any)._filterKind = message.kind;
-            await this._handleRequestData();
+          case 'testCustomModule':
+            await this._handleTestSingleModule(message);
             break;
         }
       },
@@ -168,12 +157,74 @@ export class PrefillParamsViewProvider {
         command: 'initialData',
         classes: classesResponse,
         prefillParams: prefillResponse.data,
-        filterKind: this._filterKind, // 传递过滤类型
       });
     } catch (error: any) {
       this._panel.webview.postMessage({
         command: 'error',
         error: error.message || localize('prefillParams.errorMessages.loadFailed'),
+      });
+    }
+  }
+
+  private async _handleTestSingleModule(message: any) {
+    const workspaceFolder = vscode.workspace.workspaceFolders?.[0];
+    if (!workspaceFolder) {
+      this._panel.webview.postMessage({
+        command: 'testResult',
+        moduleKey: message.moduleKey,
+        success: false,
+        error: localize('prefillParamsViewProvider.noWorkspace'),
+      });
+      return;
+    }
+
+    const moduleType = message.moduleType; // 'env_module' or 'agent'
+    const moduleClassName = message.moduleClassName; // e.g., 'SimpleAgent'
+    const moduleKey = message.moduleKey;
+
+    try {
+      // 发送请求，指定要测试的模块
+      const response = await this._apiClient.testCustomModules({
+        workspace_path: workspaceFolder.uri.fsPath,
+        module_kind: moduleType,
+        module_class_name: moduleClassName,
+      });
+
+      // 由于后端只测试指定的模块，结果应该只包含一个模块的测试结果
+      let moduleOutput = '';
+      let moduleSuccess = false;
+      let moduleError: string | undefined = undefined;
+
+      // 从 results 数组中获取测试结果
+      const results = response.results || [];
+
+      if (results.length > 0) {
+        // 找到了该模块的测试结果
+        const moduleResult = results[0];
+        moduleSuccess = moduleResult.success;
+        moduleOutput = moduleResult.output || '';
+        moduleError = moduleResult.error;
+      } else {
+        // 没有找到结果，可能是后端没有找到该模块
+        moduleOutput = response.test_output || '';
+        moduleSuccess = response.success || false;
+        moduleError = response.error || `未找到模块 "${moduleClassName}" 的测试结果`;
+      }
+
+      this._panel.webview.postMessage({
+        command: 'testResult',
+        moduleKey: moduleKey,
+        success: moduleSuccess,
+        output: moduleOutput,
+        error: moduleError,
+      });
+    } catch (error: any) {
+      this._panel.webview.postMessage({
+        command: 'testResult',
+        moduleKey: moduleKey,
+        success: false,
+        error: error.message || localize('customModules.testFailed', 'Unknown error'),
+        output: '',
       });
     }
   }
@@ -202,7 +253,7 @@ export class PrefillParamsViewProvider {
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <meta http-equiv="Content-Security-Policy" content="default-src 'none'; style-src ${webview.cspSource} 'unsafe-inline'; script-src ${webview.cspSource} 'unsafe-eval' 'unsafe-inline';">
+    <meta http-equiv="Content-Security-Policy" content="default-src 'none'; style-src ${webview.cspSource} 'unsafe-inline'; script-src ${webview.cspSource} 'unsafe-eval' 'unsafe-inline'; connect-src ${webview.cspSource};">
     <title>Prefill Parameters</title>
     <style>
       * {

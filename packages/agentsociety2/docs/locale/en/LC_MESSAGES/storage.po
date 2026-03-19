@@ -172,3 +172,11 @@ msgstr "**Export to Pandas:**"
 #: ../../storage.rst:181
 msgid "**导出到 CSV：**"
 msgstr "**Export to CSV:**"
+
+#: ../../storage.rst:201
+msgid "存储架构"
+msgstr "Storage Architecture"
+
+#: ../../storage.rst:254
+msgid "数据写入流程"
+msgstr "Data Write Flow"

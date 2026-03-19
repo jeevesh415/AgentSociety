@@ -141,3 +141,19 @@ msgstr "**Regular Tools**"
 #: ../../concepts.rst:113
 msgid "具有任何签名的通用工具："
 msgstr "General-purpose tools with any signature:"
+
+#: ../../concepts.rst:124
+msgid "完整系统架构"
+msgstr "Full System Architecture"
+
+#: ../../concepts.rst:156
+msgid "环境工具注册流程"
+msgstr "Environment Tool Registration Flow"
+
+#: ../../concepts.rst:200
+msgid "工具类别层次结构"
+msgstr "Tool Category Hierarchy"
+
+#: ../../concepts.rst:233
+msgid "智能体-环境交互流程"
+msgstr "Agent-Environment Interaction Flow"

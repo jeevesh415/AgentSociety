@@ -1,13 +1,15 @@
 from datetime import datetime
 from typing import Optional, Literal, List
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, Field, ConfigDict
 
 
 class User(BaseModel):
     """
     User Model
     """
-    
+
+    model_config = ConfigDict(use_enum_values=True)
+
     user_id: int = Field(..., description="User ID")
     username: str = Field(..., description="Username")
     bio: Optional[str] = Field(None, description="User biography")
@@ -19,12 +21,7 @@ class User(BaseModel):
         None,
         description="Camp score for polarization experiment, optional",
     )
-    
-    class Config:
-        json_encoders = {
-            datetime: lambda v: v.isoformat()
-        }
-    
+
     def __str__(self) -> str:
         return f"User {self.username} (ID: {self.user_id}), Followers: {self.followers_count}, Following: {self.following_count}, Posts: {self.posts_count}"
 
@@ -33,7 +30,9 @@ class Post(BaseModel):
     """
     贴文模型(原创、转发或评论)
     """
-    
+
+    model_config = ConfigDict(use_enum_values=True)
+
     post_id: int = Field(..., description="Post ID")
     author_id: int = Field(..., description="Author user ID")
     content: str = Field(..., min_length=1, max_length=5000, description="Post content")
@@ -47,18 +46,15 @@ class Post(BaseModel):
     tags: List[str] = Field(default_factory=list, description="话题标签列表，最多10个")
     topic_category: Optional[str] = Field(None, description="主要话题分类（politics/sports/tech等）")
 
-    class Config:
-        json_encoders = {
-            datetime: lambda v: v.isoformat()
-        }
-    
     def __str__(self) -> str:
         return f"{self.post_type.capitalize()} Post (ID: {self.post_id}) by User {self.author_id}: {self.content[:50]}{'...' if len(self.content) > 50 else ''}, Likes: {self.likes_count}, Reposts: {self.reposts_count}, Comments: {self.comments_count}"
 
 
 class Comment(BaseModel):
     """Comment Model"""
-    
+
+    model_config = ConfigDict(use_enum_values=True)
+
     comment_id: int = Field(..., description="Comment ID")
     post_id: int = Field(..., description="Post ID that this comment belongs to")
     author_id: int = Field(..., description="Commenter user ID")
@@ -66,12 +62,7 @@ class Comment(BaseModel):
     parent_comment_id: Optional[int] = Field(None, description="Parent comment ID (for replies)")
     created_at: datetime = Field(default_factory=datetime.now, description="Comment creation time")
     likes_count: int = Field(0, ge=0, description="Number of likes")
-    
-    class Config:
-        json_encoders = {
-            datetime: lambda v: v.isoformat()
-        }
-    
+
     def __str__(self) -> str:
         reply_str = f" (Reply to comment {self.parent_comment_id})" if self.parent_comment_id else ""
         return f"Comment (ID: {self.comment_id}) by User {self.author_id}{reply_str}: {self.content[:30]}{'...' if len(self.content) > 30 else ''}"
@@ -81,19 +72,16 @@ class DirectMessage(BaseModel):
     """
     私聊消息模型
     """
-    
+
+    model_config = ConfigDict(use_enum_values=True)
+
     message_id: int = Field(..., description="Message ID")
     from_user_id: int = Field(..., description="Sender user ID")
     to_user_id: int = Field(..., description="Receiver user ID")
     content: str = Field(..., min_length=1, max_length=2000, description="Message content")
     created_at: datetime = Field(default_factory=datetime.now, description="Message send time")
     read: bool = Field(False, description="Whether the message has been read")
-    
-    class Config:
-        json_encoders = {
-            datetime: lambda v: v.isoformat()
-        }
-    
+
     def __str__(self) -> str:
         read_str = "Read" if self.read else "Unread"
         return f"Direct Message ({read_str}) from User {self.from_user_id} to User {self.to_user_id}: {self.content[:30]}{'...' if len(self.content) > 30 else ''}"
@@ -103,18 +91,15 @@ class GroupChat(BaseModel):
     """
     群聊模型
     """
-    
+
+    model_config = ConfigDict(use_enum_values=True)
+
     group_id: int = Field(..., description="Group chat ID")
     group_name: str = Field(..., description="Group chat name")
     owner_id: int = Field(..., description="Group owner user ID")
     member_ids: List[int] = Field(default_factory=list, description="List of member user IDs")
     created_at: datetime = Field(default_factory=datetime.now, description="Group creation time")
-    
-    class Config:
-        json_encoders = {
-            datetime: lambda v: v.isoformat()
-        }
-    
+
     def __str__(self) -> str:
         return f"Group Chat '{self.group_name}' (ID: {self.group_id}), Owner: {self.owner_id}, Members: {len(self.member_ids)}"
 
@@ -123,18 +108,15 @@ class GroupMessage(BaseModel):
     """
     群聊消息模型
     """
-    
+
+    model_config = ConfigDict(use_enum_values=True)
+
     message_id: int = Field(..., description="Message ID")
     group_id: int = Field(..., description="Group chat ID")
     from_user_id: int = Field(..., description="Sender user ID")
     content: str = Field(..., min_length=1, max_length=2000, description="Message content")
     created_at: datetime = Field(default_factory=datetime.now, description="Message send time")
-    
-    class Config:
-        json_encoders = {
-            datetime: lambda v: v.isoformat()
-        }
-    
+
     def __str__(self) -> str:
         return f"Group Message from User {self.from_user_id} in Group {self.group_id}: {self.content[:30]}{'...' if len(self.content) > 30 else ''}"
 
@@ -394,4 +376,3 @@ class ObserveUserResponse(BaseModel):
     recent_feed: List[dict] = Field(default_factory=list, description="最近的 Feed 帖子")
     recent_messages: List[dict] = Field(default_factory=list, description="最近的私信")
     available_actions: List[str] = Field(default_factory=list, description="可用的行为")
-

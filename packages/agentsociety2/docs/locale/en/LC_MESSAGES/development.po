@@ -113,3 +113,19 @@ msgstr "Push: ``git push --tags``"
 #: ../../development.rst:117
 msgid "GitHub Actions 将构建并发布到 PyPI"
 msgstr "GitHub Actions will build and publish to PyPI"
+
+#: ../../development.rst:70
+msgid "研究技能模块"
+msgstr "Research Skills Module"
+
+#: ../../development.rst:80
+msgid "设计器模块"
+msgstr "Designer Module"
+
+#: ../../development.rst:88
+msgid "后端 API"
+msgstr "Backend API"
+
+#: ../../development.rst:96
+msgid "日志系统"
+msgstr "Logging System"

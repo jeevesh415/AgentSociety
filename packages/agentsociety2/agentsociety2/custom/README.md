@@ -122,7 +122,7 @@ curl -X POST http://localhost:8001/api/v1/custom/test \
   -d '{"workspace_path": "/path/to/workspace"}'
 ```
 
-系统会自动生成 `test_custom_module.py` 并运行测试。
+系统会在内存中运行测试并返回结果。
 
 ## 详解
 
@@ -206,9 +206,9 @@ A: 检查以下几点：
 
 ### Q: 如何调试自定义模块？
 
-A: 使用"测试自定义模块"命令，系统会：
-1. 生成 `test_custom_module.py`
-2. 自动运行测试
+A: 使用"测试自定义模块"命令，系统会在内存中：
+1. 动态导入自定义模块
+2. 运行测试验证
 3. 显示详细的测试输出
 
 ### Q: 如何清理自定义模块？

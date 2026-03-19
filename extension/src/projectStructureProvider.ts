@@ -1,13 +1,22 @@
 /**
  * 项目结构提供者 (Project Structure Provider)
- * 
+ *
  * 这个文件实现了VSCode左侧边栏的树形视图，用于显示研究项目的层次结构。
- * 
+ *
  * VSCode插件开发核心概念：
  * 1. TreeDataProvider: 实现这个接口可以创建自定义的树形视图
  * 2. TreeItem: 树形视图中的每个节点都是一个TreeItem
  * 3. FileSystemWatcher: 监听文件系统变化，实现实时更新
  * 4. EventEmitter: VSCode的事件系统，用于通知视图更新
+ *
+ * 关联文件：
+ * - @extension/src/extension.ts - 主入口，注册TreeView和命令
+ * - @extension/src/apiClient.ts - 调用后端API（初始化工作区、模块扫描等）
+ * - @extension/src/workspaceManager.ts - 工作区状态管理
+ *
+ * 后端API：
+ * - @packages/agentsociety2/agentsociety2/backend/routers/custom.py - /api/v1/custom/*
+ * - @packages/agentsociety2/agentsociety2/backend/routers/modules.py - /api/v1/modules/*
  */
 
 import * as vscode from 'vscode';
@@ -15,6 +24,7 @@ import * as path from 'path';
 import * as fs from 'fs';
 import { localize } from './i18n';
 import { ApiClient } from './apiClient';
+import { WorkspaceManager } from './workspaceManager';
 
 /**
  * ProjectItem - 项目树视图中的单个节点
@@ -44,7 +54,7 @@ export class ProjectItem extends vscode.TreeItem {
   constructor(
     public readonly label: string,
     public readonly collapsibleState: vscode.TreeItemCollapsibleState,
-    public readonly type: 'topic' | 'hypothesis' | 'experiment' | 'paper' | 'file' | 'papers' | 'userdata' | 'chat' | 'prefillParams' | 'prefillParamsGroup' | 'prefillParamsEnv' | 'prefillParamsAgent' | 'settings' | 'custom' | 'customScan' | 'customTest' | 'customClean' | 'customAgentItem' | 'customEnvItem' | 'customAgentsGroup' | 'customEnvsGroup' | 'presentation' | 'presentationHypothesis' | 'presentationExperiment' | 'synthesis' | 'reportHtml' | 'reportMd',
+    public readonly type: 'initWorkspace' | 'configureEnv' | 'fixWorkspace' | 'aiChat' | 'topic' | 'hypothesis' | 'experiment' | 'paper' | 'file' | 'papers' | 'userdata' | 'prefillParams' | 'prefillParamsGroup' | 'prefillParamsEnv' | 'prefillParamsAgent' | 'settings' | 'syncResources' | 'custom' | 'customScan' | 'customTest' | 'customClean' | 'customAgentItem' | 'customEnvItem' | 'customAgentsGroup' | 'customEnvsGroup' | 'customWorkspace' | 'presentation' | 'presentationHypothesis' | 'presentationExperiment' | 'synthesis' | 'reportHtml' | 'reportMd',
     public readonly filePath?: string
   ) {
     // 调用父类构造函数，初始化树节点
@@ -64,6 +74,10 @@ export class ProjectItem extends vscode.TreeItem {
     // 根据节点类型设置不同的图标
     // ThemeIcon是VSCode内置的图标系统，使用Codicons图标库
     const iconMap: { [key: string]: string } = {
+      'initWorkspace': 'add',      // 加号图标，初始化工作区
+      'configureEnv': 'gear',      // 齿轮图标，配置环境变量
+      'fixWorkspace': 'tools',     // 工具图标，修复工作区
+      'aiChat': 'comment-discussion',  // 聊天气泡图标，AI Chat
       'topic': 'book',           // 书籍图标，表示研究话题
       'hypothesis': 'lightbulb',  // 灯泡图标，表示假设
       'experiment': 'beaker',     // 烧杯图标，表示实验
@@ -71,16 +85,15 @@ export class ProjectItem extends vscode.TreeItem {
       'papers': 'library',        // 图书馆图标，表示文献库
       'userdata': 'database',     // 数据库图标，表示用户数据
       'file': 'file',             // 普通文件图标
-      'chat': 'comment-discussion', // 对话图标，表示AI Chat
       'prefillParams': 'settings', // 设置图标，表示预填充参数
       'prefillParamsGroup': 'folder', // 文件夹图标，表示预填充参数组
       'prefillParamsEnv': 'symbol-namespace', // 命名空间图标，表示环境模块预置参数
       'prefillParamsAgent': 'symbol-interface', // 接口图标，表示智能体类预置参数
       'settings': 'settings-gear', // 齿轮设置图标，表示配置设置
+      'syncResources': 'sync', // 同步 AI 助手资源图标
       'custom': 'workspace-trusted', // 自定义模块根图标
       'customScan': 'refresh', // 扫描图标
       'customTest': 'play', // 测试图标
-      'customClean': 'trash', // 清空图标
       'customAgentItem': 'symbol-class', // 自定义Agent图标
       'customEnvItem': 'symbol-namespace', // 自定义环境模块图标
       'customAgentsGroup': 'folder', // Agents组图标
@@ -130,25 +143,11 @@ export class ProjectItem extends vscode.TreeItem {
           arguments: [vscode.Uri.file(filePath)]  // 传递文件URI作为参数
         };
       }
-    } else if (type === 'chat') {
-      // AI Chat节点：点击时打开AI Chat界面
-      this.command = {
-        command: 'aiSocialScientist.openChat',  // 打开AI Chat的命令
-        title: localize('projectStructure.openAiChat')
-      };
-    } else if (type === 'prefillParamsEnv') {
-      // 环境模块预置参数节点：点击时打开预填充参数界面（显示环境模块）
+    } else if (type === 'prefillParamsGroup') {
+      // 环境与智能体节点：点击时打开统一的管理界面
       this.command = {
         command: 'agentsociety.viewPrefillParams',
-        title: 'View Environment Module Prefill Parameters',
-        arguments: ['env_module']
-      };
-    } else if (type === 'prefillParamsAgent') {
-      // 智能体类预置参数节点：点击时打开预填充参数界面（显示Agent）
-      this.command = {
-        command: 'agentsociety.viewPrefillParams',
-        title: 'View Agent Prefill Parameters',
-        arguments: ['agent']
+        title: 'View Environment & Agents Management',
       };
     } else if (type === 'settings') {
       // 配置设置节点：点击时打开配置页（而非 VS Code 设置）
@@ -212,6 +211,9 @@ export class ProjectStructureProvider implements vscode.TreeDataProvider<Project
     envs: Array<{ type: string; class_name: string; description: string; file_path: string }>;
   } = { agents: [], envs: [] };
 
+  // Workspace Manager - 本地文件操作
+  private workspaceManager: WorkspaceManager;
+
   /**
    * 构造函数
    * @param context - ExtensionContext，VSCode扩展的上下文对象
@@ -226,6 +228,7 @@ export class ProjectStructureProvider implements vscode.TreeDataProvider<Project
     // 创建输出通道，用于显示调试日志
     // 用户可以在VSCode的"输出"面板中选择"AI Social Scientist"查看日志
     this.outputChannel = vscode.window.createOutputChannel('AI Social Scientist');
+    this.workspaceManager = new WorkspaceManager(context);
     this.log('ProjectStructureProvider initialized');
 
     // 设置文件系统监听器
@@ -386,6 +389,9 @@ export class ProjectStructureProvider implements vscode.TreeDataProvider<Project
 
     // 清理输出通道
     this.outputChannel.dispose();
+
+    // 清理 Workspace Manager
+    this.workspaceManager.dispose();
   }
 
   /**
@@ -427,122 +433,163 @@ export class ProjectStructureProvider implements vscode.TreeDataProvider<Project
 
     const workspacePath = workspaceFolder.uri.fsPath;
 
-    // 根节点：显示研究话题和AI Chat
+    // 检查工作区状态
+    const topicFile = path.join(workspacePath, 'TOPIC.md');
+    const envFile = path.join(workspacePath, '.env');
+    const hasEnv = fs.existsSync(envFile);
+    const hasTopic = fs.existsSync(topicFile);
+
+    // 检查.env是否已配置（有API key）
+    const { EnvManager } = await import('./envManager');
+    const envManager = new EnvManager();
+    const envConfig = envManager.readEnv();
+    const hasApiKey = !!(envConfig.llmApiKey?.trim());
+
+    // 检查工作区目录结构是否完整
+    const workspaceHealth = this.checkWorkspaceHealth(workspacePath);
+    const needsFix = !workspaceHealth.isHealthy;
+
+    // 根节点：显示研究话题
     // element为undefined表示这是根节点
     if (!element) {
       const items: ProjectItem[] = [];
 
-      // 添加AI Chat节点（始终显示）
-      items.push(new ProjectItem(
-        localize('projectStructure.aiChat'),  // 显示标签（国际化）
-        vscode.TreeItemCollapsibleState.None,  // 没有子节点
-        'chat',  // 节点类型
-        undefined  // 不关联文件，点击时执行命令
-      ));
-
-      // 添加配置设置节点（始终显示，在AI Chat下方）
-      items.push(new ProjectItem(
-        localize('projectStructure.settings'),  // 显示标签（国际化）：配置设置
-        vscode.TreeItemCollapsibleState.None,  // 没有子节点
-        'settings',  // 节点类型
-        undefined  // 不关联文件，点击时执行命令
-      ));
-
-      // 添加预填充参数组节点（始终显示，在配置设置下方）
-      items.push(new ProjectItem(
-        localize('prefillParams.groupTitle'),  // 显示标签（国际化）：环境与智能体
-        vscode.TreeItemCollapsibleState.Collapsed,  // 可展开
-        'prefillParamsGroup',  // 节点类型
-        undefined  // 不关联文件
-      ));
-
-      // 添加自定义模块组节点（始终显示，在预填充参数下方）
-      items.push(new ProjectItem(
-        localize('projectStructure.customModules'),  // 显示标签（国际化）：自定义模块
-        vscode.TreeItemCollapsibleState.Collapsed,  // 可展开
-        'custom',  // 节点类型
-        undefined  // 不关联文件
-      ));
-
-      // 如果存在TOPIC.md文件，添加Research Topic节点
-      const topicFile = path.join(workspacePath, 'TOPIC.md');
-      if (fs.existsSync(topicFile)) {
-        items.push(new ProjectItem(
-          localize('projectStructure.researchTopic'),  // 显示标签（国际化）
-          vscode.TreeItemCollapsibleState.Expanded,  // 初始状态为展开
-          'topic',  // 节点类型
-          topicFile  // 文件路径，点击可打开
-        ));
+      // 阶段1: 没有.env文件 -> 提示配置环境变量
+      if (!hasEnv) {
+        const settingsItem = new ProjectItem(
+          localize('projectStructure.settings'),
+          vscode.TreeItemCollapsibleState.None,
+          'settings',
+          undefined
+        );
+        items.push(settingsItem);
+        return items;
       }
 
+      // 阶段2: 有.env但没有配置API key -> 提示配置环境变量
+      if (hasEnv && !hasApiKey) {
+        const settingsItem = new ProjectItem(
+          localize('projectStructure.settings'),
+          vscode.TreeItemCollapsibleState.None,
+          'settings',
+          undefined
+        );
+        items.push(settingsItem);
+
+        // 显示说明信息
+        const infoItem = new ProjectItem(
+          'API Key required / 需要配置 API 密钥',
+          vscode.TreeItemCollapsibleState.None,
+          'initWorkspace',
+          undefined
+        );
+        items.push(infoItem);
+        return items;
+      }
+
+      // 阶段3: 有.env且配置了API key，但没有TOPIC.md -> 提示初始化工作区
+      if (hasEnv && hasApiKey && !hasTopic) {
+        // 配置设置按钮始终在最上面
+        const settingsItem = new ProjectItem(
+          localize('projectStructure.settings'),
+          vscode.TreeItemCollapsibleState.None,
+          'settings',
+          undefined
+        );
+        items.push(settingsItem);
+
+        const initItem = new ProjectItem(
+          localize('extension.initProject.button'),
+          vscode.TreeItemCollapsibleState.None,
+          'initWorkspace',
+          undefined
+        );
+        initItem.command = {
+          command: 'aiSocialScientist.initProject',
+          title: 'Initialize Workspace'
+        };
+        items.push(initItem);
+
+        return items;
+      }
+
+      // 已初始化：配置设置按钮始终在最上面
+      const settingsItem = new ProjectItem(
+        localize('projectStructure.settings'),
+        vscode.TreeItemCollapsibleState.None,
+        'settings',
+        undefined
+      );
+      items.push(settingsItem);
+
+      // 添加 AI Chat 入口
+      const aiChatItem = new ProjectItem(
+        localize('extension.aiChat.label'),
+        vscode.TreeItemCollapsibleState.None,
+        'aiChat',
+        undefined
+      );
+      aiChatItem.command = {
+        command: 'aiSocialScientist.openChat',
+        title: 'Open AI Chat'
+      };
+      items.push(aiChatItem);
+
+      // 如果工作区目录结构不完整，显示修复按钮
+      if (needsFix) {
+        const fixItem = new ProjectItem(
+          localize('extension.fixWorkspace.button'),
+          vscode.TreeItemCollapsibleState.None,
+          'fixWorkspace',
+          undefined
+        );
+        fixItem.command = {
+          command: 'aiSocialScientist.fixWorkspace',
+          title: 'Fix Workspace Directory'
+        };
+        items.push(fixItem);
+      }
+
+      // 添加同步 AI 助手资源节点
+      const syncItem = new ProjectItem(
+        localize('projectStructure.syncResources'),
+        vscode.TreeItemCollapsibleState.None,
+        'syncResources',
+        undefined
+      );
+      syncItem.command = {
+        command: 'aiSocialScientist.updateSkills',
+        title: localize('projectStructure.syncResources')
+      };
+      items.push(syncItem);
+
+      // 添加环境与智能体组节点（直接点击打开管理页面）
+      items.push(new ProjectItem(
+        localize('prefillParams.groupTitle'),
+        vscode.TreeItemCollapsibleState.None,
+        'prefillParamsGroup',
+        undefined
+      ));
+
+      // 添加 Research Topic 节点
+      items.push(new ProjectItem(
+        localize('projectStructure.researchTopic'),
+        vscode.TreeItemCollapsibleState.Expanded,
+        'topic',
+        topicFile
+      ));
+
       return items;
     }
 
-    // 预填充参数组节点的子节点：显示环境模块预置参数和智能体类预置参数
+    // 环境与智能体节点的子节点：已移空（测试功能移至webview内）
     if (element.type === 'prefillParamsGroup') {
-      const items: ProjectItem[] = [];
-
-      // 添加环境模块预置参数节点
-      items.push(new ProjectItem(
-        localize('prefillParams.envModuleTitle'),  // 环境模块预置参数
-        vscode.TreeItemCollapsibleState.None,  // 没有子节点
-        'prefillParamsEnv',  // 节点类型
-        undefined  // 不关联文件，点击时执行命令
-      ));
-
-      // 添加智能体类预置参数节点
-      items.push(new ProjectItem(
-        localize('prefillParams.agentTitle'),  // 智能体类预置参数
-        vscode.TreeItemCollapsibleState.None,  // 没有子节点
-        'prefillParamsAgent',  // 节点类型
-        undefined  // 不关联文件，点击时执行命令
-      ));
-
-      return items;
+      return [];
     }
 
-    // 自定义模块节点的子节点：显示操作按钮和扫描结果
+    // 自定义模块节点的子节点：显示扫描结果（已废弃，保留兼容性）
     if (element.type === 'custom') {
       const items: ProjectItem[] = [];
-
-      // 添加扫描按钮
-      const scanItem = new ProjectItem(
-        localize('projectStructure.customScan'),
-        vscode.TreeItemCollapsibleState.None,
-        'customScan',
-        undefined
-      );
-      scanItem.command = {
-        command: 'aiSocialScientist.scanCustomModules',
-        title: localize('projectStructure.customScan')
-      };
-      items.push(scanItem);
-
-      // 添加测试按钮
-      const testItem = new ProjectItem(
-        localize('projectStructure.customTest'),
-        vscode.TreeItemCollapsibleState.None,
-        'customTest',
-        undefined
-      );
-      testItem.command = {
-        command: 'aiSocialScientist.testCustomModules',
-        title: localize('projectStructure.customTest')
-      };
-      items.push(testItem);
-
-      // 添加清空按钮
-      const cleanItem = new ProjectItem(
-        localize('projectStructure.customClean'),
-        vscode.TreeItemCollapsibleState.None,
-        'customClean',
-        undefined
-      );
-      cleanItem.command = {
-        command: 'aiSocialScientist.cleanCustomModules',
-        title: localize('projectStructure.customClean')
-      };
-      items.push(cleanItem);
 
       // 如果有扫描结果,显示分组
       if (this.customModulesCache.agents.length > 0) {
@@ -646,6 +693,18 @@ export class ProjectStructureProvider implements vscode.TreeDataProvider<Project
           vscode.TreeItemCollapsibleState.Collapsed,  // 可展开
           'userdata',  // 节点类型为userdata
           undefined  // 用户数据节点本身不关联文件
+        ));
+      }
+
+      // 查找custom目录，如果存在，创建一个"自定义模块"节点
+      const customDir = path.join(workspacePath, 'custom');
+      if (fs.existsSync(customDir)) {
+        // 创建一个"自定义模块"节点，可展开显示子目录
+        items.push(new ProjectItem(
+          localize('projectStructure.customModules'),
+          vscode.TreeItemCollapsibleState.Collapsed,
+          'customWorkspace',
+          undefined
         ));
       }
 
@@ -829,6 +888,46 @@ export class ProjectStructureProvider implements vscode.TreeDataProvider<Project
       }
     }
 
+    // Custom Workspace节点（custom/目录）的子节点：显示agents和envs
+    if (element.type === 'customWorkspace') {
+      const workspaceFolder = vscode.workspace.workspaceFolders?.[0];
+      if (!workspaceFolder) {
+        return [];
+      }
+      const workspacePath = workspaceFolder.uri.fsPath;
+      const customDir = path.join(workspacePath, 'custom');
+      const items: ProjectItem[] = [];
+
+      if (fs.existsSync(customDir)) {
+        const entries = fs.readdirSync(customDir);
+
+        for (const entry of entries) {
+          const fullPath = path.join(customDir, entry);
+          const stat = fs.statSync(fullPath);
+
+          if (stat.isDirectory()) {
+            // 创建可展开的目录节点
+            items.push(new ProjectItem(
+              entry,
+              vscode.TreeItemCollapsibleState.Collapsed,
+              'file',  // 使用file类型来复用目录展开逻辑
+              fullPath
+            ));
+          } else if (stat.isFile()) {
+            // 创建文件节点
+            items.push(new ProjectItem(
+              entry,
+              vscode.TreeItemCollapsibleState.None,
+              'file',
+              fullPath
+            ));
+          }
+        }
+      }
+
+      return items;
+    }
+
     // Hypothesis节点的子节点：显示实验和SIM设置
     if (element.type === 'hypothesis') {
       // 获取假设目录的路径
@@ -887,19 +986,20 @@ export class ProjectStructureProvider implements vscode.TreeDataProvider<Project
       const experimentDir = path.dirname(element.filePath || '');
       const items: ProjectItem[] = [];
 
-      // 检查init/results目录
+      // 检查init目录（直接包含配置文件：config_params.py, init_config.json, steps.yaml）
       const initDir = path.join(experimentDir, 'init');
       if (fs.existsSync(initDir)) {
-        const resultsDir = path.join(initDir, 'results');
-        if (fs.existsSync(resultsDir)) {
-          // 读取results目录下的所有文件
-          const resultFiles = fs.readdirSync(resultsDir);
-          for (const file of resultFiles) {
+        // 读取init目录下的所有文件
+        const initFiles = fs.readdirSync(initDir);
+        for (const file of initFiles) {
+          const filePath = path.join(initDir, file);
+          const stat = fs.statSync(filePath);
+          if (stat.isFile()) {
             items.push(new ProjectItem(
-              localize('projectStructure.init', file),  // 添加"Init:"前缀以便区分
+              `Init: ${file}`,  // 添加"Init:"前缀以便区分
               vscode.TreeItemCollapsibleState.None,
               'file',
-              path.join(resultsDir, file)
+              filePath
             ));
           }
         }
@@ -1384,23 +1484,63 @@ export class ProjectStructureProvider implements vscode.TreeDataProvider<Project
     }
 
     try {
-      // 调用后端初始化能力
-      const response = await this.apiClient.initWorkspace({
-        workspace_path: workspacePath,
-        topic: topic
-      });
+      // 使用进度提示显示初始化过程
+      const result = await vscode.window.withProgress(
+        {
+          location: vscode.ProgressLocation.Notification,
+          title: localize('workspaceInit.initializing'),
+          cancellable: false,
+        },
+        async (progress) => {
+          // 使用本地 WorkspaceManager 初始化，传递 progress 对象
+          return await this.workspaceManager.init({ topic, progress });
+        }
+      );
 
-      if (response.success) {
-        vscode.window.showInformationMessage(response.message);
+      if (result.success) {
+        vscode.window.showInformationMessage(localize('workspaceInit.success', topic));
       } else {
-        vscode.window.showErrorMessage(response.message);
+        // 失败时显示错误消息
+        vscode.window.showErrorMessage(result.message);
       }
     } catch (error: any) {
+      // 异常时也显示错误消息
       vscode.window.showErrorMessage(localize('projectStructure.initWorkspace.failed', error.message || error));
     }
 
     // 刷新视图，显示新创建的文件和目录
     this.refresh();
+  }
+
+  /**
+   * 同步助手资源 - 复制最新技能和 CLAUDE.md 到工作区
+   */
+  async updateSkills(): Promise<void> {
+    try {
+      vscode.window.showInformationMessage(localize('customModules.syncAssistant.updating'));
+
+      const result = await this.workspaceManager.copySkills();
+
+      if (result.success) {
+        const message = localize('customModules.syncAssistant.success', result.copied.length, result.message);
+        if (result.claudeMdUpdated) {
+          vscode.window.showInformationMessage(message + ' - ' + localize('customModules.syncAssistant.claudeMdUpdated'));
+        } else {
+          vscode.window.showInformationMessage(message);
+        }
+      } else {
+        vscode.window.showErrorMessage(result.message);
+      }
+    } catch (error: any) {
+      vscode.window.showErrorMessage(localize('customModules.syncAssistant.failed', error.message || error));
+    }
+  }
+
+  /**
+   * 获取 Skills 状态
+   */
+  getSkillsStatus(): { skillsDirExists: boolean; installedSkills: string[] } {
+    return this.workspaceManager.getSkillsStatus();
   }
 
   /**
@@ -1472,8 +1612,7 @@ export class ProjectStructureProvider implements vscode.TreeDataProvider<Project
 
       if (response.success) {
         vscode.window.showInformationMessage(
-          localize('customModules.testSuccess') +
-          (response.test_file ? `\n${response.test_file}` : '')
+          localize('customModules.testSuccess')
         );
 
         // 如果有测试输出，显示在输出通道
@@ -1494,9 +1633,76 @@ export class ProjectStructureProvider implements vscode.TreeDataProvider<Project
   }
 
   /**
-   * 清空自定义模块配置
+   * 检查工作区目录结构健康状态
+   * @returns 工作区健康状态信息
    */
-  async cleanCustomModules(): Promise<void> {
+  checkWorkspaceHealth(workspacePath: string): {
+    isHealthy: boolean;
+    missingItems: string[];
+    issues: string[];
+  } {
+    const missingItems: string[] = [];
+    const issues: string[] = [];
+
+    // 必需的目录
+    const requiredDirs = [
+      'papers',
+      'user_data',
+      'custom',
+      'custom/agents',
+      'custom/envs',
+      '.agentsociety',
+      '.claude',
+      '.claude/skills'
+    ];
+
+    // 必需的文件
+    const requiredFiles = [
+      'TOPIC.md',
+      'CLAUDE.md',
+      'AGENTS.md',
+      '.env',
+      'papers/literature_index.json',
+      '.agentsociety/prefill_params.json'
+    ];
+
+    // 检查目录
+    for (const dir of requiredDirs) {
+      const dirPath = path.join(workspacePath, dir);
+      if (!fs.existsSync(dirPath)) {
+        missingItems.push(`${dir}/`);
+      }
+    }
+
+    // 检查文件
+    for (const file of requiredFiles) {
+      const filePath = path.join(workspacePath, file);
+      if (!fs.existsSync(filePath)) {
+        missingItems.push(file);
+      }
+    }
+
+    // 检查custom目录中是否有示例文件（仅作为警告）
+    const customAgentsDir = path.join(workspacePath, 'custom', 'agents');
+    const customEnvsDir = path.join(workspacePath, 'custom', 'envs');
+    if (fs.existsSync(customAgentsDir)) {
+      const agents = fs.readdirSync(customAgentsDir);
+      if (agents.length === 0 || agents.every(f => f.startsWith('__') || f === 'examples')) {
+        issues.push('custom/agents/ 目录为空或只有示例文件');
+      }
+    }
+
+    return {
+      isHealthy: missingItems.length === 0,
+      missingItems,
+      issues
+    };
+  }
+
+  /**
+   * 修复工作区目录结构
+   */
+  async fixWorkspace(): Promise<void> {
     const workspaceFolder = vscode.workspace.workspaceFolders?.[0];
     if (!workspaceFolder) {
       vscode.window.showErrorMessage(localize('customModules.noWorkspace'));
@@ -1504,41 +1710,41 @@ export class ProjectStructureProvider implements vscode.TreeDataProvider<Project
     }
 
     const workspacePath = workspaceFolder.uri.fsPath;
+    const health = this.checkWorkspaceHealth(workspacePath);
 
-    // 确认对话框
+    if (health.isHealthy) {
+      vscode.window.showInformationMessage(localize('workspaceFix.healthy'));
+      return;
+    }
+
+    // 显示问题并询问是否修复
+    const missingList = health.missingItems.map(i => `  - ${i}`).join('\n');
+    const message = localize('workspaceFix.confirm', health.missingItems.length, missingList);
+
     const confirm = await vscode.window.showWarningMessage(
-      localize('customModules.cleanConfirm'),
+      message,
       { modal: true },
-      localize('customModules.cleanConfirmButton'),
-      localize('projectStructure.initWorkspace.cancel')
+      'Fix / 修复',
+      'Cancel / 取消'
     );
 
-    if (confirm !== localize('customModules.cleanConfirmButton')) {
+    if (confirm !== 'Fix / 修复') {
       return;
     }
 
     try {
-      const response = await this.apiClient.cleanCustomModules({
-        workspace_path: workspacePath
-      });
+      // 使用 WorkspaceManager 来修复工作区
+      const result = await this.workspaceManager.init({ topic: 'Fix Workspace' });
 
-      if (response.success) {
-        // 清空缓存
-        this.customModulesCache = { agents: [], envs: [] };
-
-        vscode.window.showInformationMessage(
-          localize('customModules.cleanSuccess') +
-          ` (${response.removed_count} ${localize('projectStructure.customModules')} removed)`
-        );
-
-        // 刷新视图
+      if (result.success) {
+        vscode.window.showInformationMessage(localize('workspaceFix.fixed', result.filesCreated?.length || 0));
         this.refresh();
       } else {
-        vscode.window.showErrorMessage(localize('customModules.cleanFailed', response.message));
+        vscode.window.showErrorMessage(localize('workspaceFix.failed', result.message));
       }
     } catch (error: any) {
-      this.log(`Clean custom modules failed: ${error}`);
-      vscode.window.showErrorMessage(localize('customModules.cleanFailed', error.message || error));
+      this.log(`Fix workspace failed: ${error}`);
+      vscode.window.showErrorMessage(localize('workspaceFix.failed', error.message || error));
     }
   }
 }

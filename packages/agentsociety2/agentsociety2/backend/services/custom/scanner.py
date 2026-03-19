@@ -31,11 +31,7 @@ class CustomModuleScanner:
         Returns:
             包含 agents, envs, errors 的字典
         """
-        result = {
-            "agents": [],
-            "envs": [],
-            "errors": []
-        }
+        result = {"agents": [], "envs": [], "errors": []}
 
         if not self.custom_dir.exists():
             result["errors"].append(f"custom/ 目录不存在: {self.custom_dir}")
@@ -57,7 +53,9 @@ class CustomModuleScanner:
 
         return result
 
-    def _scan_agents(self, agents_dir: Path, skip_examples: bool = True) -> List[Dict[str, Any]]:
+    def _scan_agents(
+        self, agents_dir: Path, skip_examples: bool = True
+    ) -> List[Dict[str, Any]]:
         """
         扫描 Agent 目录
 
@@ -82,20 +80,26 @@ class CustomModuleScanner:
             try:
                 agent_classes = self._extract_agent_classes(py_file)
                 for cls in agent_classes:
-                    agents.append({
-                        "type": cls.__name__,
-                        "class_name": cls.__name__,
-                        "module_path": str(py_file.relative_to(self.workspace_path)),
-                        "file_path": str(py_file),
-                        "description": self._get_safe_description(cls),
-                    })
+                    agents.append(
+                        {
+                            "type": cls.__name__,
+                            "class_name": cls.__name__,
+                            "module_path": str(
+                                py_file.relative_to(self.workspace_path)
+                            ),
+                            "file_path": str(py_file),
+                            "description": self._get_safe_description(cls),
+                        }
+                    )
             except Exception as e:
                 # 记录错误但继续扫描
                 pass
 
         return agents
 
-    def _scan_envs(self, envs_dir: Path, skip_examples: bool = True) -> List[Dict[str, Any]]:
+    def _scan_envs(
+        self, envs_dir: Path, skip_examples: bool = True
+    ) -> List[Dict[str, Any]]:
         """
         扫描环境模块目录
 
@@ -120,13 +124,17 @@ class CustomModuleScanner:
             try:
                 env_classes = self._extract_env_classes(py_file)
                 for cls in env_classes:
-                    envs.append({
-                        "type": cls.__name__,
-                        "class_name": cls.__name__,
-                        "module_path": str(py_file.relative_to(self.workspace_path)),
-                        "file_path": str(py_file),
-                        "description": self._get_safe_description(cls),
-                    })
+                    envs.append(
+                        {
+                            "type": cls.__name__,
+                            "class_name": cls.__name__,
+                            "module_path": str(
+                                py_file.relative_to(self.workspace_path)
+                            ),
+                            "file_path": str(py_file),
+                            "description": self._get_safe_description(cls),
+                        }
+                    )
             except Exception as e:
                 pass
 
@@ -143,7 +151,9 @@ class CustomModuleScanner:
             Agent 类列表
         """
         # 动态导入模块
-        spec = importlib.util.spec_from_file_location(f"custom_module_{id(file_path)}", file_path)
+        spec = importlib.util.spec_from_file_location(
+            f"custom_module_{id(file_path)}", file_path
+        )
         if spec is None or spec.loader is None:
             return []
 
@@ -166,10 +176,12 @@ class CustomModuleScanner:
             agents = []
             for name, obj in inspect.getmembers(module, inspect.isclass):
                 # 检查是否是 AgentBase 的子类，且不是 AgentBase 本身
-                if (inspect.isclass(obj) and
-                    issubclass(obj, AgentBase) and
-                    obj is not AgentBase and
-                    obj.__module__ == module_name):
+                if (
+                    inspect.isclass(obj)
+                    and issubclass(obj, AgentBase)
+                    and obj is not AgentBase
+                    and obj.__module__ == module_name
+                ):
                     if self._validate_agent_class(obj):
                         agents.append(obj)
 
@@ -190,7 +202,9 @@ class CustomModuleScanner:
             环境模块类列表
         """
         # 动态导入模块
-        spec = importlib.util.spec_from_file_location(f"custom_module_{id(file_path)}", file_path)
+        spec = importlib.util.spec_from_file_location(
+            f"custom_module_{id(file_path)}", file_path
+        )
         if spec is None or spec.loader is None:
             return []
 
@@ -209,10 +223,12 @@ class CustomModuleScanner:
 
             envs = []
             for name, obj in inspect.getmembers(module, inspect.isclass):
-                if (inspect.isclass(obj) and
-                    issubclass(obj, EnvBase) and
-                    obj is not EnvBase and
-                    obj.__module__ == module_name):
+                if (
+                    inspect.isclass(obj)
+                    and issubclass(obj, EnvBase)
+                    and obj is not EnvBase
+                    and obj.__module__ == module_name
+                ):
                     if self._validate_env_class(obj):
                         envs.append(obj)
 

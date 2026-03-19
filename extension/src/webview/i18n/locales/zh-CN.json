@@ -87,6 +87,7 @@
   },
   "prefillParams": {
     "title": "预填充参数",
+    "groupTitle": "环境与智能体",
     "loading": "正在加载预填充参数...",
     "error": "错误",
     "refresh": "刷新",
@@ -101,11 +102,19 @@
       "noPrefillParams": "此类未配置预填充参数",
       "hasPrefill": "已配置预填充参数",
       "envModule": "环境模块",
-      "agent": "智能体"
+      "agent": "智能体",
+      "builtin": "内置",
+      "custom": "自定义",
+      "test": "测试"
+    },
+    "test": {
+      "success": "测试通过",
+      "failed": "测试失败"
     },
     "errorMessages": {
       "loadFailed": "加载数据失败",
-      "noWorkspace": "未找到工作区文件夹"
+      "noWorkspace": "未找到工作区文件夹",
+      "backendDisconnected": "后端服务未连接，请先启动后端服务"
     }
   },
   "replay": {
@@ -181,6 +190,136 @@
       "mapIntegration": "地图集成",
       "mapIntegrationHint": "如需使用 DeckGL + Mapbox 进行交互式地图展示，请安装依赖：",
       "installHint": "npm install deck.gl react-map-gl mapbox-gl"
+    }
+  },
+  "configPage": {
+    "title": "AI Social Scientist 配置向导",
+    "description": "按步骤配置您的环境，每一步都可以单独保存",
+    "steps": {
+      "llm": {
+        "title": "LLM 配置",
+        "description": "配置大语言模型 API"
+      },
+      "backend": {
+        "title": "后端服务",
+        "description": "配置后端服务地址"
+      },
+      "coder": {
+        "title": "代码生成 LLM",
+        "description": "代码生成专用模型（可选）"
+      },
+      "advanced": {
+        "title": "高级功能",
+        "description": "Embedding、搜索等（可选）"
+      },
+      "finish": {
+        "title": "完成",
+        "description": "完成配置"
+      }
+    },
+    "noWorkspace": "未检测到工作区",
+    "noWorkspaceHint": "请先打开一个工作区文件夹（File > Open Folder）",
+    "save": "保存",
+    "validate": "验证",
+    "validating": "验证中...",
+    "validationSuccess": "验证成功",
+    "validationFailed": "验证失败",
+    "startBackend": "启动后端服务",
+    "previous": "上一步",
+    "next": "下一步",
+    "llm": {
+      "apiKey": "LLM API 密钥",
+      "apiKeyRequired": "LLM API 密钥 *",
+      "apiKeyRequiredHint": "用于默认对话、分析等核心功能",
+      "apiKeyPlaceholder": "sk-xxx 或您的 API 密钥",
+      "apiBase": "LLM API 基础URL",
+      "apiBasePlaceholder": "https://cloud.infini-ai.com/maas/v1",
+      "modelName": "LLM 模型名称",
+      "modelPlaceholder": "qwen3-next-80b-a3b-instruct"
+    },
+    "backend": {
+      "title": "后端服务配置",
+      "hint": "端口将自动分配，Python 路径留空则自动检测",
+      "pythonPath": "Python 路径（可选，留空自动检测）",
+      "pythonPathPlaceholder": "python3 或 /usr/bin/python3"
+    },
+    "coder": {
+      "title": "代码生成 LLM（可选）",
+      "hint": "用于代码生成的专用模型，留空则使用默认 LLM",
+      "apiKey": "代码生成 LLM API 密钥",
+      "apiKeyPlaceholder": "留空则使用默认",
+      "apiBase": "代码生成 LLM API 基础 URL",
+      "apiBasePlaceholder": "留空则使用默认",
+      "model": "代码生成 LLM 模型",
+      "modelPlaceholder": "glm-4.7"
+    },
+    "advanced": {
+      "embedding": {
+        "title": "Embedding 模型",
+        "hint": "用于文本嵌入，留空则使用默认 LLM",
+        "apiKey": "Embedding API 密钥",
+        "apiKeyPlaceholder": "留空则使用默认 LLM 密钥",
+        "apiBase": "Embedding API 基础 URL",
+        "apiBasePlaceholder": "留空则使用默认 LLM URL",
+        "model": "Embedding 模型名称",
+        "modelPlaceholder": "bge-m3",
+        "dims": "向量维度",
+        "dimsPlaceholder": "1024"
+      },
+      "nano": {
+        "title": "高频操作 LLM（可选）",
+        "hint": "用于高频快速操作的轻量级模型",
+        "apiKey": "高频操作 LLM API 密钥",
+        "apiKeyPlaceholder": "留空则使用默认",
+        "apiBase": "高频操作 LLM API 基础 URL",
+        "apiBasePlaceholder": "留空则使用默认",
+        "model": "高频操作 LLM 模型",
+        "modelPlaceholder": "qwen3-next-80b-a3b-instruct"
+      },
+      "easypaper": {
+        "title": "EasyPaper（可选）",
+        "hint": "论文 PDF 排版服务",
+        "apiUrl": "EasyPaper API URL",
+        "apiUrlPlaceholder": "http://localhost:8004",
+        "llmApiKey": "EasyPaper 通用 LLM API Key",
+        "llmApiKeyPlaceholder": "与默认 LLM 一致可留空",
+        "llmModel": "EasyPaper LLM 模型",
+        "llmModelPlaceholder": "qwen3-next-80b-a3b-instruct",
+        "vlmModel": "EasyPaper VLM 模型",
+        "vlmModelPlaceholder": "qwen3-vl-235b-a22b-thinking",
+        "vlmApiKey": "EasyPaper VLM API Key",
+        "vlmApiKeyPlaceholder": "与 LLM API Key 一致可留空"
+      },
+      "literature": {
+        "title": "文献检索服务（可选）",
+        "apiUrl": "文献检索 API URL",
+        "apiUrlPlaceholder": "http://localhost:8002/api/v1/search"
+      }
+    },
+    "finish": {
+      "title": "配置完成！",
+      "description": "所有配置已保存到工作区的 <code>.env</code> 文件中。",
+      "hint": "点击下方按钮启动后端服务。"
+    },
+    "notifications": {
+      "saveSuccess": "保存成功",
+      "saveSuccessDesc": "配置已保存到 .env 文件",
+      "saveFailed": "保存失败",
+      "llmKeyRequired": "LLM API 密钥不能为空",
+      "llmKeyRequiredDesc": "请输入 LLM API 密钥以继续",
+      "apiKeyMissing": "请输入 LLM API 密钥",
+      "apiBaseMissing": "请输入 LLM API 基础 URL"
+    },
+    "validation": {
+      "failed": "验证失败，请检查 API 密钥和基础 URL",
+      "emptyApiKey": "API Key 或 Base URL 为空",
+      "invalidKey": "API Key 无效或已过期",
+      "invalidUrl": "API 地址不正确。请检查地址是否包含 /v1 路径",
+      "serverError": "服务器错误",
+      "requestFailed": "请求失败",
+      "connectionFailed": "无法连接到 API 地址。请检查网络或 API 地址是否正确",
+      "timeout": "请求超时，请检查网络连接或 API 地址是否正确",
+      "unknownError": "未知错误"
     }
   }
 }

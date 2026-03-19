@@ -10,10 +10,14 @@ from litellm.router import Router
 
 from agentsociety2.logger import get_logger, setup_litellm_logging
 
+# 禁用遥测（避免连接 Posthog/Facebook 等外部服务）
 # mem0 telemetry has per-call Posthog client creation in current upstream version,
 # which may lead to excessive background threads in long simulations.
 # Keep override capability: users can still export MEM0_TELEMETRY=true explicitly.
 os.environ.setdefault("MEM0_TELEMETRY", "False")
+
+# ChromaDB 也使用 Posthog 进行遥测，必须禁用
+os.environ.setdefault("ANONYMIZED_TELEMETRY", "False")
 
 from mem0.memory.main import MemoryConfig
 import mem0.memory.main as _mem0_main
@@ -147,7 +151,9 @@ class Config:
     or pricing structures.
     """
 
-    CODER_LLM_API_BASE: str = os.getenv("AGENTSOCIETY_CODER_LLM_API_BASE", LLM_API_BASE)
+    CODER_LLM_API_BASE: str = (
+        os.getenv("AGENTSOCIETY_CODER_LLM_API_BASE") or LLM_API_BASE
+    )
     """
     Base URL endpoint for the code generation LLM API.
 
@@ -190,7 +196,9 @@ class Config:
     key allows you to use a faster or cheaper model for these high-frequency operations.
     """
 
-    NANO_LLM_API_BASE: str = os.getenv("AGENTSOCIETY_NANO_LLM_API_BASE", LLM_API_BASE)
+    NANO_LLM_API_BASE: str = (
+        os.getenv("AGENTSOCIETY_NANO_LLM_API_BASE") or LLM_API_BASE
+    )
     """
     Base URL endpoint for the nano LLM API.
 
@@ -233,7 +241,9 @@ class Config:
     operations. Some providers offer separate embedding services with different pricing.
     """
 
-    EMBEDDING_API_BASE: str = os.getenv("AGENTSOCIETY_EMBEDDING_API_BASE", LLM_API_BASE)
+    EMBEDDING_API_BASE: str = (
+        os.getenv("AGENTSOCIETY_EMBEDDING_API_BASE") or LLM_API_BASE
+    )
     """
     Base URL endpoint for the embedding API service.
 
@@ -544,6 +554,19 @@ class Config:
             },
         }
         return MemoryConfig.model_validate(memory_config)
+
+
+# Validate required configuration at module load time
+if not Config.LLM_API_KEY:
+    raise ValueError(
+        "AGENTSOCIETY_LLM_API_KEY is required. "
+        "Please set this environment variable before running AgentSociety2."
+    )
+if not Config.LLM_API_BASE:
+    raise ValueError(
+        "AGENTSOCIETY_LLM_API_BASE is required. "
+        "Please set this environment variable before running AgentSociety2."
+    )
 
 
 # Global router instances (lazy initialization)

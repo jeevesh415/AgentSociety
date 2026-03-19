@@ -33,11 +33,7 @@ class CustomModuleJsonGenerator:
         Returns:
             生成统计信息
         """
-        counts = {
-            "agents_generated": 0,
-            "envs_generated": 0,
-            "errors": 0
-        }
+        counts = {"agents_generated": 0, "envs_generated": 0, "errors": 0}
 
         # 确保目录存在
         self.agent_classes_dir.mkdir(parents=True, exist_ok=True)
@@ -74,22 +70,22 @@ class CustomModuleJsonGenerator:
 
             # 检查是否已存在非自定义的文件
             if file_path.exists():
-                with open(file_path, 'r', encoding='utf-8') as f:
+                with open(file_path, "r", encoding="utf-8") as f:
                     existing = json.load(f)
                     if not existing.get("is_custom"):
                         # 不覆盖内置模块
                         return False
 
             data = {
-                "type": agent_info['type'],
-                "class_name": agent_info['class_name'],
-                "description": agent_info['description'],
+                "type": agent_info["type"],
+                "class_name": agent_info["class_name"],
+                "description": agent_info["description"],
                 "is_custom": True,
-                "module_path": agent_info.get('module_path', ''),
-                "file_path": agent_info.get('file_path', ''),
+                "module_path": agent_info.get("module_path", ""),
+                "file_path": agent_info.get("file_path", ""),
             }
 
-            with open(file_path, 'w', encoding='utf-8') as f:
+            with open(file_path, "w", encoding="utf-8") as f:
                 json.dump(data, f, ensure_ascii=False, indent=2)
 
             return True
@@ -111,21 +107,21 @@ class CustomModuleJsonGenerator:
 
             # 检查是否已存在非自定义的文件
             if file_path.exists():
-                with open(file_path, 'r', encoding='utf-8') as f:
+                with open(file_path, "r", encoding="utf-8") as f:
                     existing = json.load(f)
                     if not existing.get("is_custom"):
                         return False
 
             data = {
-                "type": env_info['type'],
-                "class_name": env_info['class_name'],
-                "description": env_info['description'],
+                "type": env_info["type"],
+                "class_name": env_info["class_name"],
+                "description": env_info["description"],
                 "is_custom": True,
-                "module_path": env_info.get('module_path', ''),
-                "file_path": env_info.get('file_path', ''),
+                "module_path": env_info.get("module_path", ""),
+                "file_path": env_info.get("file_path", ""),
             }
 
-            with open(file_path, 'w', encoding='utf-8') as f:
+            with open(file_path, "w", encoding="utf-8") as f:
                 json.dump(data, f, ensure_ascii=False, indent=2)
 
             return True
@@ -145,7 +141,7 @@ class CustomModuleJsonGenerator:
         if self.agent_classes_dir.exists():
             for json_file in self.agent_classes_dir.glob("*.json"):
                 try:
-                    with open(json_file, 'r', encoding='utf-8') as f:
+                    with open(json_file, "r", encoding="utf-8") as f:
                         data = json.load(f)
                         if data.get("is_custom"):
                             json_file.unlink()
@@ -157,7 +153,7 @@ class CustomModuleJsonGenerator:
         if self.env_modules_dir.exists():
             for json_file in self.env_modules_dir.glob("*.json"):
                 try:
-                    with open(json_file, 'r', encoding='utf-8') as f:
+                    with open(json_file, "r", encoding="utf-8") as f:
                         data = json.load(f)
                         if data.get("is_custom"):
                             json_file.unlink()

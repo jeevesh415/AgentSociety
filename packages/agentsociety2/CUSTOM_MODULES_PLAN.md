@@ -53,7 +53,6 @@ my_workspace/
 │   └── env_modules/
 │       └── my_env.json             # 扫描后自动生成
 │
-└── test_custom_module.py            # 测试命令生成（自动生成）
 ```
 
 ## 一、用户交互机制
@@ -105,8 +104,8 @@ my_workspace/
                  │
                  ↓
 ┌─────────────────────────────────────────────────┐
-│  5. 系统自动生成 test_custom_module.py          │
-│     并执行测试                                  │
+│  5. 系统在内存中动态导入并测试模块              │
+│     不生成临时文件                              │
 └────────────────┬────────────────────────────────┘
                  │
                  ↓
@@ -374,232 +373,72 @@ class CustomModuleJsonGenerator:
         return count
 ```
 
-### 3. 测试脚本生成器 (`backend/services/custom/test_builder.py`)
+### 3. 内存测试执行器 (`backend/services/custom/script_generator.py`)
 
 ```python
+import importlib
+import io
+import sys
+from contextlib import redirect_stdout, redirect_stderr
 from pathlib import Path
-from typing import List, Dict, Any
-from datetime import datetime
+from typing import Dict, Any, List, Optional, Type
+from dataclasses import dataclass
 
-class TestScriptBuilder:
-    """自动生成测试脚本"""
+
+@dataclass
+class TestResult:
+    """单个测试结果"""
+    name: str
+    success: bool
+    output: str
+    error: Optional[str] = None
+
+
+class SafeModuleTester:
+    """安全的模块测试器（使用动态导入和反射）"""
+
+    # 允许的模块路径前缀（白名单）
+    ALLOWED_PATH_PREFIXES = [
+        "custom.agents",
+        "custom.envs",
+        "agentsociety2",
+    ]
 
     def __init__(self, workspace_path: str):
-        self.workspace_path = Path(workspace_path)
+        self.workspace_path = Path(workspace_path).resolve()
+        # 确保工作区路径在 sys.path 中
+        workspace_str = str(self.workspace_path)
+        if workspace_str not in sys.path:
+            sys.path.insert(0, workspace_str)
 
-    def build_test_script(self, scan_result: Dict[str, Any]) -> str:
-        """生成测试脚本内容"""
+    def _validate_module_path(self, module_path: str) -> bool:
+        """验证模块路径是否在允许的白名单内"""
+        clean_path = module_path.replace(".py", "").replace("/", ".")
+        for prefix in self.ALLOWED_PATH_PREFIXES:
+            if clean_path.startswith(prefix):
+                return True
+        return False
 
-        agents = scan_result.get("agents", [])
-        envs = scan_result.get("envs", [])
+    def _safe_import_class(self, module_path: str, class_name: str) -> Optional[Type]:
+        """安全地导入类"""
+        if not self._validate_module_path(module_path):
+            raise ValueError(f"模块路径不在白名单内: {module_path}")
+        if not class_name.replace("_", "").isalnum():
+            raise ValueError(f"类名包含非法字符: {class_name}")
 
-        # 构建导入语句
-        imports = []
-        for agent in agents:
-            module_path = agent['module_path'].replace('/', '.').replace('.py', '')
-            imports.append(f"from {module_path} import {agent['class_name']}")
-
-        for env in envs:
-            module_path = env['module_path'].replace('/', '.').replace('.py', '')
-            imports.append(f"from {module_path} import {env['class_name']}")
-
-        # 构建测试代码
-        script = f'''"""
-自动生成的测试脚本
-生成时间: {datetime.now().strftime("%Y-%m-%d %H:%M:%S")}
-
-此脚本用于快速测试自定义模块的基本功能。
-"""
-import asyncio
-import sys
-from pathlib import Path
-
-# 添加工作区到 Python 路径
-workspace_path = Path("{self.workspace_path}")
-sys.path.insert(0, str(workspace_path))
-sys.path.insert(0, str(workspace_path / "packages/agentsociety2"))
-
-{chr(10).join(imports)}
-
-from agentsociety2.env.router_react import ReActRouter
-
-
-async def test_agents():
-    """测试自定义 Agent"""
-    print("=" * 50)
-    print("测试自定义 Agent")
-    print("=" * 50)
-
-'''
-
-        # 添加 Agent 测试代码
-        for i, agent in enumerate(agents):
-            script += f'''
-    # 测试 {agent['class_name']}
-    print(f"\\n--- 测试 {agent['class_name']} ---")
-    try:
-        agent = {agent['class_name']}(
-            id={i},
-            profile={{"name": "测试用户", "personality": "友好"}}
-        )
-        print(f"✓ {agent['class_name']} 创建成功")
-
-        # 测试基本方法
-        if hasattr(agent, "mcp_description"):
-            desc = agent.mcp_description()
-            print(f"✓ mcp_description() 返回: {{len(desc)}} 字符")
-
-        print(f"✓ {agent['class_name']} 基本测试通过\\n")
-    except Exception as e:
-        print(f"✗ {agent['class_name']} 测试失败: {{e}}\\n")
-'''
-
-        # 添加环境模块测试代码
-        script += '''
-async def test_envs():
-    """测试自定义环境模块"""
-    print("=" * 50)
-    print("测试自定义环境模块")
-    print("=" * 50)
-
-'''
-
-        for env in envs:
-            script += f'''
-    # 测试 {env['class_name']}
-    print(f"\\n--- 测试 {env['class_name']} ---")
-    try:
-        env_module = {env['class_name']}()
-        print(f"✓ {env['class_name']} 创建成功")
-
-        # 测试工具注册
-        if hasattr(env_module, "_registered_tools"):
-            tools = env_module._registered_tools
-            print(f"✓ 已注册 {{len(tools)}} 个工具:")
-            for tool_name in tools.keys():
-                print(f"  - {{tool_name}}")
-
-        print(f"✓ {env['class_name']} 基本测试通过\\n")
-    except Exception as e:
-        print(f"✗ {env['class_name']} 测试失败: {{e}}\\n")
-'''
-
-        # 添加集成测试
-        if agents and envs:
-            script += '''
-async def test_integration():
-    """测试 Agent 与环境模块的集成"""
-    print("=" * 50)
-    print("测试集成（Agent + 环境模块）")
-    print("=" * 50)
-
-    try:
-'''
-            # 使用第一个 Agent 和第一个环境
-            first_agent = agents[0]
-            first_env = envs[0]
-
-            script += f'''
-        # 创建环境
-        env = {first_env['class_name']}()
-        router = ReActRouter([env])
-        await router.init(datetime.now())
-        print(f"✓ 环境初始化成功")
-
-        # 创建 Agent
-        agent = {first_agent['class_name']}(
-            id=0,
-            profile={{"name": "测试用户"}}
-        )
-        await agent.init(router)
-        print(f"✓ Agent 初始化成功")
-
-        # 运行一个仿真步骤
-        print(f"\\n运行仿真步骤...")
-        result = await agent.step(tick=60, t=datetime.now())
-        print(f"✓ 仿真步骤执行成功")
-        print(f"  结果: {{result[:100] if len(result) > 100 else result}}...")
-
-        print(f"\\n✓ 集成测试通过\\n")
-
-    except Exception as e:
-        print(f"✗ 集成测试失败: {{e}}\\n")
-        import traceback
-        traceback.print_exc()
-'''
-
-        # 添加主函数
-        script += '''
-async def main():
-    """主测试函数"""
-    print("\\n" + "=" * 50)
-    print("开始测试自定义模块")
-    print("=" * 50 + "\\n")
-
-    await test_agents()
-    await test_envs()
-'''
-
-        if agents and envs:
-            script += '    await test_integration()\n'
-
-        script += '''
-    print("=" * 50)
-    print("测试完成！")
-    print("=" * 50)
-
-
-if __name__ == "__main__":
-    asyncio.run(main())
-'''
-
-        return script
-
-    def save_test_script(self, scan_result: Dict[str, Any]) -> str:
-        """保存测试脚本到工作区"""
-        script_content = self.build_test_script(scan_result)
-        test_file = self.workspace_path / "test_custom_module.py"
-
-        with open(test_file, 'w', encoding='utf-8') as f:
-            f.write(script_content)
-
-        return str(test_file)
+        module_import_path = module_path.replace(".py", "").replace("/", ".")
+        module = importlib.import_module(module_import_path)
+        return getattr(module, class_name)
 
     async def run_test(self, scan_result: Dict[str, Any]) -> Dict[str, Any]:
-        """运行测试并返回结果"""
-        import subprocess
-
-        # 保存测试脚本
-        test_file = self.save_test_script(scan_result)
-
-        # 运行测试
-        try:
-            result = subprocess.run(
-                [sys.executable, str(test_file)],
-                capture_output=True,
-                text=True,
-                timeout=30,
-                cwd=str(self.workspace_path)
-            )
-
-            return {
-                "success": result.returncode == 0,
-                "stdout": result.stdout,
-                "stderr": result.stderr,
-                "test_file": str(test_file)
-            }
-        except subprocess.TimeoutExpired:
-            return {
-                "success": False,
-                "error": "测试超时（30秒）",
-                "test_file": str(test_file)
-            }
-        except Exception as e:
-            return {
-                "success": False,
-                "error": str(e),
-                "test_file": str(test_file)
-            }
+        """在内存中执行测试并返回结果"""
+        # ... 使用 importlib 动态导入，反射调用方法
+        # ... 不生成临时文件
+        return {
+            "success": True,
+            "stdout": "...",
+            "results": [...]
+        }
 ```
 
 ### 4. API 端点 (`backend/routers/custom.py`)
@@ -627,8 +466,12 @@ class ScanResponse(BaseModel):
 class TestResponse(BaseModel):
     success: bool
     test_output: str
-    test_file: Optional[str] = None
     error: Optional[str] = None
+    # 结构化测试结果
+    results: list = []
+    total_tests: int = 0
+    passed_tests: int = 0
+    failed_tests: int = 0
 
 @router.post("/scan", response_model=ScanResponse)
 async def scan_custom_modules(request: ScanRequest):
@@ -685,9 +528,9 @@ async def clean_custom_modules(request: ScanRequest):
 
 @router.post("/test", response_model=TestResponse)
 async def test_custom_modules(request: ScanRequest):
-    """生成并运行测试脚本"""
+    """在内存中测试自定义模块"""
     from agentsociety2.backend.services.custom.scanner import CustomModuleScanner
-    from agentsociety2.backend.services.custom.test_builder import TestScriptBuilder
+    from agentsociety2.backend.services.custom.script_generator import ScriptGenerator
 
     workspace_path = request.workspace_path or os.getenv("WORKSPACE_PATH")
     if not workspace_path:
@@ -705,15 +548,18 @@ async def test_custom_modules(request: ScanRequest):
                 error="未发现任何自定义模块"
             )
 
-        # 生成并运行测试
-        builder = TestScriptBuilder(workspace_path)
+        # 在内存中运行测试
+        builder = ScriptGenerator(workspace_path)
         result = await builder.run_test(scan_result)
 
         return TestResponse(
             success=result["success"],
             test_output=result.get("stdout", ""),
-            test_file=result.get("test_file"),
-            error=result.get("stderr") or result.get("error")
+            error=result.get("error"),
+            results=result.get("results", []),
+            total_tests=result.get("total_tests", 0),
+            passed_tests=result.get("passed_tests", 0),
+            failed_tests=result.get("failed_tests", 0)
         )
 
     except Exception as e:
@@ -784,7 +630,7 @@ async def list_custom_modules():
    VSCode 命令: "测试自定义模块"
    或 API: POST /api/v1/custom/test
 
-   结果: 生成 test_custom_module.py 并自动运行
+   结果: 在内存中动态导入并测试模块
 
    ↓
 
@@ -799,132 +645,12 @@ async def list_custom_modules():
    或 API: POST /api/v1/custom/clean
 ```
 
-### 生成的测试脚本示例
+### 测试实现说明
 
-当用户运行"测试自定义模块"命令后，系统会生成 `test_custom_module.py`：
-
-```python
-"""
-自动生成的测试脚本
-生成时间: 2026-02-26 10:30:00
-
-此脚本用于快速测试自定义模块的基本功能。
-"""
-import asyncio
-import sys
-from pathlib import Path
-from datetime import datetime
-
-workspace_path = Path("/root/my_workspace")
-sys.path.insert(0, str(workspace_path))
-sys.path.insert(0, str(workspace_path / "packages/agentsociety2"))
-
-from custom.agents.my_agent import MyAgent
-from custom.envs.my_env import MyEnv
-
-from agentsociety2.env.router_react import ReActRouter
-
-
-async def test_agents():
-    """测试自定义 Agent"""
-    print("=" * 50)
-    print("测试自定义 Agent")
-    print("=" * 50)
-
-    # 测试 MyAgent
-    print("\n--- 测试 MyAgent ---")
-    try:
-        agent = MyAgent(
-            id=0,
-            profile={"name": "测试用户", "personality": "友好"}
-        )
-        print("✓ MyAgent 创建成功")
-
-        if hasattr(agent, "mcp_description"):
-            desc = agent.mcp_description()
-            print(f"✓ mcp_description() 返回: {len(desc)} 字符")
-
-        print("✓ MyAgent 基本测试通过\n")
-    except Exception as e:
-        print(f"✗ MyAgent 测试失败: {e}\n")
-
-
-async def test_envs():
-    """测试自定义环境模块"""
-    print("=" * 50)
-    print("测试自定义环境模块")
-    print("=" * 50)
-
-    # 测试 MyEnv
-    print("\n--- 测试 MyEnv ---")
-    try:
-        env_module = MyEnv()
-        print("✓ MyEnv 创建成功")
-
-        if hasattr(env_module, "_registered_tools"):
-            tools = env_module._registered_tools
-            print(f"✓ 已注册 {len(tools)} 个工具:")
-            for tool_name in tools.keys():
-                print(f"  - {tool_name}")
-
-        print("✓ MyEnv 基本测试通过\n")
-    except Exception as e:
-        print(f"✗ MyEnv 测试失败: {e}\n")
-
-
-async def test_integration():
-    """测试 Agent 与环境模块的集成"""
-    print("=" * 50)
-    print("测试集成（Agent + 环境模块）")
-    print("=" * 50)
-
-    try:
-        # 创建环境
-        env = MyEnv()
-        router = ReActRouter([env])
-        await router.init(datetime.now())
-        print("✓ 环境初始化成功")
-
-        # 创建 Agent
-        agent = MyAgent(
-            id=0,
-            profile={"name": "测试用户"}
-        )
-        await agent.init(router)
-        print("✓ Agent 初始化成功")
-
-        # 运行一个仿真步骤
-        print("\n运行仿真步骤...")
-        result = await agent.step(tick=60, t=datetime.now())
-        print("✓ 仿真步骤执行成功")
-        print(f"  结果: {result[:100] if len(result) > 100 else result}...")
-
-        print("\n✓ 集成测试通过\n")
-
-    except Exception as e:
-        print(f"✗ 集成测试失败: {e}\n")
-        import traceback
-        traceback.print_exc()
-
-
-async def main():
-    """主测试函数"""
-    print("\n" + "=" * 50)
-    print("开始测试自定义模块")
-    print("=" * 50 + "\n")
-
-    await test_agents()
-    await test_envs()
-    await test_integration()
-
-    print("=" * 50)
-    print("测试完成！")
-    print("=" * 50)
-
-
-if __name__ == "__main__":
-    asyncio.run(main())
-```
+系统使用安全的内存测试方式，不生成临时文件：
+- 使用 `importlib` 动态导入模块（避免 `exec/eval`）
+- 使用反射调用类和方法
+- 在内存中执行测试并返回结果
 
 ## 四、文件清单
 
@@ -966,12 +692,12 @@ if __name__ == "__main__":
 
 不会被系统实现细节干扰。
 
-### 2. 测试脚本设计
+### 2. 测试设计
 
-- **自动生成** - 根据扫描到的模块自动生成
-- **独立可运行** - 生成的 `test_custom_module.py` 可以独立运行
+- **内存测试** - 使用 `importlib` 动态导入，不生成临时文件
+- **安全执行** - 使用反射调用类和方法，避免 `exec/eval`
 - **完整测试** - 包含单元测试和集成测试
-- **30秒超时** - 防止测试卡死
+- **白名单验证** - 限制可导入的模块路径
 
 ### 3. 跳过示例目录
 
@@ -1052,7 +778,7 @@ async function testCustomModules() {
       <body>
         <h1>测试结果</h1>
         <pre>${result.test_output}</pre>
-        <p>测试脚本: ${result.test_file}</p>
+        <p>通过: ${result.passed_tests}/${result.total_tests}</p>
       </body>
       </html>
     `;

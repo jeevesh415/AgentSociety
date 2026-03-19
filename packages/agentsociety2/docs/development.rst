@@ -73,17 +73,83 @@ AgentSociety 2 使用 `ruff`_ 进行检查和格式化：
 
    agentsociety2/
    ├── agent/           # Agent implementations
-   ├── backend/         # FastAPI backend service
+   ├── backend/         # FastAPI backend service (REST API)
    ├── code_executor/   # Code execution in Docker
    ├── config/          # Configuration and LLM routing
    ├── contrib/         # Contributed agents and environments
-   ├── designer/        # Experiment designer
+   ├── custom/          # Custom module templates
+   ├── designer/        # Experiment designer (LLM-driven)
    ├── env/             # Environment modules and routers
-   ├── logger/          # Logging utilities
-   ├── mcp/             # Model Context Protocol server
-   ├── society/         # Society helper utilities
-   ├── storage/         # Replay storage system
-   └── web_ui/          # Gradio web interface
+   ├── logger/          # Enhanced logging with file support
+   ├── registry/        # Module registry for custom components
+   ├── skills/          # Research skills (literature, experiment, hypothesis, etc.)
+   ├── society/         # Society helper utilities and CLI
+   └── storage/         # Replay storage system
+
+研究技能模块
+-------------------------
+
+``skills/`` 模块提供 LLM 原生的研究工作流：
+
+* **literature**: 学术文献搜索和管理
+* **experiment**: 实验配置和执行
+* **hypothesis**: 假设生成和管理
+* **web_research**: 使用 Miro 进行网络研究
+* **paper**: 使用 EasyPaper 生成学术论文
+* **analysis**: 数据分析和报告
+* **agent**: 智能体处理、选择、生成和过滤
+
+设计器模块
+-------------------------
+
+``designer/`` 模块提供 LLM 驱动的实验设计：
+
+* **ExpDesigner**: 从假设生成实验配置
+* **ExpExecutor**: 执行设计的实验
+* **ConfigBuilder**: 构建和验证实验配置
+
+后端 API
+-------------------------
+
+``backend/`` 模块提供 FastAPI REST API：
+
+* **Routers**:
+  * ``/api/v1/experiments`` - 实验管理
+  * ``/api/v1/modules`` - 模块管理
+  * ``/api/v1/replay`` - 回放数据访问
+  * ``/api/v1/custom`` - 自定义模块注册
+
+* **Service Layer**: 业务逻辑层
+
+启动后端：
+
+.. code-block:: bash
+
+   python -m agentsociety2.backend.run
+
+   # 访问 http://localhost:8001/docs 查看 API 文档
+
+日志系统
+-------------------------
+
+增强的日志系统支持：
+
+* **彩色控制台输出**: 按日志级别着色
+* **文件日志**: 使用 ``add_file_handler()`` 写入日志文件
+* **LiteLLM 集成**: 自定义回调日志记录 LLM 调用
+
+.. code-block:: python
+
+   from agentsociety2.logger import get_logger, set_logger_level, add_file_handler
+
+   # 设置日志级别
+   set_logger_level("DEBUG")
+
+   # 添加文件处理器
+   add_file_handler("output.log", level="INFO")
+
+   logger = get_logger()
+   logger.info("Hello, AgentSociety!")
 
 贡献
 ------------

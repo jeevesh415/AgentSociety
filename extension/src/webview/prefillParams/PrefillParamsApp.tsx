@@ -1,15 +1,13 @@
 import * as React from 'react';
-import { Layout, Input, Card, Typography, Spin, Alert, Empty, Space, Badge, Collapse } from 'antd';
-import { SearchOutlined, ReloadOutlined } from '@ant-design/icons';
+import { Input, Card, Typography, Spin, Alert, Empty, Space, Badge, Tabs, Tag, Button } from 'antd';
+import { SearchOutlined, ReloadOutlined, PlayCircleOutlined, CheckCircleOutlined, CloseCircleOutlined, LoadingOutlined } from '@ant-design/icons';
 import { useTranslation } from 'react-i18next';
 import type { VSCodeAPI, ClassInfo, AvailableClasses, PrefillParams } from './types';
 import { MarkdownRenderer } from '../components/MarkdownRenderer';
 import '../i18n';
 
-const { Content, Sider } = Layout;
 const { Title, Text, Paragraph } = Typography;
 const { Search } = Input;
-const { Panel } = Collapse;
 
 interface PrefillParamsAppProps {
   vscode: VSCodeAPI;
@@ -22,6 +20,8 @@ interface ClassItem {
   params: Record<string, any>;
 }
 
+type TestStatus = 'idle' | 'testing' | 'success' | 'error';
+
 export const PrefillParamsApp: React.FC<PrefillParamsAppProps> = ({ vscode }) => {
   const { t } = useTranslation();
   const [loading, setLoading] = React.useState<boolean>(true);
@@ -30,8 +30,12 @@ export const PrefillParamsApp: React.FC<PrefillParamsAppProps> = ({ vscode }) =>
   const [filteredClasses, setFilteredClasses] = React.useState<ClassItem[]>([]);
   const [selectedClass, setSelectedClass] = React.useState<ClassItem | null>(null);
   const [searchText, setSearchText] = React.useState<string>('');
-  const [filterKind, setFilterKind] = React.useState<'env_module' | 'agent' | undefined>(undefined);
+  const [activeTab, setActiveTab] = React.useState<'env_module' | 'agent'>('env_module');
   const [isDark, setIsDark] = React.useState<boolean>(false);
+
+  // 为每个模块维护测试状态，key 为 `${kind}-${type}`
+  const [testStatuses, setTestStatuses] = React.useState<Record<string, TestStatus>>({});
+  const [testResults, setTestResults] = React.useState<Record<string, string>>({});
 
   // 检测暗色主题
   React.useEffect(() => {
@@ -42,7 +46,6 @@ export const PrefillParamsApp: React.FC<PrefillParamsAppProps> = ({ vscode }) =>
       );
     };
     checkDarkMode();
-    // 监听主题变化
     const observer = new MutationObserver(checkDarkMode);
     observer.observe(document.body, {
       attributes: true,
@@ -67,17 +70,9 @@ export const PrefillParamsApp: React.FC<PrefillParamsAppProps> = ({ vscode }) =>
         try {
           const classesData: AvailableClasses = message.classes;
           const prefillParams: PrefillParams = message.prefillParams;
-          const filterKindFromMessage = message.filterKind as 'env_module' | 'agent' | undefined;
 
-          // 更新过滤类型
-          if (filterKindFromMessage !== undefined) {
-            setFilterKind(filterKindFromMessage);
-          }
-
-          // 构建类列表
           const classItems: ClassItem[] = [];
 
-          // 添加环境模块
           Object.entries(classesData.env_modules).forEach(([type, info]) => {
             classItems.push({
               type,
@@ -87,7 +82,6 @@ export const PrefillParamsApp: React.FC<PrefillParamsAppProps> = ({ vscode }) =>
             });
           });
 
-          // 添加Agent类
           Object.entries(classesData.agents).forEach(([type, info]) => {
             classItems.push({
               type,
@@ -98,38 +92,37 @@ export const PrefillParamsApp: React.FC<PrefillParamsAppProps> = ({ vscode }) =>
           });
 
           setClasses(classItems);
-
-          // 应用过滤
-          let filtered = classItems;
-          if (filterKindFromMessage) {
-            filtered = classItems.filter(item => item.kind === filterKindFromMessage);
-          }
-          setFilteredClasses(filtered);
-
           setLoading(false);
           setError(null);
         } catch (e) {
           console.error('Error processing initial data:', e);
           setError(t('prefillParams.errorMessages.loadFailed'));
           setLoading(false);
-        }
-      } else if (message.command === 'setFilterKind') {
-        // 更新过滤类型
-        const newFilterKind = message.kind as 'env_module' | 'agent' | undefined;
-        setFilterKind(newFilterKind);
-        // 重新过滤
-        let filtered = classes;
-        if (newFilterKind) {
-          filtered = classes.filter(item => item.kind === newFilterKind);
-        }
-        setFilteredClasses(filtered);
-        // 如果当前选中的类不在过滤范围内，清除选择
-        if (selectedClass && newFilterKind && selectedClass.kind !== newFilterKind) {
+          // 清除旧数据，防止在错误状态下显示旧内容
+          setClasses([]);
+          setFilteredClasses([]);
           setSelectedClass(null);
         }
       } else if (message.command === 'error') {
         setError(message.error || t('prefillParams.errorMessages.loadFailed'));
         setLoading(false);
+        // 清除旧数据，防止在错误状态下显示旧内容
+        setClasses([]);
+        setFilteredClasses([]);
+        setSelectedClass(null);
+      } else if (message.command === 'testResult') {
+        // 处理测试结果
+        const moduleKey = message.moduleKey;
+        if (moduleKey) {
+          setTestStatuses(prev => ({
+            ...prev,
+            [moduleKey]: message.success ? 'success' : 'error',
+          }));
+          setTestResults(prev => ({
+            ...prev,
+            [moduleKey]: message.output || message.error || '',
+          }));
+        }
       }
     };
 
@@ -137,18 +130,14 @@ export const PrefillParamsApp: React.FC<PrefillParamsAppProps> = ({ vscode }) =>
     return () => {
       window.removeEventListener('message', handleMessage);
     };
-  }, [vscode]);
+  }, [vscode, t]);
 
-  // 搜索过滤
+  // 搜索过滤和Tab切换
   React.useEffect(() => {
     let filtered = classes;
 
-    // 先应用类型过滤
-    if (filterKind) {
-      filtered = filtered.filter(item => item.kind === filterKind);
-    }
+    filtered = filtered.filter(item => item.kind === activeTab);
 
-    // 再应用搜索过滤
     if (searchText.trim()) {
       const lowerSearch = searchText.toLowerCase();
       filtered = filtered.filter((item) => {
@@ -161,11 +150,19 @@ export const PrefillParamsApp: React.FC<PrefillParamsAppProps> = ({ vscode }) =>
     }
 
     setFilteredClasses(filtered);
-  }, [searchText, classes, filterKind]);
+
+    if (selectedClass && selectedClass.kind !== activeTab) {
+      setSelectedClass(null);
+    }
+  }, [searchText, classes, activeTab, selectedClass]);
 
   const handleRefresh = () => {
     setLoading(true);
     setError(null);
+    // 清除旧数据，防止在错误状态下显示旧内容
+    setClasses([]);
+    setFilteredClasses([]);
+    setSelectedClass(null);
     vscode.postMessage({
       command: 'refresh',
     });
@@ -173,6 +170,33 @@ export const PrefillParamsApp: React.FC<PrefillParamsAppProps> = ({ vscode }) =>
 
   const handleClassSelect = (item: ClassItem) => {
     setSelectedClass(item);
+  };
+
+  const handleTestModule = (item: ClassItem) => {
+    const key = `${item.kind}-${item.type}`;
+    setTestStatuses(prev => ({ ...prev, [key]: 'testing' }));
+    setTestResults(prev => ({ ...prev, [key]: '' }));
+
+    vscode.postMessage({
+      command: 'testCustomModule',
+      moduleKey: key,
+      moduleType: item.kind,
+      moduleTypeValue: item.type,
+      moduleClassName: item.info.class_name,
+    });
+  };
+
+  const getTestIcon = (status: TestStatus) => {
+    switch (status) {
+      case 'testing':
+        return <LoadingOutlined style={{ color: '#1890ff' }} />;
+      case 'success':
+        return <CheckCircleOutlined style={{ color: '#52c41a' }} />;
+      case 'error':
+        return <CloseCircleOutlined style={{ color: '#ff4d4f' }} />;
+      default:
+        return null;
+    }
   };
 
   if (loading) {
@@ -205,13 +229,16 @@ export const PrefillParamsApp: React.FC<PrefillParamsAppProps> = ({ vscode }) =>
     );
   }
 
+  const customCount = classes.filter(c => c.info.is_custom).length;
+  const builtinCount = classes.length - customCount;
+
   return (
-    <Layout style={{ height: '100vh', display: 'flex', flexDirection: 'column' }}>
-      <div style={{ padding: '12px', borderBottom: '1px solid #d9d9d9' }}>
+    <div style={{ height: '100vh', display: 'flex', flexDirection: 'column' }}>
+      <div style={{ padding: '12px', borderBottom: '1px solid #d9d9d9', flexShrink: 0 }}>
         <Space style={{ width: '100%' }} direction="vertical" size="small">
-          <Space>
+          <Space style={{ width: '100%', justifyContent: 'space-between' }}>
             <Title level={5} style={{ margin: 0 }}>
-              {t('prefillParams.title')}
+              {t('prefillParams.groupTitle')}
             </Title>
             <ReloadOutlined
               onClick={handleRefresh}
@@ -219,6 +246,32 @@ export const PrefillParamsApp: React.FC<PrefillParamsAppProps> = ({ vscode }) =>
               title={t('prefillParams.refresh')}
             />
           </Space>
+
+          <Space style={{ width: '100%', justifyContent: 'space-between', fontSize: '12px', color: '#888' }}>
+            <Space split={<span>|</span>}>
+              <span>{t('prefillParams.classInfo.builtin')}: {builtinCount}</span>
+              <span>{t('prefillParams.classInfo.custom')}: {customCount}</span>
+            </Space>
+          </Space>
+
+          <Tabs
+            activeKey={activeTab}
+            onChange={(key) => {
+              setActiveTab(key as 'env_module' | 'agent');
+              setSelectedClass(null);
+            }}
+            style={{ marginBottom: 0 }}
+            items={[
+              {
+                key: 'env_module',
+                label: `${t('prefillParams.classInfo.envModule')} (${classes.filter(c => c.kind === 'env_module').length})`,
+              },
+              {
+                key: 'agent',
+                label: `${t('prefillParams.classInfo.agent')} (${classes.filter(c => c.kind === 'agent').length})`,
+              },
+            ]}
+          />
           <Search
             placeholder={t('prefillParams.searchPlaceholder')}
             allowClear
@@ -229,153 +282,140 @@ export const PrefillParamsApp: React.FC<PrefillParamsAppProps> = ({ vscode }) =>
           />
         </Space>
       </div>
-      <Layout style={{ flex: 1, overflow: 'hidden' }}>
-        <Sider
-          width={300}
+      <div style={{ flex: 1, display: 'flex', overflow: 'hidden' }}>
+        <div
           style={{
+            width: '340px',
             background: '#fff',
             borderRight: '1px solid #d9d9d9',
-            overflow: 'auto',
+            overflowY: 'auto',
+            flexShrink: 0,
           }}
         >
           <div style={{ padding: '8px' }}>
             {filteredClasses.length === 0 ? (
-              <Empty description={t('prefillParams.noClasses')} />
+              <Empty description={t('prefillParams.noClasses')} style={{ marginTop: '40px' }} />
             ) : (
-              <Collapse
-                defaultActiveKey={
-                  filterKind
-                    ? filterKind === 'env_module'
-                      ? ['env_modules']
-                      : ['agents']
-                    : ['env_modules', 'agents']
-                }
-                ghost
-                style={{ background: 'transparent' }}
-              >
-                {/* 环境模块分组 */}
-                {(!filterKind || filterKind === 'env_module') && (
-                  <Panel
-                    header={`${t('prefillParams.classInfo.envModule')} (${filteredClasses.filter(item => item.kind === 'env_module').length})`}
-                    key="env_modules"
-                    style={{ padding: 0 }}
-                  >
-                    {filteredClasses
-                      .filter(item => item.kind === 'env_module')
-                      .length === 0 ? (
-                      <Empty description={t('prefillParams.noClasses')} />
-                    ) : (
-                      filteredClasses
-                        .filter(item => item.kind === 'env_module')
-                        .map((item) => (
-                          <Card
-                            key={`${item.kind}-${item.type}`}
-                            size="small"
-                            style={{
-                              marginBottom: '8px',
-                              cursor: 'pointer',
-                              border:
-                                selectedClass?.type === item.type &&
-                                  selectedClass?.kind === item.kind
-                                  ? '2px solid #1890ff'
-                                  : '1px solid #d9d9d9',
-                            }}
-                            onClick={() => handleClassSelect(item)}
-                          >
-                            <Space direction="vertical" size="small" style={{ width: '100%' }}>
-                              <Space>
-                                <Badge
-                                  status={item.info.has_prefill ? 'success' : 'default'}
-                                  text={
-                                    <Text strong>
-                                      {item.type}
-                                    </Text>
-                                  }
-                                />
-                              </Space>
-                              <Text type="secondary" style={{ fontSize: '12px' }}>
-                                {item.info.class_name}
-                              </Text>
-                              {item.info.has_prefill && (
-                                <Text type="success" style={{ fontSize: '12px' }}>
-                                  {t('prefillParams.classInfo.hasPrefill')}
-                                </Text>
-                              )}
-                            </Space>
-                          </Card>
-                        ))
-                    )}
-                  </Panel>
-                )}
+              filteredClasses.map((item) => {
+                const key = `${item.kind}-${item.type}`;
+                const testStatus = testStatuses[key] || 'idle';
+                const testResult = testResults[key];
+                const isCustom = item.info.is_custom;
 
-                {/* Agent分组 */}
-                {(!filterKind || filterKind === 'agent') && (
-                  <Panel
-                    header={`${t('prefillParams.classInfo.agent')} (${filteredClasses.filter(item => item.kind === 'agent').length})`}
-                    key="agents"
-                    style={{ padding: 0 }}
+                return (
+                  <Card
+                    key={key}
+                    size="small"
+                    style={{
+                      marginBottom: '8px',
+                      cursor: 'pointer',
+                      border:
+                        selectedClass?.type === item.type &&
+                          selectedClass?.kind === item.kind
+                          ? '2px solid #1890ff'
+                          : '1px solid #d9d9d9',
+                      backgroundColor: isCustom ? '#fafafa' : '#fff',
+                    }}
+                    onClick={() => handleClassSelect(item)}
+                    hoverable
                   >
-                    {filteredClasses
-                      .filter(item => item.kind === 'agent')
-                      .length === 0 ? (
-                      <Empty description={t('prefillParams.noClasses')} />
-                    ) : (
-                      filteredClasses
-                        .filter(item => item.kind === 'agent')
-                        .map((item) => (
-                          <Card
-                            key={`${item.kind}-${item.type}`}
+                    <Space direction="vertical" size="small" style={{ width: '100%' }}>
+                      <Space style={{ width: '100%', justifyContent: 'space-between' }}>
+                        <Space>
+                          <Badge
+                            status={item.info.has_prefill ? 'success' : 'default'}
+                            text={
+                            <Text strong>
+                              {item.type}
+                            </Text>
+                          }
+                          />
+                        </Space>
+                        <Tag color={isCustom ? 'blue' : 'default'}>
+                          {isCustom
+                            ? t('prefillParams.classInfo.custom')
+                            : t('prefillParams.classInfo.builtin')}
+                        </Tag>
+                      </Space>
+                      <Text type="secondary" style={{ fontSize: '12px' }}>
+                        {item.info.class_name}
+                      </Text>
+
+                      {/* 自定义模块显示测试按钮和状态 */}
+                      {isCustom && (
+                        <Space style={{ width: '100%' }} size="small">
+                          <Button
                             size="small"
-                            style={{
-                              marginBottom: '8px',
-                              cursor: 'pointer',
-                              border:
-                                selectedClass?.type === item.type &&
-                                  selectedClass?.kind === item.kind
-                                  ? '2px solid #1890ff'
-                                  : '1px solid #d9d9d9',
+                            icon={<PlayCircleOutlined />}
+                            loading={testStatus === 'testing'}
+                            onClick={(e) => {
+                              e.stopPropagation();
+                              handleTestModule(item);
                             }}
-                            onClick={() => handleClassSelect(item)}
                           >
-                            <Space direction="vertical" size="small" style={{ width: '100%' }}>
-                              <Space>
-                                <Badge
-                                  status={item.info.has_prefill ? 'success' : 'default'}
-                                  text={
-                                    <Text strong>
-                                      {item.type}
-                                    </Text>
-                                  }
-                                />
-                              </Space>
-                              <Text type="secondary" style={{ fontSize: '12px' }}>
-                                {item.info.class_name}
-                              </Text>
-                              {item.info.has_prefill && (
-                                <Text type="success" style={{ fontSize: '12px' }}>
-                                  {t('prefillParams.classInfo.hasPrefill')}
-                                </Text>
-                              )}
-                            </Space>
-                          </Card>
-                        ))
-                    )}
-                  </Panel>
-                )}
-              </Collapse>
+                            {t('prefillParams.classInfo.test')}
+                          </Button>
+                          {getTestIcon(testStatus)}
+                        </Space>
+                      )}
+
+                      {testStatus !== 'idle' && testResult && (
+                        <Alert
+                          message={testStatus === 'success' ? t('prefillParams.test.success') : t('prefillParams.test.failed')}
+                          description={
+                            <Text
+                              style={{
+                                fontSize: '12px',
+                                display: 'block',
+                                maxHeight: '60px',
+                                overflow: 'auto',
+                                whiteSpace: 'pre-wrap'
+                              }}
+                            >
+                              {testResult}
+                            </Text>
+                          }
+                          type={testStatus === 'success' ? 'success' : 'error'}
+                          showIcon
+                          style={{ padding: '4px 8px', fontSize: '12px' }}
+                        />
+                      )}
+
+                      {item.info.has_prefill && (
+                        <Text type="success" style={{ fontSize: '12px' }}>
+                          {t('prefillParams.classInfo.hasPrefill')}
+                        </Text>
+                      )}
+                    </Space>
+                  </Card>
+                );
+              })
             )}
           </div>
-        </Sider>
-        <Content style={{ padding: '16px', overflow: 'auto' }}>
+        </div>
+        <div
+          style={{
+            flex: 1,
+            padding: '16px',
+            overflowY: 'auto',
+            minWidth: 0,
+          }}
+        >
           {selectedClass ? (
             <div>
-              <Title level={4}>
-                {selectedClass.type}
+              <Space style={{ marginBottom: '8px' }}>
+                <Title level={4} style={{ margin: 0 }}>
+                  {selectedClass.type}
+                </Title>
                 <Badge
                   status={selectedClass.info.has_prefill ? 'success' : 'default'}
-                  style={{ marginLeft: '8px' }}
                 />
-              </Title>
+                <Tag color={selectedClass.info.is_custom ? 'blue' : 'default'}>
+                  {selectedClass.info.is_custom
+                    ? t('prefillParams.classInfo.custom')
+                    : t('prefillParams.classInfo.builtin')}
+                </Tag>
+              </Space>
               <Paragraph>
                 <Text strong>{t('prefillParams.classInfo.className')}: </Text>
                 <Text code>{selectedClass.info.class_name}</Text>
@@ -420,8 +460,8 @@ export const PrefillParamsApp: React.FC<PrefillParamsAppProps> = ({ vscode }) =>
               style={{ marginTop: '100px' }}
             />
           )}
-        </Content>
-      </Layout>
-    </Layout>
+        </div>
+      </div>
+    </div>
   );
 };

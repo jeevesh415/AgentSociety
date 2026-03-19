@@ -151,17 +151,6 @@ class AgentSociety:
                 break
             await self.step(tick)
 
-    async def run_to(self, end_t: datetime, tick: int):
-        """
-        Run the simulation until the end time.
-
-        Args:
-            end_t: The end time of the simulation.
-            tick: The duration (in seconds) of each step.
-        """
-        while self._t < end_t and not self._should_terminate:
-            await self.step(tick)
-
     async def ask(self, question: str) -> str:
         """
         Ask the society a question.

@@ -45,28 +45,6 @@ export type SSEEvent =
 // 基础类型
 // ============================================================================
 
-export interface ChatMessage {
-  id: string;
-  role: 'user' | 'assistant';
-  content: string;
-  timestamp: number;
-}
-
-export interface HistoryItem {
-  fileName: string;
-  startTime?: string;
-  displayName: string;
-}
-
-export interface ConversationProcess {
-  id: string;
-  userMessage: string;
-  events: Array<{ event: SSEEvent; timestamp: number }>;
-  isComplete: boolean;
-  finalContent: string | null;
-  isExpanded: boolean;
-}
-
 export interface BackendStatus {
   connected: boolean;
   url?: string;
@@ -76,17 +54,6 @@ export interface BackendStatus {
 // ============================================================================
 // WebView → Extension 消息
 // ============================================================================
-
-/** 发送聊天消息 */
-export interface SendMessageCommand {
-  command: 'sendMessage';
-  text: string;
-}
-
-/** 清空对话 */
-export interface ClearChatCommand {
-  command: 'clearChat';
-}
 
 /** 检查后端健康状态 */
 export interface CheckHealthCommand {
@@ -98,17 +65,6 @@ export interface OpenFileCommand {
   command: 'openFile';
   filePath: string;
   line?: number;
-}
-
-/** 加载历史记录 */
-export interface LoadHistoryCommand {
-  command: 'loadHistory';
-  historyFileName: string;
-}
-
-/** 列出所有历史 */
-export interface ListHistoriesCommand {
-  command: 'listHistories';
 }
 
 /** 工具权限响应 */
@@ -126,12 +82,8 @@ export interface InterruptCommand {
 
 /** WebView → Extension 所有消息类型 */
 export type WebViewToExtensionMessage =
-  | SendMessageCommand
-  | ClearChatCommand
   | CheckHealthCommand
   | OpenFileCommand
-  | LoadHistoryCommand
-  | ListHistoriesCommand
   | ToolPermissionResponseCommand
   | InterruptCommand;
 
@@ -145,11 +97,6 @@ export interface SSEEventMessage {
   event: SSEEvent;
 }
 
-/** 清空消息 */
-export interface ClearMessagesMessage {
-  command: 'clearMessages';
-}
-
 /** 后端状态 */
 export interface BackendStatusMessage {
   command: 'backendStatus';
@@ -161,29 +108,6 @@ export interface BackendStatusMessage {
 export interface OpenFileMessage {
   command: 'openFile';
   filePath: string;
-}
-
-/** 历史加载完成 */
-export interface HistoryLoadedMessage {
-  command: 'historyLoaded';
-  messages: ChatMessage[];
-  startTime?: string;
-  sseEvents?: Array<{
-    userMessageIndex: number;
-    events: Array<{ event: SSEEvent; timestamp: number }>;
-  }>;
-}
-
-/** 历史列表 */
-export interface HistoryListMessage {
-  command: 'historyList';
-  histories: HistoryItem[];
-}
-
-/** 历史加载错误 */
-export interface HistoryLoadErrorMessage {
-  command: 'historyLoadError';
-  error: string;
 }
 
 /** 工具权限请求 (新增) */
@@ -213,12 +137,8 @@ export interface StreamInterruptedMessage {
 /** Extension → WebView 所有消息类型 */
 export type ExtensionToWebViewMessage =
   | SSEEventMessage
-  | ClearMessagesMessage
   | BackendStatusMessage
   | OpenFileMessage
-  | HistoryLoadedMessage
-  | HistoryListMessage
-  | HistoryLoadErrorMessage
   | ToolPermissionRequestMessage
   | ExperimentStatusMessage
   | StreamInterruptedMessage;

@@ -10,7 +10,6 @@ __all__ = [
     "AgentConfig",
     "InitConfig",
     "RunStep",
-    "RunToStep",
     "AskStep",
     "InterveneStep",
     "StepUnion",
@@ -56,24 +55,6 @@ class RunStep(BaseModel):
     tick: int = Field(1, gt=0, description="每步的时间间隔（秒）")
 
 
-class RunToStep(BaseModel):
-    """运行到指定时间的步骤"""
-    
-    type: Literal["run_to"] = Field("run_to", description="步骤类型")
-    end_t: str = Field(..., description="结束时间（ISO格式）")
-    tick: int = Field(1, gt=0, description="每步的时间间隔（秒）")
-    
-    @field_validator("end_t")
-    @classmethod
-    def validate_end_t(cls, v: str) -> str:
-        """验证时间格式"""
-        try:
-            datetime.fromisoformat(v)
-        except ValueError:
-            raise ValueError(f"Invalid ISO datetime format: {v}")
-        return v
-
-
 class AskStep(BaseModel):
     """提问步骤"""
     
@@ -88,7 +69,7 @@ class InterveneStep(BaseModel):
     instruction: str = Field(..., min_length=1, description="干预指令")
 
 
-StepUnion = Union[RunStep, RunToStep, AskStep, InterveneStep]
+StepUnion = Union[RunStep, AskStep, InterveneStep]
 
 
 class StepsConfig(BaseModel):

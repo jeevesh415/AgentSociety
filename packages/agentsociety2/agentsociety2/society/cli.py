@@ -5,6 +5,7 @@ import asyncio
 import json
 import os
 import signal
+import socket
 import sqlite3
 import sys
 import yaml
@@ -12,22 +13,87 @@ from datetime import datetime
 from pathlib import Path
 from typing import Dict, Any, List, Optional
 
+# 强制禁用遥测（在任何导入之前）
+# 禁用 mem0 遥测（避免连接 Posthog/Facebook）
+os.environ["MEM0_TELEMETRY"] = "False"
+# 禁用 ChromaDB 遥测（同样使用 Posthog）
+os.environ["ANONYMIZED_TELEMETRY"] = "False"
+
+# 禁用 Posthog 客户端创建（在导入前）
+def _disable_posthog_import():
+    """在模块导入前禁用 Posthog"""
+    import sys
+    # 创建一个假模块来阻止 posthog 导入
+    class FakePosthog:
+        class Posthog:
+            def __init__(self, *args, **kwargs):
+                pass
+            def capture(self, *args, **kwargs):
+                pass
+            def disable(self):
+                pass
+        def __getattr__(self, *args, **kwargs):
+            return self.Posthog()
+
+    # 将 posthog 添加到 sys.modules 以阻止其导入
+    sys.modules['posthog'] = FakePosthog()
+    sys.modules['posthog.client'] = FakePosthog()
+    sys.modules['posthog.capture'] = lambda *a, **k: None
+
+_disable_posthog_import()
+
 from agentsociety2.agent import AgentBase
 from agentsociety2.env import CodeGenRouter, EnvBase
-from agentsociety2.mcp.registry import REGISTERED_ENV_MODULES, REGISTERED_AGENT_MODULES
+from agentsociety2.registry import get_registered_env_modules, get_registered_agent_modules
 from agentsociety2.storage import ReplayWriter
 from agentsociety2.society.models import (
     InitConfig,
     RunStep,
-    RunToStep,
     AskStep,
     InterveneStep,
     StepsConfig,
 )
 from agentsociety2.society.society import AgentSociety
-from agentsociety2.logger import get_logger
+from agentsociety2.logger import get_logger, set_logger_level, add_file_handler
 
 logger = get_logger()
+
+
+def _validate_env_early() -> None:
+    """早期环境变量验证（在 main 入口处调用）"""
+    errors = []
+
+    # 检查主要 LLM API key
+    llm_api_key = os.getenv("AGENTSOCIETY_LLM_API_KEY", "")
+    if not llm_api_key or not llm_api_key.strip():
+        errors.append("AGENTSOCIETY_LLM_API_KEY")
+
+    # 检查 coder LLM（必须有，因为 CodeGenRouter 需要）
+    coder_api_key = os.getenv("AGENTSOCIETY_CODER_LLM_API_KEY") or llm_api_key
+    if not coder_api_key or not coder_api_key.strip():
+        errors.append("AGENTSOCIETY_CODER_LLM_API_KEY (or AGENTSOCIETY_LLM_API_KEY)")
+
+    # 检查 nano LLM（用于 fallback）
+    nano_api_key = os.getenv("AGENTSOCIETY_NANO_LLM_API_KEY") or llm_api_key
+    if not nano_api_key or not nano_api_key.strip():
+        errors.append("AGENTSOCIETY_NANO_LLM_API_KEY (or AGENTSOCIETY_LLM_API_KEY)")
+
+    # 确认 mem0 遥测已禁用
+    mem0_telemetry = os.getenv("MEM0_TELEMETRY", "False").lower()
+    if mem0_telemetry not in ("false", "0", "no", ""):
+        errors.append(f"MEM0_TELEMETRY must be 'False', currently: {mem0_telemetry}")
+
+    # 确认 ChromaDB 遥测已禁用
+    chroma_telemetry = os.getenv("ANONYMIZED_TELEMETRY", "False").lower()
+    if chroma_telemetry not in ("false", "0", "no", ""):
+        errors.append(f"ANONYMIZED_TELEMETRY must be 'False', currently: {chroma_telemetry}")
+
+    if errors:
+        print("❌ Environment configuration error:", file=sys.stderr)
+        for error in errors:
+            print(f"  Missing: {error}", file=sys.stderr)
+        print("\nPlease configure these in your .env file before running experiments.", file=sys.stderr)
+        sys.exit(1)
 
 
 class ExperimentRunner:
@@ -54,16 +120,49 @@ class ExperimentRunner:
         self.society: Optional[AgentSociety] = None
         self._should_terminate = False
 
-    def _setup_signal_handlers(self):
-        """设置信号处理器"""
-        def signal_handler(signum, frame):
-            logger.info(f"Received signal {signum}, terminating...")
-            self._should_terminate = True
-            if self.society:
-                self.society._should_terminate = True
+    def _validate_environment(self) -> None:
+        """验证所有必需的环境变量，缺漏则报错退出"""
+        errors = []
 
-        signal.signal(signal.SIGINT, signal_handler)
-        signal.signal(signal.SIGTERM, signal_handler)
+        # 检查主要 LLM 配置
+        llm_api_key = os.getenv("AGENTSOCIETY_LLM_API_KEY", "")
+        if not llm_api_key or not llm_api_key.strip():
+            errors.append("Missing required environment variable: AGENTSOCIETY_LLM_API_KEY")
+
+        # 检查 coder LLM 配置（CodeGenRouter 需要）
+        coder_api_key = os.getenv("AGENTSOCIETY_CODER_LLM_API_KEY") or llm_api_key
+        if not coder_api_key or not coder_api_key.strip():
+            errors.append("Missing required environment variable: AGENTSOCIETY_CODER_LLM_API_KEY or AGENTSOCIETY_LLM_API_KEY")
+
+        # 检查 nano LLM 配置（用于 fallback）
+        nano_api_key = os.getenv("AGENTSOCIETY_NANO_LLM_API_KEY") or llm_api_key
+        if not nano_api_key or not nano_api_key.strip():
+            errors.append("Missing required environment variable: AGENTSOCIETY_NANO_LLM_API_KEY or AGENTSOCIETY_LLM_API_KEY")
+
+        # 检查 mem0 遥测是否禁用
+        mem0_telemetry = os.getenv("MEM0_TELEMETRY", "False").lower()
+        if mem0_telemetry not in ("false", "0", "no", ""):
+            errors.append(f"MEM0_TELEMETRY must be disabled (set to 'False'), currently: {mem0_telemetry}")
+
+        # 检查 ChromaDB 遥测是否禁用
+        chroma_telemetry = os.getenv("ANONYMIZED_TELEMETRY", "False").lower()
+        if chroma_telemetry not in ("false", "0", "no", ""):
+            errors.append(f"ANONYMIZED_TELEMETRY must be disabled (set to 'False'), currently: {chroma_telemetry}")
+
+        # 如果有错误，打印详细信息并退出
+        if errors:
+            logger.error("Environment validation failed:")
+            for error in errors:
+                logger.error(f"  - {error}")
+            print("\n❌ Environment validation failed. Required configuration:", file=sys.stderr)
+            for error in errors:
+                print(f"  ❌ {error}", file=sys.stderr)
+            print("\nPlease set the required environment variables in your .env file.", file=sys.stderr)
+            sys.exit(1)
+
+        logger.info("Environment validation passed")
+        # 确认遥测已禁用
+        logger.info("Telemetry disabled: MEM0_TELEMETRY=False, ANONYMIZED_TELEMETRY=False")
 
     def _load_config(self, config_path: Path) -> InitConfig:
         """加载并验证配置文件"""
@@ -103,7 +202,7 @@ class ExperimentRunner:
     ) -> List[EnvBase]:
         """创建环境模块实例"""
         env_modules = []
-        env_type_map = {module_type: env_class for module_type, env_class in REGISTERED_ENV_MODULES}
+        env_type_map = {module_type: env_class for module_type, env_class in get_registered_env_modules()}
 
         for module_type in env_module_types:
             if module_type not in env_type_map:
@@ -128,7 +227,7 @@ class ExperimentRunner:
         agents = []
         agent_type_map = {
             agent_type: agent_class
-            for agent_type, agent_class in REGISTERED_AGENT_MODULES
+            for agent_type, agent_class in get_registered_agent_modules()
         }
 
         for agent_arg in agent_args:
@@ -249,8 +348,8 @@ class ExperimentRunner:
             experiment_id: 实验ID（可选）
         """
         try:
-            # 设置信号处理器
-            self._setup_signal_handlers()
+            # 验证环境变量（必须在任何操作之前）
+            self._validate_environment()
 
             # 初始化数据库
             self._init_database()
@@ -375,29 +474,6 @@ class ExperimentRunner:
                         self._update_progress()
                         step_result = "success"
 
-                    elif isinstance(step, RunToStep):
-                        end_t = datetime.fromisoformat(step.end_t)
-                        logger.info(f"Running to {end_t} with tick={step.tick}")
-                        # 创建定期更新进度的任务
-                        async def update_progress_periodically():
-                            while not self._should_terminate:
-                                await asyncio.sleep(1)  # 每秒更新一次
-                                if self.society and not self._should_terminate:
-                                    self._update_progress()
-                        
-                        progress_task = asyncio.create_task(update_progress_periodically())
-                        try:
-                            await self.society.run_to(end_t=end_t, tick=step.tick)
-                        finally:
-                            progress_task.cancel()
-                            try:
-                                await progress_task
-                            except asyncio.CancelledError:
-                                pass
-                        # 最终更新进度
-                        self._update_progress()
-                        step_result = "success"
-
                     elif isinstance(step, AskStep):
                         logger.info(f"Asking: {step.question}")
                         answer = await self.society.ask(step.question)
@@ -490,6 +566,9 @@ class ExperimentRunner:
 
 def main():
     """命令行入口"""
+    # 早期环境变量验证（在任何操作之前）
+    _validate_env_early()
+
     parser = argparse.ArgumentParser(
         description="Run AgentSociety2 simulation experiment"
     )
@@ -516,8 +595,27 @@ def main():
         type=str,
         help="Experiment ID (optional)",
     )
+    parser.add_argument(
+        "--log-level",
+        type=str,
+        choices=["DEBUG", "INFO", "WARNING", "ERROR", "CRITICAL"],
+        default="INFO",
+        help="Logging level (default: INFO)",
+    )
+    parser.add_argument(
+        "--log-file",
+        type=str,
+        help="Path to log file (optional). If not specified, logs go to stdout/stderr only.",
+    )
 
     args = parser.parse_args()
+
+    # 设置日志级别
+    set_logger_level(args.log_level)
+
+    # 设置日志文件
+    if args.log_file:
+        add_file_handler(args.log_file, level=args.log_level)
 
     config_path = Path(args.config).resolve()
     steps_path = Path(args.steps).resolve()

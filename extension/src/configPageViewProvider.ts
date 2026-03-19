@@ -3,6 +3,18 @@
  *
  * 在首次启动时或用户手动打开时显示配置页，引导用户填写 LLM API 密钥等必要配置，
  * 避免让用户去 Settings 页面编写 JSON 配置。
+ *
+ * **重要**: 配置现在保存在工作区的 .env 文件中，而不是 VSCode 设置中。
+ *
+ * 关联文件：
+ * - @extension/src/extension.ts - 主入口，注册命令 'aiSocialScientist.openConfigPage'
+ * - @extension/src/envManager.ts - .env文件读写管理
+ * - @extension/src/services/llmValidator.ts - LLM配置验证服务
+ * - @extension/src/services/backendManager.ts - 后端服务管理（配置保存后启动）
+ * - @extension/src/webview/configPage/ - 前端React组件 (编译后为configPage.js)
+ *
+ * 后端API：
+ * - @packages/agentsociety2/agentsociety2/backend/app.py - FastAPI后端
  */
 
 import * as vscode from 'vscode';
@@ -10,9 +22,11 @@ import * as path from 'path';
 import * as fs from 'fs';
 import { localize } from './i18n';
 import type { ConfigValues, WorkspaceInfo } from './webview/configPage/types';
+import { EnvManager, EnvConfig } from './envManager';
+import { LLMValidator, PythonValidator, LLMType } from './services/llmValidator';
 
 /** Build EasyPaper agents YAML content from AgentSociety2 config (LLM/VLM). API Base uses llmApiBase. */
-function buildEasyPaperYaml(config: Partial<ConfigValues>): string {
+function buildEasyPaperYaml(config: Partial<EnvConfig>): string {
   const llmKey = (config.easypaperLlmApiKey ?? '').trim() || (config.llmApiKey ?? '').trim();
   const llmBase = (config.llmApiBase ?? 'https://cloud.infini-ai.com/maas/v1').trim();
   const llmModel = (config.easypaperLlmModel ?? '').trim() || (config.llmModel ?? 'qwen3-next-80b-a3b-instruct').trim();
@@ -103,6 +117,7 @@ export class ConfigPageViewProvider {
   private readonly _panel: vscode.WebviewPanel;
   private readonly _extensionPath: string;
   private readonly _context: vscode.ExtensionContext;
+  private readonly _envManager: EnvManager;
   private _disposables: vscode.Disposable[] = [];
 
   public static createOrShow(
@@ -134,19 +149,32 @@ export class ConfigPageViewProvider {
     this._panel = panel;
     this._context = context;
     this._extensionPath = context.extensionPath;
+    this._envManager = new EnvManager();
 
     this._panel.webview.html = this._getHtmlForWebview(this._panel.webview);
 
     this._panel.onDidDispose(() => this.dispose(), null, this._disposables);
 
     this._panel.webview.onDidReceiveMessage(
-      async (message: { command: string; config?: Partial<ConfigValues> }) => {
+      async (message: { command: string; config?: Partial<ConfigValues>; llmType?: string }) => {
         switch (message.command) {
           case 'requestConfig':
             await this._sendInitialConfig();
             break;
           case 'saveConfig':
             await this._handleSaveConfig(message.config || {});
+            break;
+          case 'startBackend':
+            await this._handleStartBackend(message.config || {});
+            break;
+          case 'validateConfig':
+            await this._handleValidateConfig(message.config || {}, message.llmType);
+            break;
+          case 'validatePython':
+            await this._handleValidatePython(message.config || {});
+            break;
+          case 'closeConfigPage':
+            this._panel.dispose();
             break;
           case 'openVscodeSettings':
             await vscode.commands.executeCommand('workbench.action.openSettings', '@aiSocialScientist');
@@ -162,38 +190,37 @@ export class ConfigPageViewProvider {
   }
 
   private async _sendInitialConfig(): Promise<void> {
-    const config = vscode.workspace.getConfiguration('aiSocialScientist');
-    const backendConfig = config.get('backend', {}) as Record<string, unknown>;
-    const envConfig = config.get('env', {}) as Record<string, unknown>;
+    // Read from .env file instead of VSCode settings
+    const envConfig = this._envManager.readEnv();
 
     const configValues: Partial<ConfigValues> = {
-      llmApiKey: (envConfig?.llmApiKey as string) || '',
-      backendHost: (envConfig?.backendHost as string) || '127.0.0.1',
-      backendPort: (envConfig?.backendPort as number) ?? 8001,
-      pythonPath: (backendConfig?.pythonPath as string) || '',
-      llmApiBase: (envConfig?.llmApiBase as string) || 'https://cloud.infini-ai.com/maas/v1',
-      llmModel: (envConfig?.llmModel as string) || 'qwen3-next-80b-a3b-instruct',
-      backendLogLevel: (envConfig?.backendLogLevel as string) || 'info',
-      coderLlmApiKey: (envConfig?.coderLlmApiKey as string) || '',
-      coderLlmApiBase: (envConfig?.coderLlmApiBase as string) || '',
-      coderLlmModel: (envConfig?.coderLlmModel as string) || 'glm-4.7',
-      nanoLlmApiKey: (envConfig?.nanoLlmApiKey as string) || '',
-      nanoLlmApiBase: (envConfig?.nanoLlmApiBase as string) || '',
-      nanoLlmModel: (envConfig?.nanoLlmModel as string) || 'qwen3-next-80b-a3b-instruct',
-      embeddingApiKey: (envConfig?.embeddingApiKey as string) || '',
-      embeddingApiBase: (envConfig?.embeddingApiBase as string) || '',
-      embeddingModel: (envConfig?.embeddingModel as string) || 'bge-m3',
-      embeddingDims: (envConfig?.embeddingDims as number) ?? 1024,
-      webSearchApiUrl: (envConfig?.webSearchApiUrl as string) || '',
-      webSearchApiToken: (envConfig?.webSearchApiToken as string) || '',
-      miroflowDefaultLlm: (envConfig?.miroflowDefaultLlm as string) || 'qwen-3',
-      miroflowDefaultAgent: (envConfig?.miroflowDefaultAgent as string) || 'mirothinker_v1.5_keep5_max200',
-      easypaperApiUrl: (envConfig?.easypaperApiUrl as string) || '',
-      easypaperLlmApiKey: (envConfig?.easypaperLlmApiKey as string) || '',
-      easypaperLlmModel: (envConfig?.easypaperLlmModel as string) || 'qwen3-next-80b-a3b-instruct',
-      easypaperVlmModel: (envConfig?.easypaperVlmModel as string) || 'qwen3-vl-235b-a22b-thinking',
-      easypaperVlmApiKey: (envConfig?.easypaperVlmApiKey as string) || '',
-      literatureSearchApiUrl: (envConfig?.literatureSearchApiUrl as string) || 'http://localhost:8002/api/v1/search',
+      llmApiKey: envConfig.llmApiKey || '',
+      backendHost: envConfig.backendHost || '127.0.0.1',
+      backendPort: envConfig.backendPort ?? 8001,
+      pythonPath: envConfig.pythonPath || '',
+      llmApiBase: envConfig.llmApiBase || 'https://cloud.infini-ai.com/maas/v1',
+      llmModel: envConfig.llmModel || 'qwen3-next-80b-a3b-instruct',
+      backendLogLevel: envConfig.backendLogLevel || 'info',
+      coderLlmApiKey: envConfig.coderLlmApiKey || '',
+      coderLlmApiBase: envConfig.coderLlmApiBase || '',
+      coderLlmModel: envConfig.coderLlmModel || 'glm-4.7',
+      nanoLlmApiKey: envConfig.nanoLlmApiKey || '',
+      nanoLlmApiBase: envConfig.nanoLlmApiBase || '',
+      nanoLlmModel: envConfig.nanoLlmModel || 'qwen3-next-80b-a3b-instruct',
+      embeddingApiKey: envConfig.embeddingApiKey || '',
+      embeddingApiBase: envConfig.embeddingApiBase || '',
+      embeddingModel: envConfig.embeddingModel || 'bge-m3',
+      embeddingDims: envConfig.embeddingDims ?? 1024,
+      webSearchApiUrl: envConfig.webSearchApiUrl || '',
+      webSearchApiToken: envConfig.webSearchApiToken || '',
+      miroflowDefaultLlm: envConfig.miroflowDefaultLlm || 'qwen-3',
+      miroflowDefaultAgent: envConfig.miroflowDefaultAgent || 'mirothinker_v1.5_keep5_max200',
+      easypaperApiUrl: envConfig.easypaperApiUrl || '',
+      easypaperLlmApiKey: envConfig.easypaperLlmApiKey || '',
+      easypaperLlmModel: envConfig.easypaperLlmModel || 'qwen3-next-80b-a3b-instruct',
+      easypaperVlmModel: envConfig.easypaperVlmModel || 'qwen3-vl-235b-a22b-thinking',
+      easypaperVlmApiKey: envConfig.easypaperVlmApiKey || '',
+      literatureSearchApiUrl: envConfig.literatureSearchApiUrl || 'http://localhost:8002/api/v1/search',
     };
 
     // 获取工作区信息
@@ -215,123 +242,8 @@ export class ConfigPageViewProvider {
 
   private async _handleSaveConfig(config: Partial<ConfigValues>): Promise<void> {
     try {
-      // 检查是否有工作区
-      if (!vscode.workspace.workspaceFolders || vscode.workspace.workspaceFolders.length === 0) {
-        this._panel.webview.postMessage({
-          command: 'saveResult',
-          success: false,
-          error: localize('configPage.noWorkspace')
-        });
-        return;
-      }
-      const vscodeConfig = vscode.workspace.getConfiguration('aiSocialScientist');
-
-      if (config.llmApiKey !== undefined) {
-        await vscodeConfig.update('env.llmApiKey', config.llmApiKey, vscode.ConfigurationTarget.Workspace);
-      }
-      if (config.backendHost !== undefined) {
-        await vscodeConfig.update('env.backendHost', config.backendHost, vscode.ConfigurationTarget.Workspace);
-      }
-      if (config.backendPort !== undefined) {
-        await vscodeConfig.update('env.backendPort', config.backendPort, vscode.ConfigurationTarget.Workspace);
-      }
-      if (config.pythonPath !== undefined) {
-        await vscodeConfig.update('backend.pythonPath', config.pythonPath, vscode.ConfigurationTarget.Workspace);
-      }
-      if (config.llmApiBase !== undefined) {
-        await vscodeConfig.update('env.llmApiBase', config.llmApiBase, vscode.ConfigurationTarget.Workspace);
-      }
-      if (config.llmModel !== undefined) {
-        await vscodeConfig.update('env.llmModel', config.llmModel, vscode.ConfigurationTarget.Workspace);
-      }
-      if (config.backendLogLevel !== undefined) {
-        await vscodeConfig.update('env.backendLogLevel', config.backendLogLevel, vscode.ConfigurationTarget.Workspace);
-      }
-      if (config.coderLlmApiKey !== undefined) {
-        await vscodeConfig.update('env.coderLlmApiKey', config.coderLlmApiKey, vscode.ConfigurationTarget.Workspace);
-      }
-      if (config.coderLlmApiBase !== undefined) {
-        await vscodeConfig.update('env.coderLlmApiBase', config.coderLlmApiBase, vscode.ConfigurationTarget.Workspace);
-      }
-      if (config.coderLlmModel !== undefined) {
-        await vscodeConfig.update('env.coderLlmModel', config.coderLlmModel, vscode.ConfigurationTarget.Workspace);
-      }
-      if (config.nanoLlmApiKey !== undefined) {
-        await vscodeConfig.update('env.nanoLlmApiKey', config.nanoLlmApiKey, vscode.ConfigurationTarget.Workspace);
-      }
-      if (config.nanoLlmApiBase !== undefined) {
-        await vscodeConfig.update('env.nanoLlmApiBase', config.nanoLlmApiBase, vscode.ConfigurationTarget.Workspace);
-      }
-      if (config.nanoLlmModel !== undefined) {
-        await vscodeConfig.update('env.nanoLlmModel', config.nanoLlmModel, vscode.ConfigurationTarget.Workspace);
-      }
-      if (config.embeddingApiKey !== undefined) {
-        await vscodeConfig.update('env.embeddingApiKey', config.embeddingApiKey, vscode.ConfigurationTarget.Workspace);
-      }
-      if (config.embeddingApiBase !== undefined) {
-        await vscodeConfig.update('env.embeddingApiBase', config.embeddingApiBase, vscode.ConfigurationTarget.Workspace);
-      }
-      if (config.embeddingModel !== undefined) {
-        await vscodeConfig.update('env.embeddingModel', config.embeddingModel, vscode.ConfigurationTarget.Workspace);
-      }
-      if (config.embeddingDims !== undefined) {
-        await vscodeConfig.update('env.embeddingDims', config.embeddingDims, vscode.ConfigurationTarget.Workspace);
-      }
-      if (config.webSearchApiUrl !== undefined) {
-        await vscodeConfig.update('env.webSearchApiUrl', config.webSearchApiUrl, vscode.ConfigurationTarget.Workspace);
-      }
-      if (config.webSearchApiToken !== undefined) {
-        await vscodeConfig.update('env.webSearchApiToken', config.webSearchApiToken, vscode.ConfigurationTarget.Workspace);
-      }
-      if (config.miroflowDefaultLlm !== undefined) {
-        await vscodeConfig.update('env.miroflowDefaultLlm', config.miroflowDefaultLlm, vscode.ConfigurationTarget.Workspace);
-      }
-      if (config.miroflowDefaultAgent !== undefined) {
-        await vscodeConfig.update('env.miroflowDefaultAgent', config.miroflowDefaultAgent, vscode.ConfigurationTarget.Workspace);
-      }
-      if (config.easypaperApiUrl !== undefined) {
-        await vscodeConfig.update('env.easypaperApiUrl', config.easypaperApiUrl, vscode.ConfigurationTarget.Workspace);
-      }
-      if (config.easypaperLlmApiKey !== undefined) {
-        await vscodeConfig.update('env.easypaperLlmApiKey', config.easypaperLlmApiKey, vscode.ConfigurationTarget.Workspace);
-      }
-      if (config.easypaperLlmModel !== undefined) {
-        await vscodeConfig.update('env.easypaperLlmModel', config.easypaperLlmModel, vscode.ConfigurationTarget.Workspace);
-      }
-      if (config.easypaperVlmModel !== undefined) {
-        await vscodeConfig.update('env.easypaperVlmModel', config.easypaperVlmModel, vscode.ConfigurationTarget.Workspace);
-      }
-      if (config.easypaperVlmApiKey !== undefined) {
-        await vscodeConfig.update('env.easypaperVlmApiKey', config.easypaperVlmApiKey, vscode.ConfigurationTarget.Workspace);
-      }
-      if (config.literatureSearchApiUrl !== undefined) {
-        await vscodeConfig.update('env.literatureSearchApiUrl', config.literatureSearchApiUrl, vscode.ConfigurationTarget.Workspace);
-      }
-
-      // If EasyPaper URL or any model field is set, write easypaper_agentsociety.yaml to workspace for EasyPaper to use
-      const workspaceFolder = vscode.workspace.workspaceFolders?.[0];
-      const hasEasyPaperConfig =
-        (config.easypaperApiUrl ?? '').trim() !== '' ||
-        (config.easypaperLlmModel ?? '').trim() !== '' ||
-        (config.easypaperLlmApiKey ?? '').trim() !== '' ||
-        (config.easypaperVlmModel ?? '').trim() !== '';
-      if (workspaceFolder && hasEasyPaperConfig) {
-        try {
-          const yamlPath = path.join(workspaceFolder.uri.fsPath, 'easypaper_agentsociety.yaml');
-          const yamlContent = buildEasyPaperYaml(config);
-          fs.writeFileSync(yamlPath, yamlContent, 'utf8');
-        } catch (e) {
-          console.warn('Failed to write easypaper_agentsociety.yaml:', e);
-        }
-      }
-
-      // 标记已完成初始配置
-      await this._context.globalState.update('configPage.hasCompletedInitialSetup', true);
-
+      await this._saveConfigInternal(config);
       this._panel.webview.postMessage({ command: 'saveResult', success: true });
-
-      // 启动后端服务
-      await vscode.commands.executeCommand('aiSocialScientist.startBackend');
     } catch (err: unknown) {
       const message = err instanceof Error ? err.message : String(err);
       this._panel.webview.postMessage({
@@ -340,6 +252,166 @@ export class ConfigPageViewProvider {
         error: message
       });
     }
+  }
+
+  private async _handleStartBackend(config: Partial<ConfigValues>): Promise<void> {
+    try {
+      // 确保配置已保存
+      await this._saveConfigInternal(config);
+
+      // 启动后端服务
+      const success = await vscode.commands.executeCommand<boolean>('aiSocialScientist.startBackend');
+
+      this._panel.webview.postMessage({
+        command: 'startBackendResult',
+        success: success !== false,
+      });
+    } catch (err: unknown) {
+      const message = err instanceof Error ? err.message : String(err);
+      this._panel.webview.postMessage({
+        command: 'startBackendResult',
+        success: false,
+        error: message
+      });
+    }
+  }
+
+  private async _saveConfigInternal(config: Partial<ConfigValues>): Promise<void> {
+    // 检查是否有工作区
+    if (!vscode.workspace.workspaceFolders || vscode.workspace.workspaceFolders.length === 0) {
+      throw new Error(localize('configPage.noWorkspace'));
+    }
+
+    // Write to .env file instead of VSCode settings
+    this._envManager.writeEnv({
+      llmApiKey: config.llmApiKey,
+      backendHost: config.backendHost,
+      backendPort: config.backendPort,
+      pythonPath: config.pythonPath,
+      llmApiBase: config.llmApiBase,
+      llmModel: config.llmModel,
+      backendLogLevel: config.backendLogLevel,
+      coderLlmApiKey: config.coderLlmApiKey,
+      coderLlmApiBase: config.coderLlmApiBase,
+      coderLlmModel: config.coderLlmModel,
+      nanoLlmApiKey: config.nanoLlmApiKey,
+      nanoLlmApiBase: config.nanoLlmApiBase,
+      nanoLlmModel: config.nanoLlmModel,
+      embeddingApiKey: config.embeddingApiKey,
+      embeddingApiBase: config.embeddingApiBase,
+      embeddingModel: config.embeddingModel,
+      embeddingDims: config.embeddingDims,
+      webSearchApiUrl: config.webSearchApiUrl,
+      webSearchApiToken: config.webSearchApiToken,
+      miroflowDefaultLlm: config.miroflowDefaultLlm,
+      miroflowDefaultAgent: config.miroflowDefaultAgent,
+      easypaperApiUrl: config.easypaperApiUrl,
+      easypaperLlmApiKey: config.easypaperLlmApiKey,
+      easypaperLlmModel: config.easypaperLlmModel,
+      easypaperVlmModel: config.easypaperVlmModel,
+      easypaperVlmApiKey: config.easypaperVlmApiKey,
+      literatureSearchApiUrl: config.literatureSearchApiUrl,
+    });
+
+    // If EasyPaper URL or any model field is set, write easypaper_agentsociety.yaml to workspace for EasyPaper to use
+    const workspaceFolder = vscode.workspace.workspaceFolders?.[0];
+    const hasEasyPaperConfig =
+      (config.easypaperApiUrl ?? '').trim() !== '' ||
+      (config.easypaperLlmModel ?? '').trim() !== '' ||
+      (config.easypaperLlmApiKey ?? '').trim() !== '' ||
+      (config.easypaperVlmModel ?? '').trim() !== '';
+    if (workspaceFolder && hasEasyPaperConfig) {
+      try {
+        const yamlPath = path.join(workspaceFolder.uri.fsPath, 'easypaper_agentsociety.yaml');
+        const yamlContent = buildEasyPaperYaml(config);
+        fs.writeFileSync(yamlPath, yamlContent, 'utf8');
+      } catch (e) {
+        console.warn('Failed to write easypaper_agentsociety.yaml:', e);
+      }
+    }
+
+    // 标记已完成初始配置
+    await this._context.globalState.update('configPage.hasCompletedInitialSetup', true);
+  }
+
+  /**
+   * 处理 LLM 配置验证请求
+   */
+  private async _handleValidateConfig(config: Partial<ConfigValues>, llmType: string = 'default'): Promise<void> {
+    const validator = new LLMValidator();
+
+    let apiKey: string = '';
+    let apiBase: string = '';
+    let model: string = '';
+    let validationType: LLMType = LLMType.Chat;
+
+    switch (llmType) {
+      case 'coder':
+        apiKey = config.coderLlmApiKey || '';
+        apiBase = config.coderLlmApiBase || '';
+        model = config.coderLlmModel || 'glm-4.7';
+        break;
+      case 'nano':
+        apiKey = config.nanoLlmApiKey || '';
+        apiBase = config.nanoLlmApiBase || '';
+        model = config.nanoLlmModel || 'qwen3-next-80b-a3b-instruct';
+        break;
+      case 'embedding':
+        apiKey = config.embeddingApiKey || '';
+        apiBase = config.embeddingApiBase || '';
+        model = config.embeddingModel || 'bge-m3';
+        validationType = LLMType.Embedding;
+        break;
+      case 'easypaperLlm':
+        apiKey = config.easypaperLlmApiKey || '';
+        apiBase = config.llmApiBase || 'https://cloud.infini-ai.com/maas/v1';
+        model = config.easypaperLlmModel || 'qwen3-next-80b-a3b-instruct';
+        break;
+      case 'easypaperVlm':
+        apiKey = config.easypaperVlmApiKey || '';
+        apiBase = config.llmApiBase || 'https://cloud.infini-ai.com/ai.sap.com/v1';
+        model = config.easypaperVlmModel || 'qwen3-vl-235b-a22b-thinking';
+        break;
+      default: // default LLM
+        apiKey = config.llmApiKey || '';
+        apiBase = config.llmApiBase || '';
+        model = config.llmModel || 'qwen3-next-80b-a3b-instruct';
+        break;
+    }
+
+    // 如果 coder/nano/embedding 的 API Key 或 Base URL 为空，使用默认 LLM 的配置
+    if (!apiKey && llmType !== 'easypaperVlm') {
+      apiKey = config.llmApiKey || '';
+    }
+    if (!apiBase) {
+      apiBase = config.llmApiBase || '';
+    }
+
+    const result = await validator.validate({ apiKey, apiBase, model }, validationType);
+
+    this._panel.webview.postMessage({
+      command: 'validationResult',
+      llmType,
+      success: result.success,
+      error: result.error || null,
+    });
+  }
+
+  /**
+   * 处理 Python 环境验证请求
+   */
+  private async _handleValidatePython(config: Partial<ConfigValues>): Promise<void> {
+    const validator = new PythonValidator();
+    const pythonPath = config.pythonPath || '';
+
+    const result = await validator.validate({ pythonPath });
+
+    this._panel.webview.postMessage({
+      command: 'validationResult',
+      llmType: 'python',
+      success: result.success,
+      error: result.error || null,
+    });
   }
 
   private _getHtmlForWebview(webview: vscode.Webview): string {
@@ -352,7 +424,7 @@ export class ConfigPageViewProvider {
 <head>
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
-  <meta http-equiv="Content-Security-Policy" content="default-src 'none'; style-src ${webview.cspSource} 'unsafe-inline'; script-src ${webview.cspSource} 'unsafe-eval' 'unsafe-inline';">
+  <meta http-equiv="Content-Security-Policy" content="default-src 'none'; style-src ${webview.cspSource} 'unsafe-inline'; script-src ${webview.cspSource} 'unsafe-eval' 'unsafe-inline'; connect-src *;">
   <title>${localize('configPage.title')}</title>
   <style>
     * { box-sizing: border-box; margin: 0; padding: 0; }
@@ -375,9 +447,10 @@ export class ConfigPageViewProvider {
 
   public dispose(): void {
     ConfigPageViewProvider.currentPanel = undefined;
+    this._envManager.dispose();
     while (this._disposables.length) {
       const d = this._disposables.pop();
-      if (d) d.dispose();
+      if (d) {d.dispose();}
     }
   }
 }

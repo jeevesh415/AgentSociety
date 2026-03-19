@@ -26,6 +26,12 @@ AgentSociety 2
 
 * **回放与分析**: 基于 SQLite 的内置存储，用于实验跟踪和分析。
 
+* **研究技能**: 内置文献检索、假设生成、实验设计、论文撰写等 LLM 原生工作流。
+
+* **REST API**: 基于 FastAPI 的独立后端服务，支持外部集成。
+
+* **CLI 工具**: 强大的命令行界面，支持实验运行和进度跟踪。
+
 * **可扩展**: 轻松扩展自定义智能体、环境和工具。
 
 安装
@@ -70,6 +76,7 @@ AgentSociety 2
 
    installation
    quickstart
+   cli
    concepts
    interaction
 
@@ -81,6 +88,7 @@ AgentSociety 2
    env_modules
    storage
    custom_modules
+   skills
 
 .. toctree::
    :maxdepth: 2

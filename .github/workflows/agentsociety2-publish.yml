@@ -10,8 +10,8 @@ permissions:
   id-token: write  # Required for trusted publishing
 
 jobs:
-  build:
-    name: Build distribution
+  build-python:
+    name: Build Python distribution
     runs-on: ubuntu-latest
 
     steps:
@@ -45,9 +45,52 @@ jobs:
           name: python-package-distributions
           path: packages/agentsociety2/dist/
 
+  build-vscode:
+    name: Build VSCode extension
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+
+      - name: Install pnpm
+        uses: pnpm/action-setup@v4
+        with:
+          version: '10.7.0'
+
+      - name: Install dependencies
+        working-directory: ./extension
+        run: pnpm install
+
+      - name: Build extension
+        working-directory: ./extension
+        run: |
+          pnpm run compile
+          pnpm run build-webview
+
+      - name: Install vsce
+        run: npm install -g @vscode/vsce
+
+      - name: Package extension
+        working-directory: ./extension
+        run: vsce package --out ai-social-scientist.vsix
+
+      - name: Store the VSIX package
+        uses: actions/upload-artifact@v4
+        with:
+          name: vscode-extension
+          path: extension/ai-social-scientist.vsix
+
   publish-to-pypi:
     name: Publish to PyPI
-    needs: build
+    needs: build-python
     runs-on: ubuntu-latest
     environment:
       name: pypi
@@ -70,7 +113,7 @@ jobs:
 
   github-release:
     name: Create GitHub Release
-    needs: publish-to-pypi
+    needs: [publish-to-pypi, build-vscode]
     runs-on: ubuntu-latest
     permissions:
       contents: write
@@ -81,11 +124,17 @@ jobs:
         with:
           fetch-depth: 0
 
-      - name: Download all the dists
+      - name: Download Python distributions
         uses: actions/download-artifact@v4
         with:
           name: python-package-distributions
-          path: dist/
+          path: python-dist/
+
+      - name: Download VSCode extension
+        uses: actions/download-artifact@v4
+        with:
+          name: vscode-extension
+          path: vscode-dist/
 
       - name: Extract version from tag
         id: get_version
@@ -114,8 +163,9 @@ jobs:
           name: AgentSociety2 ${{ steps.get_version.outputs.version }}
           body_path: release_notes.md
           files: |
-            dist/*.tar.gz
-            dist/*.whl
+            python-dist/*.tar.gz
+            python-dist/*.whl
+            vscode-dist/*.vsix
           draft: false
           prerelease: false
         env:

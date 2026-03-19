@@ -87,6 +87,22 @@ msgstr ""
 "and analysis."
 
 #: ../../index.rst:29
+msgid "**研究技能**: 内置文献检索、假设生成、实验设计、论文撰写等 LLM 原生工作流。"
+msgstr ""
+"**Research Skills**: Built-in LLM-native workflows for literature search, hypothesis "
+"generation, experiment design, and paper writing."
+
+#: ../../index.rst:31
+msgid "**REST API**: 基于 FastAPI 的独立后端服务，支持外部集成。"
+msgstr ""
+"**REST API**: Independent FastAPI-based backend service for external integrations."
+
+#: ../../index.rst:33
+msgid "**CLI 工具**: 强大的命令行界面，支持实验运行和进度跟踪。"
+msgstr ""
+"**CLI Tool**: Powerful command-line interface for experiment execution and progress tracking."
+
+#: ../../index.rst:35
 msgid "**可扩展**: 轻松扩展自定义智能体、环境和工具。"
 msgstr ""
 "**Extensible**: Easily extend with custom agents, environments, and tools."

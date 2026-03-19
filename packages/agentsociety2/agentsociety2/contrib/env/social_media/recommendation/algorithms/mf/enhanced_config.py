@@ -2,7 +2,7 @@
 增强版MF配置
 """
 
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, Field, ConfigDict
 
 
 class EnhancedMFConfig(BaseModel):
@@ -12,6 +12,20 @@ class EnhancedMFConfig(BaseModel):
     2. 隐式反馈（Implicit Feedback）：整合用户浏览/交互历史
     3. 时间动态性（Temporal Dynamics）：捕捉评分随时间的变化
     """
+
+    model_config = ConfigDict(
+        json_schema_extra={
+            "example": {
+                "n_latent_factors": 50,
+                "learning_rate": 0.005,
+                "reg_param": 0.02,
+                "n_iterations": 100,
+                "use_biases": True,
+                "use_implicit_feedback": False,
+                "use_temporal_dynamics": False
+            }
+        }
+    )
 
     # 基础参数
     n_latent_factors: int = Field(
@@ -75,19 +89,6 @@ class EnhancedMFConfig(BaseModel):
         ge=0,
         le=1
     )
-
-    class Config:
-        json_schema_extra = {
-            "example": {
-                "n_latent_factors": 50,
-                "learning_rate": 0.005,
-                "reg_param": 0.02,
-                "n_iterations": 100,
-                "use_biases": True,
-                "use_implicit_feedback": False,
-                "use_temporal_dynamics": False
-            }
-        }
 
 
 __all__ = ["EnhancedMFConfig"]

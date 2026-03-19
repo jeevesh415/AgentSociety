@@ -8,23 +8,15 @@ export const PROTOCOL_VERSION = '1.0.0';
 /** 消息命令常量 */
 export const Commands = {
   // WebView → Extension
-  SEND_MESSAGE: 'sendMessage',
-  CLEAR_CHAT: 'clearChat',
   CHECK_HEALTH: 'checkHealth',
   OPEN_FILE: 'openFile',
-  LOAD_HISTORY: 'loadHistory',
-  LIST_HISTORIES: 'listHistories',
   TOOL_PERMISSION_RESPONSE: 'toolPermissionResponse',
   INTERRUPT: 'interrupt',
 
   // Extension → WebView
   SSE_EVENT: 'sseEvent',
   STREAM_INTERRUPTED: 'streamInterrupted',
-  CLEAR_MESSAGES: 'clearMessages',
   BACKEND_STATUS: 'backendStatus',
-  HISTORY_LOADED: 'historyLoaded',
-  HISTORY_LIST: 'historyList',
-  HISTORY_LOAD_ERROR: 'historyLoadError',
   TOOL_PERMISSION_REQUEST: 'toolPermissionRequest',
   EXPERIMENT_STATUS: 'experimentStatus',
 } as const;

@@ -258,8 +258,9 @@ async def main():
         progress_task = asyncio.create_task(progress_monitor())
 
         try:
-            # Run simulation until end_t
-            await society.run_to(end_t, TICK_DURATION)
+            # Run simulation for specified number of steps
+            num_steps = int(SIMULATION_DURATION / TICK_DURATION)
+            await society.run(num_steps=num_steps, tick=TICK_DURATION)
         finally:
             # 停止进度监控
             progress_task.cancel()

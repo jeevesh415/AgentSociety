@@ -5,7 +5,7 @@
 本次实现为 AgentSociety2 添加了**自定义 Agent 和环境模块支持**功能，允许用户：
 1. 在 `custom/` 目录编写自定义代码
 2. 通过 API 触发扫描和注册
-3. 自动生成测试脚本并运行
+3. 在内存中安全测试模块（不生成临时文件）
 4. 与 AI Social Scientist 无缝集成
 
 ## 文件变更清单
@@ -32,7 +32,7 @@
 | `backend/services/custom/__init__.py` | 服务包初始化 |
 | `backend/services/custom/scanner.py` | 扫描服务（~250 行） |
 | `backend/services/custom/generator.py` | JSON 配置生成器（~150 行） |
-| `backend/services/custom/test_builder.py` | 测试脚本生成器（~350 行） |
+| `backend/services/custom/script_generator.py` | 内存测试执行器（~500 行） |
 
 #### API 路由
 
@@ -90,24 +90,21 @@ class CustomModuleJsonGenerator:
 - JSON 文件包含 `is_custom: true` 标记
 - 不覆盖内置模块的 JSON
 
-### 3. 测试脚本生成器 (`test_builder.py`)
+### 3. 内存测试执行器 (`script_generator.py`)
 
 ```python
-class TestScriptBuilder:
-    """自动生成测试脚本"""
-
-    def build_test_script() -> str:
-        """生成完整的测试代码"""
+class SafeModuleTester:
+    """安全的模块测试器（使用动态导入和反射）"""
 
     async def run_test() -> Dict[str, Any]:
-        """保存并运行测试，返回结果"""
+        """在内存中执行测试，返回结果"""
 ```
 
-**生成的测试脚本包含：**
-- Agent 单元测试（创建、方法验证）
-- 环境模块单元测试（工具注册验证）
-- Agent + 环境集成测试
-- 完整的错误处理和输出
+**安全设计特点：**
+- 使用 `importlib` 动态导入模块（避免 `exec/eval`）
+- 使用反射调用类和方法
+- 白名单验证可导入的模块路径
+- 在内存中执行测试，不生成临时文件
 
 ### 4. API 路由 (`custom.py`)
 
@@ -137,7 +134,7 @@ class TestScriptBuilder:
 
 #### 4.2 POST `/api/v1/custom/test`
 
-生成并运行测试脚本
+在内存中测试自定义模块（不生成临时文件）
 
 **请求：**
 ```json
@@ -151,8 +148,18 @@ class TestScriptBuilder:
 {
   "success": true,
   "test_output": "测试输出内容...",
-  "test_file": "/path/to/workspace/test_custom_module.py",
-  "returncode": 0
+  "returncode": 0,
+  "results": [
+    {
+      "name": "MyAgent",
+      "success": true,
+      "output": "...",
+      "error": null
+    }
+  ],
+  "total_tests": 1,
+  "passed_tests": 1,
+  "failed_tests": 0
 }
 ```
 
@@ -228,7 +235,7 @@ packages/agentsociety2/agentsociety2/
         ├── __init__.py
         ├── scanner.py                   # 扫描服务
         ├── generator.py                 # JSON 生成器
-        └── test_builder.py              # 测试脚本生成器
+        └── script_generator.py          # 内存测试执行器
 ```
 
 ## 用户工作区结构
@@ -241,13 +248,11 @@ my_workspace/
 │   └── envs/
 │       └── my_env.py                    # 用户自己的环境模块
 │
-├── .agentsociety/                       # 自动生成
-│   ├── agent_classes/
-│   │   └── my_agent.json                # 扫描后生成
-│   └── env_modules/
-│       └── my_env.json                  # 扫描后生成
-│
-└── test_custom_module.py                # 测试命令生成
+└── .agentsociety/                       # 自动生成
+    ├── agent_classes/
+    │   └── my_agent.json                # 扫描后生成
+    └── env_modules/
+        └── my_env.json                  # 扫描后生成
 ```
 
 ## 生成的 JSON 配置格式
@@ -276,72 +281,15 @@ my_workspace/
 }
 ```
 
-## 生成的测试脚本示例
+## 测试实现说明
 
-```python
-"""自动生成的测试脚本..."""
+系统使用安全的内存测试方式，不生成临时文件：
 
-import asyncio
-import sys
-from pathlib import Path
-from datetime import datetime
-
-# 设置路径
-workspace_path = Path("/path/to/workspace")
-sys.path.insert(0, str(workspace_path))
-sys.path.insert(0, str(workspace_path / "packages/agentsociety2"))
-
-# 导入自定义模块
-from custom.agents.my_agent import MyAgent
-from custom.envs.my_env import MyEnv
-
-from agentsociety2.env.router_react import ReActRouter
-
-
-async def test_agents():
-    """测试自定义 Agent"""
-    print("=" * 50)
-    print("测试自定义 Agent")
-    print("=" * 50)
-
-    # 测试 MyAgent
-    print("\n--- 测试 MyAgent ---")
-    try:
-        agent = MyAgent(
-            id=0,
-            profile={"name": "测试用户", "personality": "友好"}
-        )
-        print("✓ MyAgent 创建成功")
-
-        if hasattr(agent, "mcp_description"):
-            desc = agent.mcp_description()
-            print(f"✓ mcp_description() 返回: {len(desc)} 字符")
-
-        print("✓ MyAgent 基本测试通过\n")
-    except Exception as e:
-        print(f"✗ MyAgent 测试失败: {e}\n")
-
-
-async def test_envs():
-    """测试自定义环境模块"""
-    # ... 类似结构
-
-
-async def test_integration():
-    """测试 Agent 与环境模块的集成"""
-    # ... 创建 Router、Agent、环境，运行仿真步骤
-
-
-async def main():
-    await test_agents()
-    await test_envs()
-    await test_integration()
-    print("测试完成！")
-
-
-if __name__ == "__main__":
-    asyncio.run(main())
-```
+**安全设计特点：**
+- 使用 `importlib` 动态导入模块
+- 使用反射调用类和方法（避免 `exec/eval`）
+- 白名单验证可导入的模块路径
+- 完整的单元测试和集成测试
 
 ## 环境变量
 
@@ -391,7 +339,7 @@ WORKSPACE_PATH=/path/to/workspace
 |------|------|
 | scanner.py | ~250 |
 | generator.py | ~150 |
-| test_builder.py | ~350 |
+| script_generator.py | ~500 |
 | custom.py (API) | ~330 |
 | simple_agent.py | ~100 |
 | advanced_agent.py | ~130 |

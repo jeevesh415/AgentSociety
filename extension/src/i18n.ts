@@ -15,6 +15,11 @@ const translations: Record<string, Record<string, string>> = {
     'extension.initProject.prompt': '输入研究话题',
     'extension.initProject.placeholder': '例如：社交媒体对政治观点的影响',
     'extension.initProject.success': '研究项目已初始化：{0}',
+    'extension.initProject.button': '初始化工作区',
+    'extension.configureEnv.button': '配置环境变量',
+    'extension.configureEnv.title': '配置环境变量',
+    'extension.fixWorkspace.button': '修复工作区目录',
+    'extension.aiChat.label': 'AI 对话',
     'extension.searchPapers.prompt': '输入论文搜索查询',
     'extension.searchPapers.placeholder': '例如：社交媒体影响',
     'extension.searchPapers.searching': '正在搜索论文：{0}',
@@ -59,9 +64,7 @@ const translations: Record<string, Record<string, string>> = {
     'projectStructure.userData': '用户数据',
     'projectStructure.resultsDatabase': 'Results Database',
     'projectStructure.init': 'Init: {0}',
-    'projectStructure.aiChat': 'AI 对话',
     'projectStructure.researchTopic': '研究话题',
-    'projectStructure.openAiChat': '打开AI对话',
     'projectStructure.simSettings': '模拟设置',
     'projectStructure.hypothesis': '假设',
     'projectStructure.experiment': '实验',
@@ -69,6 +72,9 @@ const translations: Record<string, Record<string, string>> = {
     'projectStructure.initWorkspace.confirm': '确认',
     'projectStructure.initWorkspace.cancel': '取消',
     'projectStructure.initWorkspace.failed': '初始化失败: {0}',
+    'workspaceInit.initializing': '正在初始化工作区，请稍候...',
+    'workspaceInit.success': '工作区初始化成功：{0}',
+    'workspaceInit.failed': '工作区初始化失败：{0}',
 
     // paperWatcher.ts
     'paperWatcher.newFile': '发现新文件: {0}',
@@ -123,13 +129,6 @@ const translations: Record<string, Record<string, string>> = {
     'dragDrop.cancelled': '上传已取消',
     'dragDrop.mkdirFailed': '无法创建目标目录: {0}',
 
-    // chatWebviewProvider.ts
-    'chatWebview.noBackend': '无法连接到后端服务 ({0})。请确保后端服务正在运行。',
-    'chatWebview.noWorkspace': '请先打开一个工作区文件夹。AI Social Scientist 需要在工作区中运行。',
-    'chatWebview.chatFailed': '对话失败: {0}',
-    'chatWebview.toolFailed': '工具执行失败: {1} - {0}',
-    'chatWebview.filesSaved': '已保存 {0} 个文献文件到工作区的 papers 目录',
-
     // prefillParamsViewProvider.ts
     'prefillParamsViewProvider.noWorkspace': '未找到工作区文件夹',
     'prefillParams.title': '预填充参数',
@@ -139,6 +138,7 @@ const translations: Record<string, Record<string, string>> = {
 
     // projectStructureProvider.ts - settings
     'projectStructure.settings': '配置设置',
+    'projectStructure.syncResources': '同步 AI 助手资源',
 
     // backendManager.ts
     'backendManager.openSettings': '打开设置',
@@ -165,12 +165,18 @@ const translations: Record<string, Record<string, string>> = {
     'customModules.testing': '正在测试自定义模块...',
     'customModules.testSuccess': '测试完成',
     'customModules.testFailed': '测试失败: {0}',
-    'customModules.cleanConfirm': '确定要清理所有自定义模块配置吗？此操作无法撤销。',
-    'customModules.cleanConfirmButton': '清理',
-    'customModules.cleanFailed': '清理失败: {0}',
     'customModules.noModules': '未发现自定义模块',
     'customModules.listFailed': '获取模块列表失败: {0}',
-    'customModules.cleanSuccess': '清理完成',
+    'customModules.syncAssistant.updating': '正在同步 AI 助手资源...',
+    'customModules.syncAssistant.success': 'AI 助手资源已同步: {0} 个技能文件, {1}',
+    'customModules.syncAssistant.claudeMdUpdated': 'CLAUDE.md 已更新',
+    'customModules.syncAssistant.failed': '同步 AI 助手资源失败: {0}',
+
+    // workspace fix
+    'workspaceFix.healthy': '工作区目录结构完整，无需修复',
+    'workspaceFix.fixed': '工作区已修复，创建了 {0} 个项目',
+    'workspaceFix.failed': '修复失败: {0}',
+    'workspaceFix.confirm': '检测到工作区缺少 {0} 个项目:\n{1}\n\n是否立即修复？',
 
     // projectStructureProvider.ts - custom modules
     'projectStructure.customModules': '自定义模块',
@@ -178,7 +184,6 @@ const translations: Record<string, Record<string, string>> = {
     'projectStructure.customEnvs': '自定义环境',
     'projectStructure.customScan': '扫描模块',
     'projectStructure.customTest': '测试模块',
-    'projectStructure.customClean': '清空配置',
 
     // projectStructureProvider.ts - analysis reports
     'projectStructure.presentation': '分析报告',
@@ -200,6 +205,11 @@ const translations: Record<string, Record<string, string>> = {
     'extension.initProject.prompt': 'Enter research topic',
     'extension.initProject.placeholder': 'e.g., Social media influence on political opinions',
     'extension.initProject.success': 'Research project initialized: {0}',
+    'extension.initProject.button': 'Initialize Workspace',
+    'extension.configureEnv.button': 'Configure Environment',
+    'extension.configureEnv.title': 'Configure Environment Variables',
+    'extension.fixWorkspace.button': 'Fix Workspace Directory',
+    'extension.aiChat.label': 'AI Chat',
     'extension.searchPapers.prompt': 'Enter paper search query',
     'extension.searchPapers.placeholder': 'e.g., social media influence',
     'extension.searchPapers.searching': 'Searching papers for: {0}',
@@ -244,9 +254,7 @@ const translations: Record<string, Record<string, string>> = {
     'projectStructure.userData': 'User Data',
     'projectStructure.resultsDatabase': 'Results Database',
     'projectStructure.init': 'Init: {0}',
-    'projectStructure.aiChat': 'AI Chat',
     'projectStructure.researchTopic': 'Research Topic',
-    'projectStructure.openAiChat': 'Open AI Chat',
     'projectStructure.simSettings': 'SIM Settings',
     'projectStructure.hypothesis': 'Hypothesis',
     'projectStructure.experiment': 'Experiment',
@@ -254,6 +262,9 @@ const translations: Record<string, Record<string, string>> = {
     'projectStructure.initWorkspace.confirm': 'Confirm',
     'projectStructure.initWorkspace.cancel': 'Cancel',
     'projectStructure.initWorkspace.failed': 'Initialization failed: {0}',
+    'workspaceInit.initializing': 'Initializing workspace, please wait...',
+    'workspaceInit.success': 'Workspace initialized successfully: {0}',
+    'workspaceInit.failed': 'Workspace initialization failed: {0}',
 
     // paperWatcher.ts
     'paperWatcher.newFile': 'New file detected: {0}',
@@ -308,13 +319,6 @@ const translations: Record<string, Record<string, string>> = {
     'dragDrop.cancelled': 'Upload cancelled',
     'dragDrop.mkdirFailed': 'Cannot create target directory: {0}',
 
-    // chatWebviewProvider.ts
-    'chatWebview.noBackend': 'Cannot connect to backend service ({0}). Please ensure the backend service is running.',
-    'chatWebview.noWorkspace': 'Please open a workspace folder first. AI Social Scientist requires a workspace to run.',
-    'chatWebview.chatFailed': 'Chat failed: {0}',
-    'chatWebview.toolFailed': 'Tool execution failed: {1} - {0}',
-    'chatWebview.filesSaved': 'Saved {0} literature file(s) to papers directory in workspace',
-
     // prefillParamsViewProvider.ts
     'prefillParamsViewProvider.noWorkspace': 'No workspace folder found',
     'prefillParams.title': 'Prefill Parameters',
@@ -324,6 +328,7 @@ const translations: Record<string, Record<string, string>> = {
 
     // projectStructureProvider.ts - settings
     'projectStructure.settings': 'Settings',
+    'projectStructure.syncResources': 'Sync AI Assistant Resources',
 
     // backendManager.ts
     'backendManager.openSettings': 'Open Settings',
@@ -350,17 +355,25 @@ const translations: Record<string, Record<string, string>> = {
     'customModules.testing': 'Testing custom modules...',
     'customModules.testSuccess': 'Test completed',
     'customModules.testFailed': 'Test failed: {0}',
-    'customModules.cleanConfirm': 'Are you sure you want to clean all custom module configurations? This action cannot be undone.',
-    'customModules.cleanSuccess': 'Clean completed',
-    'customModules.cleanConfirmButton': 'Clean',
-    'customModules.cleanFailed': 'Clean failed: {0}',
     'customModules.noModules': 'No custom modules found',
     'customModules.listFailed': 'Failed to get module list: {0}',
+    'customModules.syncAssistant.updating': 'Syncing AI assistant resources...',
+    'customModules.syncAssistant.success': 'AI assistant resources synced: {0} skill file(s), {1}',
+    'customModules.syncAssistant.claudeMdUpdated': 'CLAUDE.md updated',
+    'customModules.syncAssistant.failed': 'Failed to sync AI assistant resources: {0}',
+
+    // workspace fix
+    'workspaceFix.healthy': 'Workspace directory structure is complete, no fix needed',
+    'workspaceFix.fixed': 'Workspace fixed, created {0} items',
+    'workspaceFix.failed': 'Fix failed: {0}',
+    'workspaceFix.confirm': 'Detected {0} missing items in workspace:\n{1}\n\nFix now?',
 
     // projectStructureProvider.ts - custom modules
     'projectStructure.customModules': 'Custom Modules',
     'projectStructure.customAgents': 'Custom Agents',
     'projectStructure.customEnvs': 'Custom Environments',
+    'projectStructure.customScan': 'Scan Modules',
+    'projectStructure.customTest': 'Test Modules',
 
     // projectStructureProvider.ts - analysis reports
     'projectStructure.presentation': 'Analysis Reports',

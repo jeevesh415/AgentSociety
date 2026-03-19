@@ -1,4 +1,18 @@
-"""FastAPI backend service for AI Social Scientist VSCode extension"""
+"""
+FastAPI backend service for AI Social Scientist VSCode extension
+
+关联文件：
+- @packages/agentsociety2/agentsociety2/backend/run.py - 服务启动脚本
+- @extension/src/services/backendManager.ts - VSCode插件后端进程管理
+- @extension/src/apiClient.ts - VSCode插件API客户端
+
+路由注册：
+- @packages/agentsociety2/agentsociety2/backend/routers/prefill_params.py - /api/v1/prefill-params
+- @packages/agentsociety2/agentsociety2/backend/routers/experiments.py - /api/v1/experiments
+- @packages/agentsociety2/agentsociety2/backend/routers/replay.py - /api/v1/replay
+- @packages/agentsociety2/agentsociety2/backend/routers/custom.py - /api/v1/custom
+- @packages/agentsociety2/agentsociety2/backend/routers/modules.py - /api/v1/modules
+"""
 
 from __future__ import annotations
 
@@ -11,7 +25,7 @@ from fastapi.responses import JSONResponse
 from dotenv import load_dotenv
 from pathlib import Path
 
-from agentsociety2.backend.routers import chat, mineru, literature, workspace, modules, prefill_params, experiments, replay, custom
+from agentsociety2.backend.routers import prefill_params, experiments, replay, custom, modules
 
 # 加载环境变量
 _project_root = Path(__file__).resolve().parents[2]
@@ -59,12 +73,6 @@ async def lifespan(app: FastAPI):
     logger.info("AI Social Scientist Backend Service 启动中...")
     logger.info(f"项目根目录: {_project_root}")
 
-    # 初始化工具注册表
-    from agentsociety2.backend.tools.registry import get_registry
-
-    registry = get_registry()
-    logger.info(f"已注册 {len(registry.get_all_tools())} 个工具")
-
     yield
 
     # 关闭时执行
@@ -74,7 +82,7 @@ async def lifespan(app: FastAPI):
 # 创建FastAPI应用
 app = FastAPI(
     title="AI Social Scientist Backend API",
-    description="Backend API service for AI Social Scientist VSCode extension with function calling support",
+    description="Backend API service for AI Social Scientist VSCode extension",
     version="2.0.0",
     lifespan=lifespan,
 )
@@ -88,41 +96,28 @@ app.add_middleware(
     allow_headers=["*"],
 )
 
-# 注册路由
-app.include_router(chat.router)
-app.include_router(mineru.router)
-app.include_router(literature.router)
-app.include_router(workspace.router)
-app.include_router(modules.router)
+# 注册路由（仅保留必要的API）
 app.include_router(prefill_params.router)
 app.include_router(experiments.router, prefix="/api/v1")
 app.include_router(replay.router, prefix="/api/v1")
 app.include_router(custom.router)
+app.include_router(modules.router)
 
 
 @app.get("/")
 async def root():
     """根路径，返回API信息"""
-    from agentsociety2.backend.tools.registry import get_registry
-
-    registry = get_registry()
-    tools = list(registry.get_all_tools().keys())
-
     return {
         "service": "AI Social Scientist Backend API",
         "version": "2.0.0",
         "status": "running",
-        "architecture": "function_calling",
         "endpoints": {
-            "chat": "/api/v1/chat/completion",
-            "tools": "/api/v1/chat/tools",
-            "mineru": "/api/v1/mineru/parse",
-            "literature": "/api/v1/literature",
-            "workspace": "/api/v1/workspace",
+            "prefill_params": "/api/v1/prefill-params",
             "experiments": "/api/v1/experiments/{hypothesis_id}/{experiment_id}",
             "replay": "/api/v1/replay/{hypothesis_id}/{experiment_id}/*",
+            "custom": "/api/v1/custom/*",
+            "modules": "/api/v1/modules/*",
         },
-        "available_tools": tools,
     }
 
 

@@ -13,6 +13,7 @@ export interface ClassInfo {
   class_name: string;
   description: string;
   has_prefill?: boolean;
+  is_custom?: boolean;
 }
 
 export interface AvailableClasses {
