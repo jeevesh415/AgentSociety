@@ -451,9 +451,9 @@ class SafeModuleTester:
                         )
 
                         if agent_cls is None:
-                            raise ValueError(f"无法导入 Agent 类")
+                            raise ValueError("无法导入 Agent 类")
                         if env_cls is None:
-                            raise ValueError(f"无法导入环境类")
+                            raise ValueError("无法导入环境类")
 
                         result = self._test_integration(
                             agent_cls,

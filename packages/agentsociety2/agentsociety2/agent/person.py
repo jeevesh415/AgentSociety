@@ -68,8 +68,9 @@ class PersonAgent(AgentBase):
 5. Generates detailed execution plans and interacts with the environment using ReAct paradigm to complete plan steps
 
 **Initialization Parameters:**
-- id (int): The unique identifier for the agent.
-- profile (dict | Any): The profile of the agent. Can be a dictionary with agent attributes or any other type. Common profile fields include: name, gender, age, education, occupation, marriage_status, persona, background_story, profile_text.
+- id (int, required): The unique identifier for the agent.
+- profile (dict | Any, required): The profile of the agent. Can be a dictionary with agent attributes or any other type. Common profile fields include: name, gender, age, education, occupation, marriage_status, persona, background_story, profile_text.
+- name (str, optional): The name of the agent. If not provided, will try to extract from profile['name']. Default: None.
 - T_H (float, optional): Hunger threshold. Default: 0.2.
 - T_D (float, optional): Energy threshold. Default: 0.2.
 - T_P (float, optional): Safety threshold. Default: 0.2.
@@ -78,7 +79,9 @@ class PersonAgent(AgentBase):
 - short_memory_window_size (int, optional): Short-term memory window size for storing recent N message records. Default: 10.
 - max_intentions (int, optional): Maximum number of candidate intentions. Default: 5.
 - max_react_interactions_per_step (int, optional): Maximum number of environment interactions per plan step using ReAct paradigm. Default: 3.
-- template_mode_enabled (bool, optional): Enable template mode for environment interactions. When True, instructions sent to the environment router are treated as template instructions where variables from ctx['variables'] are substituted using {{variable_name}} syntax. The instruction MUST contain variable placeholders like {{variable_name}} if there are ANY variables in the instruction. Default: False.
+- template_mode_enabled (bool, optional): Enable template mode for environment interactions. Default: False.
+- ask_intention_enabled (bool, optional): Enable asking for intentions. Default: True.
+- skill_names (list[str], optional): List of skill names to enable. Default: None (all skills enabled).
 
 **Example initialization config:**
 ```json
@@ -102,7 +105,9 @@ class PersonAgent(AgentBase):
   "short_memory_window_size": 10,
   "max_intentions": 5,
   "max_react_interactions_per_step": 3,
-  "template_mode_enabled": false
+  "template_mode_enabled": false,
+  "ask_intention_enabled": true,
+  "skill_names": null
 }}
 ```
 

@@ -219,6 +219,11 @@
           "group": "2_actions"
         },
         {
+          "command": "aiSocialScientist.openSkillFolder",
+          "when": "view == projectStructureView && viewItem == syncBuiltinSkillItem",
+          "group": "1_actions"
+        },
+        {
           "command": "aiSocialScientist.formatJsonFile",
           "when": "view == projectStructureView && viewItem =~ /json/",
           "group": "2_actions"

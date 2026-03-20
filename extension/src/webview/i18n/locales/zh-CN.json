@@ -3,6 +3,8 @@
     "title": "模拟环境配置",
     "description": "配置用于检验该假设的模拟环境设置",
     "descriptionDetail": "配置将用于检验该假设的模拟实验中的智能体类和环境模块。这些设置定义了用于验证研究假设的模拟环境。",
+    "custom": "自定义",
+    "builtin": "内置",
     "agentClasses": {
       "title": "智能体类",
       "description": "选择将参与模拟以检验该假设的智能体类。",

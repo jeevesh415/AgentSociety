@@ -23,13 +23,11 @@ from .models import (
     DIR_DATA,
     DIR_HYPOTHESIS_PREFIX,
     DIR_EXPERIMENT_PREFIX,
-    DIR_RUN,
     DIR_PRESENTATION,
     FILE_SQLITE,
     FILE_PID,
     FILE_HYPOTHESIS_MD,
     FILE_EXPERIMENT_MD,
-    DIR_SYNTHESIS,
     FILE_SYNTHESIS_REPORT_PREFIX,
 )
 from .agents import InsightAgent, DataExplorer

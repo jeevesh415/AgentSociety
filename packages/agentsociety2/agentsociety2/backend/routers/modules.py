@@ -20,7 +20,7 @@ from __future__ import annotations
 
 import os
 from pathlib import Path
-from typing import Dict, Any, List
+from typing import Dict, Any
 
 from fastapi import APIRouter, Query, HTTPException
 
@@ -72,7 +72,7 @@ async def get_agent_classes(
         包含 Agent 类信息的字典
     """
     try:
-        registry = get_registry()
+        _ = get_registry()  # 确保注册表已初始化
 
         # 加载自定义模块（如果需要）
         if include_custom:
@@ -118,7 +118,7 @@ async def get_env_module_classes(
         包含 Environment 模块类信息的字典
     """
     try:
-        registry = get_registry()
+        _ = get_registry()  # 确保注册表已初始化
 
         # 加载自定义模块（如果需要）
         if include_custom:
@@ -164,7 +164,7 @@ async def get_all_modules(
         包含所有模块信息的字典
     """
     try:
-        registry = get_registry()
+        _ = get_registry()  # 确保注册表已初始化
 
         # 加载自定义模块（如果需要）
         if include_custom:

@@ -111,12 +111,14 @@ export interface AgentInfo {
   type: string;
   class_name: string;
   description: string;
+  is_custom?: boolean;
 }
 
 export interface EnvModuleInfo {
   type: string;
   class_name: string;
   description: string;
+  is_custom?: boolean;
 }
 
 export interface AgentsListResponse {

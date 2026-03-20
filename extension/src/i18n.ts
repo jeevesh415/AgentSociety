@@ -139,8 +139,8 @@ const translations: Record<string, Record<string, string>> = {
     // projectStructureProvider.ts - settings
     'projectStructure.settings': '配置设置',
     'projectStructure.syncResources': '同步 AI 助手资源',
+    'projectStructure.syncResourcesAction': '同步/更新 Skills',
     'projectStructure.agentSkills': 'Agent Skills',
-    'projectStructure.agentSkillsScan': '扫描 Agent Skills',
     'projectStructure.agentSkillsImport': '导入 Skill',
     'projectStructure.agentSkillsBuiltin': '内置 Skills',
     'projectStructure.agentSkillsCustom': '自定义 Skills',
@@ -349,8 +349,8 @@ const translations: Record<string, Record<string, string>> = {
     // projectStructureProvider.ts - settings
     'projectStructure.settings': 'Settings',
     'projectStructure.syncResources': 'Sync AI Assistant Resources',
+    'projectStructure.syncResourcesAction': 'Sync/Update Skills',
     'projectStructure.agentSkills': 'Agent Skills',
-    'projectStructure.agentSkillsScan': 'Scan Agent Skills',
     'projectStructure.agentSkillsImport': 'Import Skill',
     'projectStructure.agentSkillsBuiltin': 'Built-in Skills',
     'projectStructure.agentSkillsCustom': 'Custom Skills',

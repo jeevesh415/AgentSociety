@@ -54,7 +54,7 @@ export class ProjectItem extends vscode.TreeItem {
   constructor(
     public readonly label: string,
     public readonly collapsibleState: vscode.TreeItemCollapsibleState,
-    public readonly type: 'initWorkspace' | 'configureEnv' | 'fixWorkspace' | 'aiChat' | 'topic' | 'hypothesis' | 'experiment' | 'paper' | 'file' | 'papers' | 'userdata' | 'prefillParams' | 'prefillParamsGroup' | 'prefillParamsEnv' | 'prefillParamsAgent' | 'settings' | 'syncResources' | 'custom' | 'customScan' | 'customTest' | 'customClean' | 'customAgentItem' | 'customEnvItem' | 'customAgentsGroup' | 'customEnvsGroup' | 'customWorkspace' | 'presentation' | 'presentationHypothesis' | 'presentationExperiment' | 'synthesis' | 'reportHtml' | 'reportMd' | 'agentSkillsGroup' | 'agentSkillItem' | 'agentSkillScan' | 'agentSkillImport' | 'agentSkillBuiltinGroup' | 'agentSkillCustomGroup',
+    public readonly type: 'initWorkspace' | 'configureEnv' | 'fixWorkspace' | 'aiChat' | 'topic' | 'hypothesis' | 'experiment' | 'paper' | 'file' | 'papers' | 'userdata' | 'prefillParams' | 'prefillParamsGroup' | 'prefillParamsEnv' | 'prefillParamsAgent' | 'settings' | 'syncResourcesGroup' | 'syncResourcesAction' | 'syncBuiltinSkillsGroup' | 'syncBuiltinSkillItem' | 'syncCustomSkillsGroup' | 'custom' | 'customScan' | 'customTest' | 'customClean' | 'customAgentItem' | 'customEnvItem' | 'customAgentsGroup' | 'customEnvsGroup' | 'customWorkspace' | 'presentation' | 'presentationHypothesis' | 'presentationExperiment' | 'synthesis' | 'reportHtml' | 'reportMd' | 'agentSkillsGroup' | 'agentSkillItem' | 'agentSkillScan' | 'agentSkillImport' | 'agentSkillBuiltinGroup' | 'agentSkillCustomGroup',
     public readonly filePath?: string
   ) {
     // 调用父类构造函数，初始化树节点
@@ -107,7 +107,11 @@ export class ProjectItem extends vscode.TreeItem {
       'prefillParamsEnv': 'symbol-namespace', // 命名空间图标，表示环境模块预置参数
       'prefillParamsAgent': 'symbol-interface', // 接口图标，表示智能体类预置参数
       'settings': 'settings-gear', // 齿轮设置图标，表示配置设置
-      'syncResources': 'sync', // 同步 AI 助手资源图标
+      'syncResourcesGroup': 'cloud-download', // 同步 AI 助手资源图标
+      'syncResourcesAction': 'sync', // 同步操作图标
+      'syncBuiltinSkillsGroup': 'package', // 内置 Skills 分组图标
+      'syncBuiltinSkillItem': 'puzzle', // 内置 Skill 项图标
+      'syncCustomSkillsGroup': 'tools', // 自定义 Skills 分组图标
       'custom': 'workspace-trusted', // 自定义模块根图标
       'customScan': 'refresh', // 扫描图标
       'customTest': 'play', // 测试图标
@@ -610,18 +614,13 @@ export class ProjectStructureProvider implements vscode.TreeDataProvider<Project
         items.push(fixItem);
       }
 
-      // 添加同步 AI 助手资源节点
-      const syncItem = new ProjectItem(
+      // 添加同步 AI 助手资源节点（可展开，显示可用技能）
+      items.push(new ProjectItem(
         localize('projectStructure.syncResources'),
-        vscode.TreeItemCollapsibleState.None,
-        'syncResources',
+        vscode.TreeItemCollapsibleState.Collapsed,
+        'syncResourcesGroup',
         undefined
-      );
-      syncItem.command = {
-        command: 'aiSocialScientist.updateSkills',
-        title: localize('projectStructure.syncResources')
-      };
-      items.push(syncItem);
+      ));
 
       // 添加 Agent Skills 管理节点
       items.push(new ProjectItem(
@@ -648,6 +647,152 @@ export class ProjectStructureProvider implements vscode.TreeDataProvider<Project
       ));
 
       return items;
+    }
+
+    // 同步 AI 助手资源组的子节点
+    if (element.type === 'syncResourcesGroup') {
+      const items: ProjectItem[] = [];
+
+      // 同步/更新按钮
+      const syncActionItem = new ProjectItem(
+        localize('projectStructure.syncResourcesAction') || '同步/更新 Skills',
+        vscode.TreeItemCollapsibleState.None,
+        'syncResourcesAction',
+        undefined
+      );
+      syncActionItem.command = {
+        command: 'aiSocialScientist.updateSkills',
+        title: 'Sync Skills'
+      };
+      items.push(syncActionItem);
+
+      // 导入自定义 Skill 按钮
+      const importItem = new ProjectItem(
+        localize('projectStructure.agentSkillsImport') || '导入 Skill',
+        vscode.TreeItemCollapsibleState.None,
+        'agentSkillImport',
+        undefined
+      );
+      importItem.command = {
+        command: 'aiSocialScientist.importAgentSkill',
+        title: 'Import Agent Skill'
+      };
+      items.push(importItem);
+
+      // 读取扩展中的 skills 目录
+      const skillsDir = path.join(this.context.extensionPath, 'skills');
+      if (fs.existsSync(skillsDir)) {
+        const skillDirs = fs.readdirSync(skillsDir).filter(name => {
+          const skillPath = path.join(skillsDir, name);
+          const skillMdPath = path.join(skillPath, 'SKILL.md');
+          return fs.statSync(skillPath).isDirectory() && fs.existsSync(skillMdPath);
+        });
+
+        if (skillDirs.length > 0) {
+          // 内置 Skills 分组（可展开）
+          const builtinGroup = new ProjectItem(
+            `${localize('projectStructure.agentSkillsBuiltin') || '内置 Skills'} (${skillDirs.length})`,
+            vscode.TreeItemCollapsibleState.Collapsed,
+            'syncBuiltinSkillsGroup',
+            undefined
+          );
+          items.push(builtinGroup);
+        }
+      }
+
+      // 已安装的自定义 Skills（来自agentSkillsCache）
+      const customSkills = this.agentSkillsCache.filter(s => s.source === 'custom');
+      if (customSkills.length > 0) {
+        const customGroup = new ProjectItem(
+          `${localize('projectStructure.agentSkillsCustom') || '自定义 Skills'} (${customSkills.length})`,
+          vscode.TreeItemCollapsibleState.Collapsed,
+          'syncCustomSkillsGroup',
+          undefined
+        );
+        items.push(customGroup);
+      }
+
+      return items;
+    }
+
+    // 内置 Skills 分组的子节点（来自扩展目录）
+    if (element.type === 'syncBuiltinSkillsGroup') {
+      const items: ProjectItem[] = [];
+      const skillsDir = path.join(this.context.extensionPath, 'skills');
+      if (fs.existsSync(skillsDir)) {
+        const skillDirs = fs.readdirSync(skillsDir).filter(name => {
+          const skillPath = path.join(skillsDir, name);
+          const skillMdPath = path.join(skillPath, 'SKILL.md');
+          return fs.statSync(skillPath).isDirectory() && fs.existsSync(skillMdPath);
+        });
+
+        for (const skillDir of skillDirs) {
+          const skillPath = path.join(skillsDir, skillDir);
+          const skillMdPath = path.join(skillPath, 'SKILL.md');
+          try {
+            const content = fs.readFileSync(skillMdPath, 'utf-8');
+            const frontmatterMatch = content.match(/^---\n([\s\S]*?)\n---/);
+            let skillName = skillDir;
+            let skillDescription = '';
+
+            if (frontmatterMatch) {
+              const frontmatter = frontmatterMatch[1];
+              const nameMatch = frontmatter.match(/^name:\s*(.+)$/m);
+              const descMatch = frontmatter.match(/^description:\s*(.+)$/m);
+              if (nameMatch) skillName = nameMatch[1].trim();
+              if (descMatch) skillDescription = descMatch[1].trim();
+            }
+
+            const skillItem = new ProjectItem(
+              skillName,
+              vscode.TreeItemCollapsibleState.Collapsed,
+              'syncBuiltinSkillItem',
+              skillPath
+            );
+            skillItem.tooltip = skillDescription || skillName;
+            skillItem.contextValue = 'syncBuiltinSkillItem';
+            (skillItem as any).skillName = skillName;
+            (skillItem as any).skillDescription = skillDescription;
+            (skillItem as any).skillDirPath = skillPath;
+            items.push(skillItem);
+          } catch {
+            items.push(new ProjectItem(skillDir, vscode.TreeItemCollapsibleState.Collapsed, 'syncBuiltinSkillItem', skillPath));
+          }
+        }
+      }
+      return items;
+    }
+
+    // 内置 Skill Item 展开时显示文件内容
+    if (element.type === 'syncBuiltinSkillItem' && element.filePath) {
+      const items: ProjectItem[] = [];
+      const entries = fs.readdirSync(element.filePath);
+
+      for (const entry of entries) {
+        const fullPath = path.join(element.filePath, entry);
+        const stat = fs.statSync(fullPath);
+
+        if (stat.isFile()) {
+          const fileItem = new ProjectItem(entry, vscode.TreeItemCollapsibleState.None, 'file', fullPath);
+          if (entry.toLowerCase().endsWith('.md')) {
+            fileItem.command = {
+              command: 'markdown.showPreview',
+              title: 'Open Preview',
+              arguments: [vscode.Uri.file(fullPath)]
+            };
+          }
+          items.push(fileItem);
+        } else if (stat.isDirectory()) {
+          items.push(new ProjectItem(entry, vscode.TreeItemCollapsibleState.Collapsed, 'file', fullPath));
+        }
+      }
+      return items;
+    }
+
+    // 自定义 Skills 分组的子节点（来自工作区）
+    if (element.type === 'syncCustomSkillsGroup') {
+      const customSkills = this.agentSkillsCache.filter(s => s.source === 'custom');
+      return this.createSkillItems(customSkills, false);
     }
 
     // Agent Skills 组的子节点
@@ -2166,7 +2311,7 @@ export class ProjectStructureProvider implements vscode.TreeDataProvider<Project
         label,
         collapsibleState,
         'agentSkillItem',
-        skillMdPath || skill.path
+        skillMdPath  // 只传递 SKILL.md 路径，不传递目录路径
       );
 
       // 设置 tooltip：显示详细信息
@@ -2186,13 +2331,13 @@ export class ProjectStructureProvider implements vscode.TreeDataProvider<Project
       (item as any).skillDirPath = skill.path;
       (item as any).skillName = skill.name;
       (item as any).isBuiltin = isBuiltin;
+      (item as any).hasSkillMd = skill.has_skill_md;
 
-      // 设置点击命令
-      if (skillMdPath && fs.existsSync(skillMdPath)) {
+      if (skill.has_skill_md) {
         item.command = {
-          command: 'markdown.showPreview',
+          command: 'aiSocialScientist.openAgentSkillDoc',
           title: 'Open Skill Documentation',
-          arguments: [vscode.Uri.file(skillMdPath)]
+          arguments: [skill.name, skill.path, isBuiltin]
         };
       }
 
@@ -2216,6 +2361,50 @@ export class ProjectStructureProvider implements vscode.TreeDataProvider<Project
       }
     } catch {
       this.agentSkillsCache = [];
+    }
+  }
+
+  /**
+   * 打开 Skill 文档（SKILL.md）
+   *
+   * 对于内置 skill，文件路径可能在 Python 包内，前端无法直接访问，
+   * 因此需要通过 API 获取内容并创建临时文件显示。
+   * 对于自定义 skill，直接打开工作区中的文件。
+   *
+   * @param skillName - Skill 名称
+   * @param skillPath - Skill 目录路径
+   * @param isBuiltin - 是否为内置 skill
+   */
+  async openAgentSkillDoc(skillName: string, skillPath: string, isBuiltin: boolean): Promise<void> {
+    const skillMdPath = path.join(skillPath, 'SKILL.md');
+
+    // 对于自定义 skill，尝试直接打开文件
+    if (!isBuiltin && fs.existsSync(skillMdPath)) {
+      const uri = vscode.Uri.file(skillMdPath);
+      await vscode.commands.executeCommand('markdown.showPreview', uri);
+      return;
+    }
+
+    // 对于内置 skill 或文件不存在的情况，通过 API 获取内容
+    try {
+      const response = await this.apiClient.getAgentSkillInfo(skillName);
+      if (response.success && response.skill_md) {
+        // 创建临时文件显示内容
+        const tempDir = path.join(this.context.globalStorageUri.fsPath, 'skill-docs');
+        if (!fs.existsSync(tempDir)) {
+          fs.mkdirSync(tempDir, { recursive: true });
+        }
+
+        const tempFilePath = path.join(tempDir, `${skillName}.md`);
+        fs.writeFileSync(tempFilePath, response.skill_md, 'utf-8');
+
+        const uri = vscode.Uri.file(tempFilePath);
+        await vscode.commands.executeCommand('markdown.showPreview', uri);
+      } else {
+        vscode.window.showWarningMessage(`Skill "${skillName}" 没有可用的文档`);
+      }
+    } catch (error: any) {
+      vscode.window.showErrorMessage(`无法打开 Skill 文档: ${error.message || error}`);
     }
   }
 }

@@ -17,14 +17,12 @@ from datetime import datetime
 from pathlib import Path
 from typing import Any, Dict, List, Optional
 
-import aiosqlite
-import json
 from fastapi import APIRouter, HTTPException, Query
 from pydantic import BaseModel
 from sqlalchemy.exc import OperationalError
 from sqlalchemy.ext.asyncio import AsyncSession, create_async_engine
 from sqlalchemy.orm import sessionmaker
-from sqlmodel import select, desc, func, col, SQLModel, text
+from sqlmodel import select, desc, func, text
 
 from ...storage.models import (
     AgentProfile,

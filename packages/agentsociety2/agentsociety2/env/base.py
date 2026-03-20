@@ -3,7 +3,8 @@ import inspect
 import json
 from copy import deepcopy
 from datetime import datetime
-from typing import TYPE_CHECKING, Any, Callable, Dict, Literal, Optional, Tuple, TypeVar, overload
+from pathlib import Path
+from typing import TYPE_CHECKING, Any, Callable, Dict, Literal, Optional, TypeVar, overload
 
 if TYPE_CHECKING:
     from agentsociety2.storage import ReplayWriter
@@ -299,6 +300,41 @@ class EnvMeta(type):
 
 
 class EnvBase(metaclass=EnvMeta):
+    """环境模块基类。
+
+    环境模块定义 Agent 可执行的操作和可观察的状态。通过 ``@tool`` 装饰器
+    注册方法为可调用工具，供 Router 调用。
+
+    工具类型：
+        - **常规工具**: ``@tool(readonly=False)`` — 可修改环境状态
+        - **只读工具**: ``@tool(readonly=True)`` — 仅查询，不修改状态
+        - **观察工具**: ``@tool(readonly=True, kind="observe")`` — 自动调用
+        - **统计工具**: ``@tool(readonly=True, kind="statistics")`` — 统计信息
+
+    子类应实现：
+        - 使用 ``@tool`` 装饰器定义可执行操作
+        - 可选：实现 ``observe()`` 方法（默认收集 kind="observe" 的工具）
+
+    Example::
+
+        class MyEnv(EnvBase):
+            @tool(readonly=True, kind="observe")
+            def get_location(self, agent_id: int) -> str:
+                '''获取 Agent 当前位置'''
+                return self._locations.get(agent_id, "unknown")
+
+            @tool(readonly=False)
+            def move(self, agent_id: int, destination: str) -> str:
+                '''移动 Agent 到指定位置'''
+                self._locations[agent_id] = destination
+                return f"Moved to {destination}"
+
+    Attributes:
+        t: 当前模拟时间
+        _replay_writer: 回放写入器
+        _tool_call_history: 工具调用历史
+    """
+
     def __init__(self):
         self.t = datetime.now()
 
@@ -361,6 +397,30 @@ It contains no functions or methods.
             A string description of the environment module for MCP registration.
         """
         return f"{cls.__name__}: {cls.__doc__ or 'No description available'}"
+
+    @classmethod
+    def get_agent_skills_dir(cls) -> "Path | None":
+        """返回此 env 模块附带的 agent skill 目录。
+
+        Env 模块可以在自身目录下放置 agent skill，当 PersonAgent
+        初始化时会自动扫描并注册，使 agent 在该环境中获得特定认知能力。
+
+        约定（按优先级）：
+          1. 目录型模块（如 mobility_space/）→ ``<dir>/agent_skills/``
+          2. 单文件模块（如 economy_space.py）→ ``<stem>_agent_skills/``
+
+        子类可重写此方法指定自定义路径。
+        """
+        import inspect
+        module_file = Path(inspect.getfile(cls))
+        parent = module_file.parent
+        # 单文件模块：economy_space.py → economy_space_agent_skills/
+        stem_dir = parent / f"{module_file.stem}_agent_skills"
+        if stem_dir.is_dir():
+            return stem_dir
+        # 目录型模块：mobility_space/ → mobility_space/agent_skills/
+        pkg_dir = parent / "agent_skills"
+        return pkg_dir if pkg_dir.is_dir() else None
 
     async def init(self, start_datetime: datetime):
         """

@@ -11,7 +11,6 @@
 
 from agentsociety2.agent.base import AgentBase
 from datetime import datetime
-from typing import Any
 
 
 class SimpleAgent(AgentBase):

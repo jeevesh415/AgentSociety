@@ -7,7 +7,7 @@
 import os
 import json
 import requests
-from typing import List, Optional, Dict, Any
+from typing import List, Optional, Dict
 
 __all__ = ["get_available_models"]
 

@@ -23,6 +23,9 @@ from agentsociety2.skills.literature import (
     format_literature_info,
 )
 
+# 兼容层：从 config_builder 导入 settings
+from agentsociety2.designer.config_builder import settings
+
 logger = get_logger()
 
 
@@ -1410,19 +1413,19 @@ class ExperimentDesigner:
                     lines.append(f"    实验数: {len(group.experiments)}")
                     if group.experiments:
                         for exp_idx, exp in enumerate(group.experiments, 1):
-                            lines.append(f"")
+                            lines.append("")
                             lines.append(f"      实验 {exp_idx}: {exp.name}")
                             if exp.workflow:
                                 workflow_lines = exp.workflow.split("\n")
                                 if len(workflow_lines) == 1:
                                     lines.append(f"        工作流: {exp.workflow}")
                                 else:
-                                    lines.append(f"        工作流:")
+                                    lines.append("        工作流:")
                                     for wf_line in workflow_lines:
                                         if wf_line.strip():
                                             lines.append(f"          {wf_line.strip()}")
                     else:
-                        lines.append(f"    实验: 尚未生成")
+                        lines.append("    实验: 尚未生成")
 
         lines.append("")
         lines.append("=" * 80)

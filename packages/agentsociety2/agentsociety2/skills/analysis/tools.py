@@ -11,7 +11,7 @@ import os
 import platform
 import re
 from pathlib import Path
-from typing import Any, Dict, List
+from typing import Any, Dict
 
 from pydantic import BaseModel
 

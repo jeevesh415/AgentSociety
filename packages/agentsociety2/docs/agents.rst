@@ -9,7 +9,47 @@
 PersonAgent
 ~~~~~~~~~~~
 
-``PersonAgent`` 类是一个现成的智能体实现：
+``PersonAgent`` 是一个 **skills-based** 智能体实现。它本身是一个轻量编排器，所有认知能力（感知、记忆、需求、思考、规划）通过独立的 Skill 模块提供：
+
+.. code-block:: python
+
+   from agentsociety2 import PersonAgent
+
+   agent = PersonAgent(
+       id=1,
+       profile={
+           "name": "Alice",
+           "age": 28,
+           "personality": "friendly and curious",
+           "bio": "A software engineer who loves hiking."
+       }
+   )
+
+内置 Skills
+^^^^^^^^^^^
+
+每个 simulation tick，PersonAgent 执行三层 skill pipeline：
+
+.. list-table::
+   :widths: 20 20 40
+   :header-rows: 1
+
+   * - Layer
+     - Skill
+     - 功能
+   * - Always-on
+     - observation
+     - 环境感知（每步必执行）
+   * - Dynamic
+     - needs, cognition, plan
+     - 需求调整、情感/意图、规划执行
+   * - Finalize
+     - memory
+     - 记忆 flush 到长期存储
+
+LLM 会根据当前情境自主选择激活哪些 dynamic skill。
+
+详细说明请参见 :doc:`agent_skills`。
 
 .. code-block:: python
 
@@ -29,6 +69,13 @@ PersonAgent
 
 自定义智能体
 ~~~~~~~~~~~~~
+
+.. note::
+
+   对于扩展 PersonAgent 的认知能力，推荐使用 **Agent Skills** 系统。
+   参见 :doc:`agent_skills` 了解如何创建自定义 skill。
+
+   只有在需要完全不同的智能体架构时，才需要创建自定义智能体类。
 
 要创建自定义智能体，请继承 ``AgentBase`` 并实现必需的抽象方法：
 

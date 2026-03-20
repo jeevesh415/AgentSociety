@@ -8,7 +8,7 @@ from __future__ import annotations
 import json
 from datetime import datetime
 from pathlib import Path
-from typing import Dict, Any, List, Optional, Tuple
+from typing import Dict, Any, List, Optional
 from litellm import AllMessageValues
 
 from agentsociety2.skills.literature.models import LiteratureEntry, LiteratureIndex

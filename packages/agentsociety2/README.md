@@ -166,10 +166,35 @@ if __name__ == "__main__":
 Agents are autonomous entities that interact with environments through LLM-powered reasoning:
 
 - **AgentBase**: Abstract base class for all agents
-- **PersonAgent**: Ready-to-use person agent with memory and personality
+- **PersonAgent**: Skills-based agent — a lightweight orchestrator whose capabilities are provided by a pluggable skill pipeline
 - Agents support two interaction modes:
   - `ask(question, readonly=True)`: Query without side effects
   - `intervene(instruction)`: Make changes to the environment
+
+#### Agent Skills
+
+PersonAgent follows a **progressive disclosure** model. Skills are self-contained directories under `agent/skills/`:
+
+```
+agent/skills/
+├── observation/        # SKILL.md + scripts/observation.py
+├── memory/             # SKILL.md + scripts/memory.py
+├── needs/              # SKILL.md + scripts/needs.py
+├── cognition/          # SKILL.md + scripts/cognition.py
+└── plan/               # SKILL.md + scripts/plan.py
+```
+
+Each skill has:
+- `SKILL.md` — YAML frontmatter (name, description, auto_load, triggers) + behavior docs
+- `scripts/<name>.py` — exports `async def run(agent, ctx)`
+
+Skills are classified by `auto_load`（pipeline 三层执行）:
+- **always** — 每步必执行的基础感知（如 observation）
+- **dynamic** — LLM 阅读 skill 描述后自主选择激活（如 needs, cognition, plan）
+- **finalize** — 所有 dynamic 完成后的收尾操作（如 memory flush）
+- **manual** — 仅在显式请求时加载
+
+Custom skills can be placed in `workspace/custom/skills/` and hot-loaded at runtime via the API or VSCode extension.
 
 ### Environment Modules
 

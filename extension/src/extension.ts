@@ -622,6 +622,14 @@ export function activate(context: vscode.ExtensionContext) {
     }
   );
 
+  // 打开 Skill 文档命令
+  const openAgentSkillDocCommand = vscode.commands.registerCommand(
+    'aiSocialScientist.openAgentSkillDoc',
+    async (skillName: string, skillPath: string, isBuiltin: boolean) => {
+      await projectStructureProvider.openAgentSkillDoc(skillName, skillPath, isBuiltin);
+    }
+  );
+
   // 删除自定义 Skill 命令
   const removeAgentSkillCommand = vscode.commands.registerCommand(
     'aiSocialScientist.removeAgentSkill',
@@ -766,6 +774,7 @@ export function activate(context: vscode.ExtensionContext) {
     scanAgentSkillsCommand,
     importAgentSkillCommand,
     toggleAgentSkillCommand,
+    openAgentSkillDocCommand,
     removeAgentSkillCommand,
     openSkillFolderCommand,
     formatJsonCommand,

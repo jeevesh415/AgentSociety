@@ -4,8 +4,7 @@
 使用Pydantic进行数据验证和序列化。
 """
 
-from pathlib import Path
-from typing import Any, Optional
+from typing import Optional
 
 from pydantic import BaseModel, Field, ConfigDict
 

@@ -42,14 +42,14 @@ class CustomModuleScanner:
         if agents_dir.exists():
             result["agents"] = self._scan_agents(agents_dir, skip_examples=True)
         else:
-            result["errors"].append(f"custom/agents/ 目录不存在")
+            result["errors"].append("custom/agents/ 目录不存在")
 
         # 扫描环境模块（跳过 examples 子目录）
         envs_dir = self.custom_dir / "envs"
         if envs_dir.exists():
             result["envs"] = self._scan_envs(envs_dir, skip_examples=True)
         else:
-            result["errors"].append(f"custom/envs/ 目录不存在")
+            result["errors"].append("custom/envs/ 目录不存在")
 
         return result
 
@@ -91,7 +91,7 @@ class CustomModuleScanner:
                             "description": self._get_safe_description(cls),
                         }
                     )
-            except Exception as e:
+            except Exception:
                 # 记录错误但继续扫描
                 pass
 
@@ -135,7 +135,7 @@ class CustomModuleScanner:
                             "description": self._get_safe_description(cls),
                         }
                     )
-            except Exception as e:
+            except Exception:
                 pass
 
         return envs
@@ -165,7 +165,7 @@ class CustomModuleScanner:
 
         try:
             spec.loader.exec_module(module)
-        except Exception as e:
+        except Exception:
             # 导入失败，返回空列表
             del sys.modules[module_name]
             return []

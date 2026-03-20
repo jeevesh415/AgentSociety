@@ -399,7 +399,7 @@ async def list_custom_modules():
     返回所有 is_custom=true 的模块信息（从内存注册表中读取）。
     """
     try:
-        registry = get_registry()
+        _ = get_registry()  # 确保注册表已初始化
         result = {"agents": [], "envs": []}
 
         # 从注册表获取自定义 Agent
@@ -456,8 +456,6 @@ async def get_custom_modules_status():
     from pathlib import Path
 
     custom_dir = Path(workspace_path) / "custom"
-    agent_classes_dir = Path(workspace_path) / ".agentsociety/agent_classes"
-    env_modules_dir = Path(workspace_path) / ".agentsociety/env_modules"
 
     status = {
         "custom_dir_exists": custom_dir.exists(),
@@ -490,7 +488,7 @@ async def get_custom_modules_status():
 
     # 统计已注册的模块（从内存注册表中读取）
     try:
-        registry = get_registry()
+        _ = get_registry()  # 确保注册表已初始化
         for agent_type, agent_class in get_registered_agent_modules():
             if getattr(agent_class, "_is_custom", False):
                 status["registered_agents"] += 1

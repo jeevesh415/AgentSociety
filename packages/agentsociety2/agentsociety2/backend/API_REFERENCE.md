@@ -338,6 +338,224 @@ response = requests.post(
 
 ---
 
+## Agent Skills 管理 API
+
+Agent Skills 是 PersonAgent 的认知能力模块，采用渐进式加载设计。以下 API 用于管理这些 skill。
+
+### 1. 列出所有 Agent Skills
+
+**端点**: `GET /api/v1/agent-skills/list`
+
+**响应**:
+```json
+{
+    "success": true,
+    "skills": [
+        {
+            "name": "observation",
+            "priority": 0,
+            "source": "builtin",
+            "enabled": true,
+            "path": "/path/to/agentsociety2/agent/skills/observation",
+            "has_skill_md": true
+        },
+        {
+            "name": "cognition",
+            "priority": 40,
+            "source": "builtin",
+            "enabled": true,
+            "path": "/path/to/agentsociety2/agent/skills/cognition",
+            "has_skill_md": true
+        },
+        {
+            "name": "my-custom-skill",
+            "priority": 100,
+            "source": "custom",
+            "enabled": true,
+            "path": "/path/to/workspace/custom/skills/my-custom-skill",
+            "has_skill_md": true
+        }
+    ],
+    "total": 3
+}
+```
+
+**字段说明**:
+- `name`: Skill 名称（唯一标识）
+- `priority`: 执行优先级（数字越小越先执行）
+- `source`: 来源类型 — `builtin`（内置）、`custom`（用户自定义）、`env:ClassName`（环境模块附带）
+- `enabled`: 是否启用
+- `path`: Skill 目录绝对路径
+- `has_skill_md`: 是否存在 SKILL.md 文件
+
+### 2. 启用 Skill
+
+**端点**: `POST /api/v1/agent-skills/enable`
+
+**请求体**:
+```json
+{
+    "name": "cognition"
+}
+```
+
+**响应**:
+```json
+{
+    "success": true,
+    "message": "Skill 'cognition' enabled"
+}
+```
+
+### 3. 禁用 Skill
+
+**端点**: `POST /api/v1/agent-skills/disable`
+
+**请求体**:
+```json
+{
+    "name": "cognition"
+}
+```
+
+**响应**:
+```json
+{
+    "success": true,
+    "message": "Skill 'cognition' disabled"
+}
+```
+
+### 4. 扫描自定义 Skills
+
+扫描 `workspace/custom/skills/` 目录下的自定义 skill。
+
+**端点**: `POST /api/v1/agent-skills/scan`
+
+**请求体**:
+```json
+{
+    "workspace_path": "/path/to/workspace"
+}
+```
+
+如果未提供 `workspace_path`，将使用环境变量 `WORKSPACE_PATH`。
+
+**响应**:
+```json
+{
+    "success": true,
+    "new_skills": ["my-custom-skill", "another-skill"],
+    "total": 5,
+    "message": "发现 2 个新 skill"
+}
+```
+
+### 5. 从路径导入 Skill
+
+从外部目录复制 skill 到 `workspace/custom/skills/`。
+
+**端点**: `POST /api/v1/agent-skills/import`
+
+**请求体**:
+```json
+{
+    "source_path": "/path/to/external/skill-directory",
+    "workspace_path": "/path/to/workspace"
+}
+```
+
+**响应**:
+```json
+{
+    "success": true,
+    "name": "skill-directory",
+    "message": "Skill 'skill-directory' imported to /path/to/workspace/custom/skills/skill-directory"
+}
+```
+
+**前置条件**: 源目录必须包含 `SKILL.md` 文件或 `scripts/` 目录。
+
+### 6. 获取 Skill 详情
+
+获取指定 skill 的 SKILL.md 内容和完整元数据。这是渐进式加载的第二阶段：只有调用此 API 时才加载完整的 skill_md 内容。
+
+**端点**: `GET /api/v1/agent-skills/{name}/info`
+
+**响应**:
+```json
+{
+    "success": true,
+    "name": "cognition",
+    "priority": 40,
+    "source": "builtin",
+    "enabled": true,
+    "path": "/path/to/agentsociety2/agent/skills/cognition",
+    "skill_md": "---\nname: cognition\ndescription: Update emotions...\n---\n\n# Cognition\n\nHandles the agent's inner mental life..."
+}
+```
+
+### 7. 热重载 Skill
+
+重新加载指定 skill 的 Python 模块，用于开发调试。
+
+**端点**: `POST /api/v1/agent-skills/reload`
+
+**请求体**:
+```json
+{
+    "name": "my-custom-skill"
+}
+```
+
+**响应**:
+```json
+{
+    "success": true,
+    "message": "Skill 'my-custom-skill' reloaded"
+}
+```
+
+### 8. 移除自定义 Skill
+
+移除自定义 skill（仅限 `source=custom` 的 skill，不可移除 builtin skill）。
+
+**端点**: `POST /api/v1/agent-skills/remove`
+
+**请求体**:
+```json
+{
+    "name": "my-custom-skill"
+}
+```
+
+**响应**:
+```json
+{
+    "success": true,
+    "message": "Custom skill 'my-custom-skill' removed"
+}
+```
+
+### Skill 来源类型
+
+| Source | 说明 | 可移除 |
+|--------|------|--------|
+| `builtin` | 随包分发的内置 skill | ❌ |
+| `custom` | 用户在 `workspace/custom/skills/` 创建或导入 | ✅ |
+| `env:ClassName` | 环境模块附带的 skill，如 `env:EconomyModule` | ❌ |
+
+### 渐进式加载说明
+
+Agent Skills 采用两阶段加载：
+
+1. **扫描阶段**：只解析 SKILL.md 的 YAML frontmatter 元数据（name, description, priority, auto_load），不读取完整文件内容
+2. **启用阶段**：当 skill 被选中或请求详情时，才加载完整的 skill_md 和 Python 模块
+
+这种设计优化了内存使用，特别是当存在大量 skill 时。
+
+---
+
 ## 注意事项
 
 1. **消息历史**: 多轮对话需要传递完整的消息历史，包括工具调用和结果
