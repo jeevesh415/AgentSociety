@@ -167,10 +167,10 @@ export class ProjectItem extends vscode.TreeItem {
     // 当用户点击这个节点时，会执行相应的命令打开文件
     if (filePath) {
       if (type === 'reportHtml' || (ext === 'html' && (type === 'presentationExperiment' || type === 'synthesis'))) {
-        // HTML 报告文件使用 live-server 预览（如果有安装）
+        // HTML 报告文件使用 Live Preview 预览
         this.command = {
-          command: 'liveServer.preview.open',
-          title: 'Open with Live Server',
+          command: 'livePreview.start.preview.atFile',
+          title: 'Open with Live Preview',
           arguments: [vscode.Uri.file(filePath)]
         };
       } else if (type === 'reportMd' && isMarkdown) {
@@ -1512,8 +1512,8 @@ export class ProjectStructureProvider implements vscode.TreeDataProvider<Project
             reportFiles['report_zh.html']
           );
           item.command = {
-            command: 'liveServer.preview.open',
-            title: 'Open with Live Server',
+            command: 'livePreview.start.preview.atFile',
+            title: 'Open with Live Preview',
             arguments: [vscode.Uri.file(reportFiles['report_zh.html'])]
           };
           items.push(item);
@@ -1528,8 +1528,8 @@ export class ProjectStructureProvider implements vscode.TreeDataProvider<Project
             reportFiles['report_en.html']
           );
           item.command = {
-            command: 'liveServer.preview.open',
-            title: 'Open with Live Server',
+            command: 'livePreview.start.preview.atFile',
+            title: 'Open with Live Preview',
             arguments: [vscode.Uri.file(reportFiles['report_en.html'])]
           };
           items.push(item);
@@ -1544,8 +1544,8 @@ export class ProjectStructureProvider implements vscode.TreeDataProvider<Project
             reportFiles['report.html']
           );
           item.command = {
-            command: 'liveServer.preview.open',
-            title: 'Open with Live Server',
+            command: 'livePreview.start.preview.atFile',
+            title: 'Open with Live Preview',
             arguments: [vscode.Uri.file(reportFiles['report.html'])]
           };
           items.push(item);
@@ -1701,8 +1701,8 @@ export class ProjectStructureProvider implements vscode.TreeDataProvider<Project
                 paths.zh
               );
               item.command = {
-                command: 'liveServer.preview.open',
-                title: 'Open with Live Server',
+                command: 'livePreview.start.preview.atFile',
+                title: 'Open with Live Preview',
                 arguments: [vscode.Uri.file(paths.zh)]
               };
               items.push(item);
@@ -1717,8 +1717,8 @@ export class ProjectStructureProvider implements vscode.TreeDataProvider<Project
                 paths.en
               );
               item.command = {
-                command: 'liveServer.preview.open',
-                title: 'Open with Live Server',
+                command: 'livePreview.start.preview.atFile',
+                title: 'Open with Live Preview',
                 arguments: [vscode.Uri.file(paths.en)]
               };
               items.push(item);
@@ -1733,8 +1733,8 @@ export class ProjectStructureProvider implements vscode.TreeDataProvider<Project
                 paths.generic
               );
               item.command = {
-                command: 'liveServer.preview.open',
-                title: 'Open with Live Server',
+                command: 'livePreview.start.preview.atFile',
+                title: 'Open with Live Preview',
                 arguments: [vscode.Uri.file(paths.generic)]
               };
               items.push(item);
