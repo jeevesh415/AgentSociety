@@ -80,7 +80,7 @@ jobs:
 
       - name: Package extension
         working-directory: ./extension
-        run: vsce package --out ai-social-scientist.vsix
+        run: vsce package --out ai-social-scientist.vsix --no-dependencies
 
       - name: Store the VSIX package
         uses: actions/upload-artifact@v4
