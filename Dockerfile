@@ -19,6 +19,7 @@ COPY ./extension/webpack.config.js ./
 COPY ./extension/src/ ./src/
 COPY ./extension/media/ ./media/
 COPY ./extension/resources/ ./resources/
+COPY ./extension/skills/ ./skills/
 COPY ./extension/.vscodeignore ./
 # Copy LICENSE file for vsce packaging (from project root)
 COPY LICENSE ./
