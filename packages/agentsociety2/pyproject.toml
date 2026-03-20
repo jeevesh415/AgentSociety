@@ -4,7 +4,7 @@ build-backend = "hatchling.build"
 
 [project]
 name = "agentsociety2"
-version = "2.1.1"
+version = "2.1.2"
 description = "A modern, LLM-native agent simulation platform for social science research"
 readme = "README.md"
 requires-python = ">=3.11"
@@ -122,6 +122,12 @@ all = [
 
 [tool.hatch.build.targets.wheel]
 packages = ["agentsociety2"]
+# Explicitly include contrib env files that match test patterns
+artifacts = [
+  "agentsociety2/contrib/env/*_test.py",
+  "agentsociety2/contrib/env/*_effect.py",
+  "agentsociety2/contrib/env/*.py",
+]
 
 [tool.hatch.build.targets.sdist]
 include = [
@@ -129,6 +135,17 @@ include = [
     "/README.md",
     "/LICENSE",
     "/CHANGELOG.md",
+]
+artifacts = [
+  "agentsociety2/contrib/env/*_test.py",
+  "agentsociety2/contrib/env/*_effect.py",
+  "agentsociety2/contrib/env/*.py",
+]
+
+[tool.hatch.build]
+# Include all contrib env files
+include = [
+  "agentsociety2/contrib/env/*.py",
 ]
 
 [dependency-groups]
