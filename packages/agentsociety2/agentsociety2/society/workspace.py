@@ -209,7 +209,7 @@ async def download_map_file(target_dir: Path, timeout: int = 300) -> dict:
         "errors": []
     }
 
-    map_url = "https://agentsociety.obs.cn-north-4.myhuaweicloud.com/data/map/beijing_map.pb"
+    map_url = "https://tsinghua-agentsociety.oss-cn-beijing.aliyuncs.com/data/map/beijing_map.pb"
     data_dir = target_dir / ".agentsociety" / "data"
     data_dir.mkdir(parents=True, exist_ok=True)
     map_file_path = data_dir / "beijing_map.pb"

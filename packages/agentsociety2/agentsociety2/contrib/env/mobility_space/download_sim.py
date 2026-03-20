@@ -9,8 +9,8 @@ __all__ = ["download_binary"]
 ROUTING_VERSION = "v2.0.10"
 BIN_SOURCES = {
     "routing": {
-        "linux_x86_64": f"https://agentsociety.obs.cn-north-4.myhuaweicloud.com/routing/{ROUTING_VERSION}/routing_linux_amd64",
-        "darwin_arm64": f"https://agentsociety.obs.cn-north-4.myhuaweicloud.com/routing/{ROUTING_VERSION}/routing_darwin_arm64",
+        "linux_x86_64": f"https://tsinghua-agentsociety.oss-cn-beijing.aliyuncs.com/routing/{ROUTING_VERSION}/routing_linux_amd64",
+        "darwin_arm64": f"https://tsinghua-agentsociety.oss-cn-beijing.aliyuncs.com/routing/{ROUTING_VERSION}/routing_darwin_arm64",
     },
 }
 
