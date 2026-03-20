@@ -1,32 +1,37 @@
 """
-PersonAgent - 基于SocietyAgent逻辑重新实现的Agent
-采用agentsociety2接口，移除Block抽象层，直接通过LLM调用和过程执行完成所有流程
+PersonAgent — skills-based agent with progressive skill loading.
+
+核心能力通过 agent/skills/ 下的 skill 模块提供，PersonAgent 本身只是
+一个轻量编排器 + 共享状态容器。
 """
 
 from datetime import datetime
-from typing import TYPE_CHECKING, Any, Dict, Literal, Optional
-from enum import Enum
+from typing import TYPE_CHECKING, Any, Optional
 import inspect
 import os
 import asyncio
 import json
 
-from pydantic import BaseModel, Field
 from litellm import AllMessageValues
-
 from mem0 import AsyncMemory
 
-from agentsociety2.agent import AgentBase, DIALOG_TYPE_REFLECTION
+from agentsociety2.agent import AgentBase
 from agentsociety2.env import RouterBase
 from agentsociety2.config import Config
-import logging
+from agentsociety2.agent.models import (
+    EmotionType, Emotion, Satisfactions, Need, PlanStepStatus, PlanStep, PlanStepEvaluation, Plan,
+    EmotionUpdateResult, NeedAdjustmentResult,
+    Intention, CognitionIntentionUpdateResult,
+    ReActInstructionResponse, ReActInstructionResponseWithTemplate,
+    SkillSelection,
+    NEED_DESCRIPTION,
+)
 
 if TYPE_CHECKING:
     from agentsociety2.storage import ReplayWriter
 
 
 def _get_debug_info(description: str = "") -> str:
-    """获取当前文件、行号和阶段描述的调试信息"""
     frame = inspect.currentframe()
     if frame and frame.f_back:
         caller_frame = frame.f_back
@@ -36,269 +41,13 @@ def _get_debug_info(description: str = "") -> str:
     return description
 
 
-# ==================== Pydantic Models ====================
-
-
-class EmotionType(str, Enum):
-    """情感类型枚举。"""
-
-    JOY = "Joy"
-    DISTRESS = "Distress"
-    RESENTMENT = "Resentment"
-    PITY = "Pity"
-    HOPE = "Hope"
-    FEAR = "Fear"
-    SATISFACTION = "Satisfaction"
-    RELIEF = "Relief"
-    DISAPPOINTMENT = "Disappointment"
-    PRIDE = "Pride"
-    ADMIRATION = "Admiration"
-    SHAME = "Shame"
-    REPROACH = "Reproach"
-    LIKING = "Liking"
-    DISLIKING = "Disliking"
-    GRATITUDE = "Gratitude"
-    ANGER = "Anger"
-    GRATIFICATION = "Gratification"
-    REMORSE = "Remorse"
-    LOVE = "Love"
-    HATE = "Hate"
-
-
-class Emotion(BaseModel):
-    """情感强度模型（0-10）。"""
-
-    sadness: int = Field(default=5, ge=0, le=10, description="悲伤强度")
-    joy: int = Field(default=5, ge=0, le=10, description="快乐强度")
-    fear: int = Field(default=5, ge=0, le=10, description="恐惧强度")
-    disgust: int = Field(default=5, ge=0, le=10, description="厌恶强度")
-    anger: int = Field(default=5, ge=0, le=10, description="愤怒强度")
-    surprise: int = Field(default=5, ge=0, le=10, description="惊讶强度")
-
-
-class Satisfactions(BaseModel):
-    """需求满意度模型（0-1）。"""
-
-    satiety: float = Field(default=0.7, ge=0.0, le=1.0, description="饱足感满意度")
-    energy: float = Field(default=0.3, ge=0.0, le=1.0, description="能量满意度")
-    safety: float = Field(default=0.9, ge=0.0, le=1.0, description="安全满意度")
-    social: float = Field(default=0.8, ge=0.0, le=1.0, description="社交满意度")
-
-
-NEED_DESCRIPTION = """## Understanding Human Needs
-
-As a person, you have various **needs** that drive your behavior and decisions. Each need has an associated **satisfaction level** (ranging from 0.0 to 1.0), where lower values indicate less satisfaction and higher urgency. When a satisfaction level drops below a certain **threshold**, the corresponding need becomes urgent and should be addressed.
-
-### Types of Needs
-
-Your needs are organized by priority, with lower priority numbers indicating higher urgency:
-
-#### 1. **Satiety** (Priority 1 - Highest)
-- **Meaning**: The need to eat food to satisfy your hunger
-- **When it becomes urgent**: When `satiety` drops below the threshold (typically at meal times)
-- **Can interrupt other plans**: Yes - This is a basic survival need that can interrupt any ongoing activity
-
-#### 2. **Energy** (Priority 2)
-- **Meaning**: The need to rest, sleep or do some leisure or relaxing activities to recover your energy
-- **When it becomes urgent**: When `energy` drops below the threshold (typically at night or after prolonged activity)
-- **Can interrupt other plans**: Yes - Fatigue can make it difficult to continue other activities effectively
-
-#### 3. **Safety** (Priority 3)
-- **Meaning**: The need to maintain or improve your safety level, such as by working, moving to a safe place, or maintaining financial security
-- **When it becomes urgent**: When `safety` drops below the threshold (often related to income, currency, or physical safety)
-- **Can interrupt other plans**: No - Safety needs are important but typically don't require immediate interruption of ongoing activities
-
-#### 4. **Social** (Priority 4)
-- **Meaning**: The need to satisfy your social needs, such as going out with friends, chatting with friends, or maintaining social relationships
-- **When it becomes urgent**: When `social` drops below the threshold (often when you have few friends or haven't socialized recently)
-- **Can interrupt other plans**: No - Social needs are important for well-being but can usually be planned for
-
-#### 5. **Whatever** (Priority 5 - Lowest)
-- **Meaning**: You have no specific urgent needs right now and can do whatever you want
-- **When it applies**: When all other needs are satisfied above their thresholds
-- **Can interrupt other plans**: No - This is a passive state
-"""
-
-NeedType = Literal["satiety", "energy", "safety", "social", "whatever"]
-
-
-class Need(BaseModel):
-    """需求模型。"""
-
-    need_type: NeedType = Field(description="需求类型")
-    description: str = Field(description="需求描述")
-    reasoning: str = Field(default="", description="选择理由")
-
-
-class PlanStepStatus(str, Enum):
-    """计划步骤状态枚举。"""
-
-    PENDING = "pending"  # 待执行
-    IN_PROGRESS = "in_progress"  # 进行中
-    COMPLETED = "completed"  # 已完成
-    FAILED = "failed"  # 失败
-
-
-class PlanStepEvaluation(BaseModel):
-    """计划步骤评估结果。"""
-
-    success: bool = Field(description="步骤是否成功")
-    evaluation: str = Field(description="评估结果描述")
-    consumed_time: int = Field(default=10, ge=0, description="消耗时间（分钟）")
-
-
-class PlanStep(BaseModel):
-    """计划步骤模型。"""
-
-    intention: str = Field(description="步骤意图")
-    status: PlanStepStatus = Field(
-        default=PlanStepStatus.PENDING, description="步骤状态"
-    )
-    start_time: Optional[datetime] = Field(
-        default=None, description="开始时间（datetime）"
-    )
-    evaluation: Optional[PlanStepEvaluation] = Field(
-        default=None, description="评估结果"
-    )
-
-
-class Plan(BaseModel):
-    """计划模型。"""
-
-    target: str = Field(description="计划目标")
-    reasoning: str = Field(default="", description="计划推理说明")
-    steps: list[PlanStep] = Field(description="计划步骤列表")
-    index: int = Field(default=0, ge=0, description="当前步骤索引")
-    completed: bool = Field(default=False, description="是否完成")
-    failed: bool = Field(default=False, description="是否失败")
-    start_time: Optional[datetime] = Field(
-        default=None, description="开始时间（datetime）"
-    )
-    end_time: Optional[datetime] = Field(
-        default=None, description="结束时间（datetime）"
-    )
-
-    def to_adjust_needs_prompt(self) -> str:
-        execution_results = []
-        for step in self.steps:
-            eval_result = step.evaluation
-            if eval_result:
-                execution_results.append(
-                    f"Step: {step.intention}, Result: {eval_result.evaluation}"
-                )
-
-        evaluation_results = (
-            "\n".join(execution_results)
-            if execution_results
-            else "No execution results"
-        )
-        return f"""Goal: {self.target}
-Execution situation:
-{evaluation_results}
-"""
-
-
-class CognitionUpdateResult(BaseModel):
-    """认知更新结果模型。"""
-
-    thought: str = Field(description="更新的思考")
-    emotion: Emotion = Field(description="更新的情感强度")
-    emotion_types: EmotionType = Field(description="情感类型")
-
-
-class EmotionUpdateResult(BaseModel):
-    """情感更新结果模型。"""
-
-    emotion: Emotion = Field(description="更新的情感强度")
-    emotion_types: EmotionType = Field(description="情感类型")
-    conclusion: Optional[str] = Field(default=None, description="结论")
-
-
-class NeedAdjustment(BaseModel):
-    """需求调整项模型。"""
-
-    need_type: NeedType = Field(description="需求类型")
-    adjustment_type: Literal["increase", "decrease", "maintain"] = Field(
-        description="调整类型：增加、减少、维持"
-    )
-    new_value: float = Field(ge=0.0, le=1.0, description="调整后的新值")
-    reasoning: str = Field(default="", description="调整理由")
-
-
-class NeedAdjustmentResult(BaseModel):
-    """需求调整结果模型。"""
-
-    adjustments: list[NeedAdjustment] = Field(description="调整列表")
-    reasoning: str = Field(default="", description="整体调整理由")
-
-
-class Intention(BaseModel):
-    """意图模型。"""
-
-    intention: str = Field(description="意图描述")
-    priority: int = Field(ge=1, description="优先级（数字越小优先级越高）")
-    attitude: float = Field(ge=0.0, le=1.0, description="个人偏好和评价")
-    subjective_norm: float = Field(ge=0.0, le=1.0, description="社会环境和他人的看法")
-    perceived_control: float = Field(ge=0.0, le=1.0, description="执行难度和可控性")
-    reasoning: str = Field(default="", description="意图存在的理由")
-
-
-class IntentionUpdate(BaseModel):
-    """意图更新结果模型。"""
-
-    intentions: list[Intention] = Field(description="候选意图列表（将选择优先级最高的一个）")
-    reasoning: str = Field(default="", description="更新理由")
-
-
-class CognitionIntentionUpdateResult(BaseModel):
-    """合并的认知与意图更新结果模型。"""
-
-    need_adjustment: NeedAdjustmentResult = Field(description="需求调整结果")
-    current_need: Need = Field(description="当前需求结果")
-    cognition_update: CognitionUpdateResult = Field(description="情感与思考更新结果")
-    intention_update: IntentionUpdate = Field(description="意图更新结果")
-
-
-class ReActInstructionResponse(BaseModel):
-    """ReAct Act阶段的指令响应模型（非template模式）。"""
-
-    reasoning: str = Field(
-        default="",
-        description="1.Why you are giving this action instruction. 2.check if the action instruction is available based on the available operations."
-    )
-    instruction: str = Field(
-        default="",
-        description="A single, clear sentence or short paragraph that tells the router what action to take. Use empty string or <break> to indicate agent wants to stop (no further environment calls)."
-    )
-    status: Optional[str] = Field(
-        default=None,
-        description="Optional status to skip environment call. If provided and not 'in_progress' or 'unknown', the environment router will be skipped. Valid values: 'success', 'fail', 'error', 'in_progress', 'unknown'"
-    )
-
-
-class ReActInstructionResponseWithTemplate(ReActInstructionResponse):
-    """ReAct Act阶段的指令响应模型（template模式，含variables）。"""
-
-    instruction: str = Field(
-        default="",
-        description="A single, clear sentence or short paragraph that tells the router what action to take. Use empty string or <break> to indicate agent wants to stop. If providing an action, this MUST contain variable placeholders like {variable_name} if there are ANY variables."
-    )
-    variables: Dict[str, Any] = Field(
-        default_factory=dict,
-        description="Variables to substitute in the instruction template. This is a dictionary where keys are variable names (without curly braces) and values are their corresponding values. For example, if instruction is 'Move to {aoi_id}', variables should be {'aoi_id': 500001234}."
-    )
-
-
 class PersonAgent(AgentBase):
-    """
-    PersonAgent - 基于SocietyAgent逻辑重新实现的Agent
+    """Skills-based agent — 一个轻量编排器，所有能力由 skills pipeline 提供。
 
-    执行流程（step()函数）：
-    1. 使用<observe>对环境进行观察，作为最新的记忆
-    2. 根据历史记忆，对需求（Need）进行调整，按调整的类型和列表返回，并且需要给出reasoning
-    3. 根据历史记忆、当前Need满足度，更新Emotion和thought
-    4. 根据历史记忆、当前Need需求满足度以及最紧迫的need、当前Emotion和thought，着重关注当前最紧迫的need，使用计划行为理论更新意图（从候选意图中选择优先级最高的一个）。
-    5. 根据选中的意图以及与该意图相关的记忆，生成详细的执行计划 Plan，然后开始与环境交互以便完成这个Plan的每个Step。与环境交互的部分采用ReAct范式，对于一个Step最多与环境进行3次交互（参数，可以设置）。交互的过程将存入记忆中。环境交互的成功与否将在下一个循环时影响agent的需求和情绪
+    step() 执行三层 pipeline：
+      1. always-on  — 每步必执行（observation）
+      2. dynamic    — LLM 阅读 skill 描述后自主选择激活（needs, cognition, plan）
+      3. finalize   — 所有 dynamic 完成后收尾（memory flush）
     """
 
     @classmethod
@@ -365,137 +114,161 @@ class PersonAgent(AgentBase):
         self,
         id: int,
         profile: Any,
-        name: Optional[str] = None,  # 可选显示名
-        replay_writer: Optional["ReplayWriter"] = None,  # 可选回放写入器
-        T_H: float = 0.2,  # 饥饿阈值
-        T_D: float = 0.2,  # 能量阈值
-        T_P: float = 0.2,  # 安全阈值
-        T_C: float = 0.3,  # 社交阈值
+        name: Optional[str] = None,
+        replay_writer: Optional["ReplayWriter"] = None,
+        T_H: float = 0.2,
+        T_D: float = 0.2,
+        T_P: float = 0.2,
+        T_C: float = 0.3,
         max_plan_steps: int = 6,
-        short_memory_window_size: int = 10,  # 短期记忆窗口大小
-        max_intentions: int = 5,  # 最大意图数量
-        max_react_interactions_per_step: int = 3,  # 每个Step最多与环境交互次数
-        template_mode_enabled: bool = False,  # 是否启用template模式
-        ask_intention_enabled: bool = True,  # 是否启用定期ask intention
+        short_memory_window_size: int = 10,
+        max_intentions: int = 5,
+        max_react_interactions_per_step: int = 3,
+        template_mode_enabled: bool = False,
+        ask_intention_enabled: bool = True,
+        skill_names: Optional[list[str]] = None,
     ):
-        """
-        初始化PersonAgent。
-
-        Args:
-            id: Agent ID
-            profile: Agent的profile（可以是包含profile_text的字典，或直接是字符串）
-            memory_config: 兼容保留（不再使用，memory_config 统一从 Config 读取）
-            world_description: 兼容保留（不再使用，world_description 统一从 env_router 获取）
-            name: 可选显示名（默认从profile或id推断）
-            replay_writer: 可选回放写入器
-            T_H: 饥饿阈值
-            T_D: 能量阈值
-            T_P: 安全阈值
-            T_C: 社交阈值
-            max_plan_steps: 最大计划步骤数
-            short_memory_window_size: 短期记忆窗口大小，用于存储最近的N条消息记录
-            max_intentions: 最大意图数量
-            max_react_interactions_per_step: 每个Step最多与环境交互次数
-            template_mode_enabled: 是否启用template模式，启用后指令会被视为模板指令，支持{variable_name}语法
-            ask_intention_enabled: 是否启用每两步一次的ask intention记录
-        """
         super().__init__(id=id, profile=profile, name=name, replay_writer=replay_writer)
+
+        # ── 记忆 ──
         self._memory_user_id = f"agent-{id}"
-        self._world_description = ""
-
-        # memory_config 统一从 Config 获取（兼容入参但不使用）
         self._memory = AsyncMemory(config=Config.get_mem0_config(str(id)))
-
-        # 阈值
-        self.T_H = T_H
-        self.T_D = T_D
-        self.T_P = T_P
-        self.T_C = T_C
-        self.max_plan_steps = max_plan_steps
+        self._memory_lock = asyncio.Lock()
+        self._short_memory: list[dict[str, str]] = []
+        self._cognition_memory: list[dict[str, Any]] = []
         self.short_memory_window_size = short_memory_window_size
 
-        # Template模式开关
+        # ── 参数 ──
+        self.T_H, self.T_D, self.T_P, self.T_C = T_H, T_D, T_P, T_C
+        self.max_plan_steps = max_plan_steps
+        self.max_intentions = max_intentions
+        self.max_react_interactions_per_step = max_react_interactions_per_step
         self.template_mode_enabled = template_mode_enabled
         self.ask_intention_enabled = ask_intention_enabled
 
-        # 短期记忆队列（存储最近的N条消息记录，每个元素是包含记忆文本和时间戳的字典）
-        self._short_memory: list[dict[str, str]] = []
-
-        # 状态跟踪
+        # ── 运行时状态（由 skills 读写） ──
+        self._world_description = ""
         self._step_count = 0
         self._tick: Optional[int] = None
         self._t: Optional[datetime] = None
         self._observation_ctx: Optional[dict] = None
         self._observation: Optional[str] = None
-        self._current_step_acts: list[dict] = []  # 当前步骤的acts记录
-
-        # 需求满意度（0-1）
-        self._satisfactions: Satisfactions = Satisfactions()
-
-        # 当前需求
+        self._current_step_acts: list[dict] = []
+        self._satisfactions = Satisfactions()
         self._need = None
-
-        # 情感状态
-        self._emotion: Emotion = Emotion()
-        self._emotion_types: EmotionType = EmotionType.RELIEF
-
-        # 思考
+        self._emotion = Emotion()
+        self._emotion_types = EmotionType.RELIEF
         self._thought: str = "Currently nothing good or bad is happening"
-
-        # 合并认知/意图更新的结构化输出
-        self._last_cognition_intention_update: Optional[
-            CognitionIntentionUpdateResult
-        ] = None
-
+        self._last_cognition_intention_update: Optional[CognitionIntentionUpdateResult] = None
         self._plan: Optional[Plan] = None
-        """
-        Current plan to be executed.
-        """
-
-        # 意图（LLM返回后只保留优先级最高的一个）
         self._intention: Intention | None = None
-        self.max_intentions = max_intentions
-        self.max_react_interactions_per_step = max_react_interactions_per_step
-
-        # 用于保护记忆操作的异步锁
-        self._memory_lock = asyncio.Lock()
-
-        # 意图历史记录（每两步记录一次）
         self._intention_history: list[dict] = []
-
-        # 时间步详细记录（每个时间步的intention、plan、act和需求状态）
         self._step_records: list[dict] = []
-
-        # 步骤记录文件路径（在第一次记录时初始化）
         self._step_records_file: Optional[str] = None
 
-        # 当前step的认知记忆列表（内在状态更新，不立即加入mem0）
-        self._cognition_memory: list[dict[str, Any]] = []
+        # ── Skills pipeline ──
+        from agentsociety2.agent.skills import get_skill_registry
+        self._skill_registry = get_skill_registry()
+        self._skill_names = skill_names
 
-        self._logger.info(f"✓ PersonAgent (ID: {id}) 已创建")
+        # 按需加载：初始化时只加载 always + finalize skill，dynamic skill 在 step 时按需加载
+        self._always_on_names = {s.name for s in self._skill_registry.list_always()}
+        self._finalize_names = {s.name for s in self._skill_registry.list_finalize()}
+
+        # 只预加载 always + finalize skill
+        always_and_finalize = list(self._always_on_names) + list(self._finalize_names)
+        if self._skill_names is not None:
+            # 用户指定的 skill 列表：过滤出 always + finalize
+            always_and_finalize = [n for n in self._skill_names if n in always_and_finalize]
+        self._loaded_skills: dict[str, Any] = {}  # LoadedSkill 缓存
+        self._loaded_skills.update({s.name: s for s in self._skill_registry.load_filtered(always_and_finalize)})
+
+        # 获取所有可用的 dynamic skill 名称（不加载 Python，只取元数据）
+        all_skills = self._skill_registry.list_enabled()
+        if self._skill_names is not None:
+            self._available_dynamic_names = {s.name for s in all_skills if s.name in self._skill_names and s.auto_load == "dynamic"}
+        else:
+            self._available_dynamic_names = {s.name for s in all_skills if s.auto_load == "dynamic"}
+
+        self._logger.info(f"PersonAgent({id}) preloaded: {list(self._loaded_skills.keys())}, dynamic available: {sorted(self._available_dynamic_names)}")
+
+    # ==================== Skills 管理 ====================
+
+    def _get_or_load_skill(self, name: str):
+        """获取或加载单个 skill（按需加载）
+
+        如果 skill 已加载则返回缓存，否则从 registry 加载。
+        """
+        if name in self._loaded_skills:
+            return self._loaded_skills[name]
+        loaded = self._skill_registry.load_single(name)
+        if loaded:
+            self._loaded_skills[name] = loaded
+        return loaded
+
+    def _get_loaded_skills_sorted(self) -> list:
+        """获取所有已加载的 skill，按 priority 排序"""
+        return sorted(self._loaded_skills.values(), key=lambda s: s.priority)
+
+    def reload_skills(self, skill_names: list[str] | None = None):
+        """热重载 skills pipeline（可在运行时调用）"""
+        if skill_names is not None:
+            self._skill_names = skill_names
+
+        # 重新计算 always/finalize/dynamic 分类
+        self._always_on_names = {s.name for s in self._skill_registry.list_always()}
+        self._finalize_names = {s.name for s in self._skill_registry.list_finalize()}
+
+        # 清空已加载缓存，重新预加载 always + finalize
+        self._loaded_skills.clear()
+        always_and_finalize = list(self._always_on_names) + list(self._finalize_names)
+        if self._skill_names is not None:
+            always_and_finalize = [n for n in self._skill_names if n in always_and_finalize]
+        self._loaded_skills.update({s.name: s for s in self._skill_registry.load_filtered(always_and_finalize)})
+
+        # 更新可用 dynamic skill
+        all_skills = self._skill_registry.list_enabled()
+        if self._skill_names is not None:
+            self._available_dynamic_names = {s.name for s in all_skills if s.name in self._skill_names and s.auto_load == "dynamic"}
+        else:
+            self._available_dynamic_names = {s.name for s in all_skills if s.auto_load == "dynamic"}
+
+        self._logger.info(f"Skills reloaded: preloaded={list(self._loaded_skills.keys())}, dynamic={sorted(self._available_dynamic_names)}")
+
+    def add_skill(self, name: str) -> bool:
+        """运行时添加一个 skill 到 pipeline"""
+        if self._skill_names is not None and name not in self._skill_names:
+            self._skill_names.append(name)
+        self._skill_registry.enable(name)
+
+        # 添加到可用列表并立即加载
+        info = self._skill_registry.get_skill_info(name, load_content=False)
+        if info:
+            if info.auto_load in ("always", "finalize"):
+                loaded = self._skill_registry.load_single(name)
+                if loaded:
+                    self._loaded_skills[name] = loaded
+            else:
+                self._available_dynamic_names.add(name)
+
+        return name in self._loaded_skills or name in self._available_dynamic_names
+
+    def remove_skill(self, name: str) -> bool:
+        """运行时从 pipeline 移除一个 skill"""
+        self._skill_registry.disable(name)
+        if self._skill_names and name in self._skill_names:
+            self._skill_names.remove(name)
+        # 从已加载缓存中移除
+        self._loaded_skills.pop(name, None)
+        # 从可用列表中移除
+        self._available_dynamic_names.discard(name)
+        return True
 
     # ==================== 重试辅助方法 ====================
 
     async def _retry_async_operation(
-        self,
-        operation_name: str,
-        async_func,
-        *args,
-        max_retries: int = 3,
-        **kwargs
+        self, operation_name: str, async_func, *args, max_retries: int = 3, **kwargs
     ):
-        """通用异步操作重试机制。
-        
-        Args:
-            operation_name: 操作名称（用于日志）
-            async_func: 要执行的异步函数
-            *args: 函数的位置参数
-            max_retries: 最大重试次数，默认3次
-            **kwargs: 函数的关键字参数
-            
-        Returns:
-            函数的返回值，或在所有重试失败后返回None
-        """
         for attempt in range(max_retries):
             try:
                 return await async_func(*args, **kwargs)
@@ -509,42 +282,8 @@ class PersonAgent(AgentBase):
                     )
                     return None
 
-    def _retry_sync_operation(
-        self,
-        operation_name: str,
-        sync_func,
-        *args,
-        max_retries: int = 3,
-        **kwargs
-    ):
-        """通用同步操作重试机制。
-        
-        Args:
-            operation_name: 操作名称（用于日志）
-            sync_func: 要执行的同步函数
-            *args: 函数的位置参数
-            max_retries: 最大重试次数，默认3次
-            **kwargs: 函数的关键字参数
-            
-        Returns:
-            函数的返回值，或在所有重试失败后返回None
-        """
-        for attempt in range(max_retries):
-            try:
-                return sync_func(*args, **kwargs)
-            except Exception as e:
-                self._logger.warning(
-                    f"{operation_name} failed (attempt {attempt + 1}/{max_retries}): {str(e)}"
-                )
-                if attempt == max_retries - 1:
-                    self._logger.warning(
-                        f"Skipping {operation_name} after {max_retries} retries"
-                    )
-                    return None
-
     @property
     def profile_text(self) -> str:
-        """获取 profile 文本。"""
         if isinstance(self._profile, str):
             return self._profile
         elif isinstance(self._profile, dict):
@@ -554,15 +293,9 @@ class PersonAgent(AgentBase):
 
     @property
     def name(self) -> str:
-        """获取 Agent 的名称（由基类 __init__ 的 name 或 profile 推导）。"""
         return self._name
 
     def get_profile(self) -> dict[str, Any]:
-        """获取 Agent 的 profile 字典。
-
-        Returns:
-            包含 Agent 所有属性的字典。
-        """
         if isinstance(self._profile, dict):
             return self._profile.copy()
         elif hasattr(self._profile, "model_dump"):
@@ -572,7 +305,6 @@ class PersonAgent(AgentBase):
 
     @property
     def memory(self) -> AsyncMemory:
-        """获取 memory 实例。"""
         return self._memory
 
     # ==================== 记忆管理方法 ====================
@@ -583,13 +315,6 @@ class PersonAgent(AgentBase):
         metadata: Optional[dict] = None,
         t: Optional[datetime] = None,
     ) -> None:
-        """添加带时间戳的记忆（带3次重试机制）。
-
-        Args:
-            memory_text: 记忆文本
-            metadata: 记忆元数据，如果为None，则使用默认值
-            t: 时间，如果为None，则使用当前时间
-        """
         async with self._memory_lock:
             if metadata is None:
                 metadata = {}
@@ -629,14 +354,6 @@ class PersonAgent(AgentBase):
                         return
 
     async def _get_recent_memories(self, limit: int = 5) -> list[dict[str, str]]:
-        """获取最近的记忆。
-
-        Args:
-            limit: 返回的记忆数量限制
-
-        Returns:
-            最近的记忆列表，每个元素是包含 'content' 和 'timestamp' 的字典
-        """
         async with self._memory_lock:
             return self._short_memory[:limit]
 
@@ -646,43 +363,15 @@ class PersonAgent(AgentBase):
         memory_type: str = "cognition",
         metadata: Optional[dict] = None,
     ) -> None:
-        """添加认知记忆到当前step的cognition_memory列表（不立即加入mem0）。
-        
-        此方法内置重试机制，最多3次重试。如果都失败则跳过。
-
-        Args:
-            memory_text: 记忆文本
-            memory_type: 记忆类型（如 "cognition", "emotion", "need", "intention", "plan"）
-            metadata: 额外的元数据
-        """
-        if metadata is None:
-            metadata = {}
-        
-        # 3次重试机制
-        max_retries = 3
-        for attempt in range(max_retries):
-            try:
-                self._cognition_memory.append({
-                    "content": memory_text,
-                    "type": memory_type,
-                    "metadata": metadata,
-                })
-                return
-            except Exception as e:
-                self._logger.warning(
-                    f"Failed to add cognition memory (attempt {attempt + 1}/{max_retries}): {str(e)}"
-                )
-                if attempt == max_retries - 1:
-                    self._logger.warning(
-                        f"Skipping cognition memory after {max_retries} retries: {memory_text[:100]}..."
-                    )
+        """暂存认知记忆到 _cognition_memory，step 结束时由 flush 写入 mem0。"""
+        self._cognition_memory.append({
+            "content": memory_text,
+            "type": memory_type,
+            "metadata": metadata or {},
+        })
 
     async def _flush_cognition_memory_to_memory(self) -> None:
-        """将当前step的cognition_memory统一格式化为结构化文本并一次性添加到memory。
-        
-        这个方法应该在step结束时调用，将所有认知记忆合并为一个结构化的记忆条目。
-        包含3次重试机制，如果添加失败3次则跳过。
-        """
+        """将当前 step 的 cognition_memory 合并写入 mem0 长期记忆。"""
         if not self._cognition_memory:
             return
 
@@ -720,11 +409,7 @@ class PersonAgent(AgentBase):
     # ==================== 需求管理方法 ====================
 
     async def _adjust_needs_from_memory(self) -> NeedAdjustmentResult:
-        """根据历史记忆调整需求满意度。
-
-        Returns:
-            NeedAdjustmentResult: 包含调整列表和整体理由的结果
-        """
+        """根据历史记忆调整需求满意度。"""
         assert self._tick is not None and self._t is not None, "tick and t are not set"
         t = self._t
 
@@ -788,13 +473,6 @@ Your response is:
 ```json
 """
 
-        # self._logger.debug(
-        #     f"{_get_debug_info('准备调用LLM调整需求满意度')} - prompt length: {len(prompt)}"
-        # )
-        # self._logger.debug(
-        #     f"{_get_debug_info('发送给LLM的完整prompt（调整需求）')}:\n{prompt}"
-        # )
-
         result = await self.acompletion_with_pydantic_validation(
             model_type=NeedAdjustmentResult,
             messages=[{"role": "user", "content": prompt}],
@@ -826,7 +504,6 @@ Your response is:
         return result
 
     async def _determine_current_need(self):
-        """确定当前需求。"""
         assert self._t is not None and self._tick is not None, "t and tick are not set"
         t = self._t
 
@@ -899,13 +576,6 @@ Your response is:
 ```json
 """
 
-        # self._logger.debug(
-        #     f"{_get_debug_info('准备调用LLM确定当前需求')} - prompt length: {len(prompt)}"
-        # )
-        # self._logger.debug(
-        #     f"{_get_debug_info('发送给LLM的完整prompt（确定需求）')}:\n{prompt}"
-        # )
-
         response = await self.acompletion_with_pydantic_validation(
             model_type=Need,
             messages=[{"role": "user", "content": prompt}],
@@ -922,11 +592,6 @@ Your response is:
     # ==================== 计划生成方法 ====================
 
     async def _generate_plan_from_intention(self, intention: Intention) -> None:
-        """根据选中的意图生成详细的执行计划。
-
-        Args:
-            intention: 选中的意图
-        """
         assert self._tick is not None and self._t is not None, "tick and t are not set"
         assert self._observation is not None, "observation is not set"
         t = self._t
@@ -1026,13 +691,6 @@ Your response is:
 ```json
 """
 
-        # self._logger.debug(
-        #     f"{_get_debug_info('准备调用LLM生成计划')} - intention: {intention.intention}, prompt length: {len(plan_prompt)}"
-        # )
-        # self._logger.debug(
-        #     f"{_get_debug_info('发送给LLM的完整prompt（生成计划）')}:\n{plan_prompt}"
-        # )
-
         plan = await self.acompletion_with_pydantic_validation(
             model_type=Plan,
             messages=[{"role": "user", "content": plan_prompt}],
@@ -1064,14 +722,6 @@ Your response is:
     # ==================== 计划相关方法 ====================
 
     async def _check_step_completion(self, step: PlanStep) -> PlanStepStatus:
-        """根据observation和历史记忆，确定当前step的完成情况。
-
-        Args:
-            step: 要检查的计划步骤
-
-        Returns:
-            PlanStepStatus: 步骤的状态
-        """
         assert self._tick is not None and self._t is not None, "tick and t are not set"
         assert self._observation is not None, "observation is not set"
 
@@ -1134,13 +784,6 @@ Return only one of: "completed", "in_progress", "failed", "pending"
 
 Your response (one word only):"""
 
-        # self._logger.debug(
-        #     f"{_get_debug_info('准备调用LLM检查步骤完成情况')} - step intention: {step.intention}, prompt length: {len(prompt)}"
-        # )
-        # self._logger.debug(
-        #     f"{_get_debug_info('发送给LLM的完整prompt（检查步骤完成）')}:\n{prompt}"
-        # )
-
         response = await self.acompletion(
             [{"role": "user", "content": prompt}],
             stream=False,
@@ -1163,11 +806,6 @@ Your response (one word only):"""
         return status_map.get(status_text, PlanStepStatus.PENDING)
 
     async def _should_interrupt_plan(self) -> bool:
-        """结合最新的意图，判定是否要中断计划。
-
-        Returns:
-            bool: True表示应该中断当前计划，False表示继续执行
-        """
         assert self._tick is not None and self._t is not None, "tick and t are not set"
         assert self._need is not None, "need is not set"
 
@@ -1197,13 +835,6 @@ Return "yes" if the plan should be interrupted, "no" if it should continue.
 
 Your response (yes/no only):"""
 
-        # self._logger.debug(
-        #     f"{_get_debug_info('准备调用LLM判断是否中断计划')} - prompt length: {len(prompt)}"
-        # )
-        # self._logger.debug(
-        #     f"{_get_debug_info('发送给LLM的完整prompt（判断中断计划）')}:\n{prompt}"
-        # )
-
         response = await self.acompletion(
             [{"role": "user", "content": prompt}],
             stream=False,
@@ -1219,44 +850,8 @@ Your response (yes/no only):"""
 
     # ==================== 步骤执行方法 ====================
 
-    def _format_interaction_history(self, interaction_history: list[str]) -> str:
-        """将交互历史格式化为对话形式。
-
-        Args:
-            interaction_history: 包含 "Action: ..." 和 "Observation: ..." 的列表
-
-        Returns:
-            格式化后的对话字符串，如果没有历史则返回"No previous interactions."
-        """
-        if not interaction_history:
-            return "No previous interactions."
-
-        dialog_lines = []
-        for i in range(0, len(interaction_history), 2):
-            # 每两条为一组：Action 和 Observation
-            if i < len(interaction_history):
-                action = interaction_history[i]
-                if action.startswith("Action: "):
-                    agent_action = action.replace("Action: ", "", 1)
-                    dialog_lines.append(f"Agent: {agent_action}")
-
-            if i + 1 < len(interaction_history):
-                observation = interaction_history[i + 1]
-                if observation.startswith("Observation: "):
-                    env_response = observation.replace("Observation: ", "", 1)
-                    dialog_lines.append(f"Environment: {env_response}")
-
-        return "\n".join(dialog_lines)
-
     async def _step_execution(self) -> tuple[PlanStepStatus, list[dict]]:
-        """执行当前步骤，采用ReAct范式，使用LLM原生多轮对话。
-
-        ReAct范式：对于每个Step，最多与环境进行max_react_interactions_per_step次交互。
-        使用多轮对话方式，observation作为第一轮对话的响应，后续交互作为对话历史。
-
-        Returns:
-            tuple[PlanStepStatus, list[dict]]: 步骤执行后的状态（已完成、进行中、失败）和acts记录列表
-        """
+        """ReAct 范式执行当前计划步骤，最多 max_react_interactions_per_step 次环境交互。"""
         assert self._tick is not None and self._t is not None, "tick and t are not set"
         # 当前步骤的acts记录
         step_acts = []
@@ -1413,8 +1008,6 @@ Now, I will provide you with the initial observation from the environment. Based
 
         # ReAct循环：最多进行max_react_interactions_per_step次交互
         for interaction_num in range(self.max_react_interactions_per_step):
-            # 添加user消息，请求生成instruction
-            # template_mode_enabled=false时，prompt和返回值类型不包含template相关描述和字段
             template_mode_section = ""
             if self.template_mode_enabled:
                 template_mode_section = """
@@ -1630,11 +1223,8 @@ Your instruction:"""
                 else:
                     updated_ctx, answer = await self.ask_env(ctx, instruction, readonly=False, template_mode=False)
 
-                # self._logger.debug(
-                #     f"{_get_debug_info('收到环境router响应（ReAct Observe）')} - answer length: {len(answer)}"
-                # )
                 self._logger.debug(
-                    f"{_get_debug_info('环境router返回的完整answer')}:\n{answer}"
+                    f"{_get_debug_info('环境router返回answer')}:\n{answer}"
                 )
                 # 将返回的context添加到returns列表中
                 if updated_ctx:
@@ -1853,13 +1443,6 @@ You should return the result in JSON format with the following structure:
 Your response is:
 ```json
 """
-
-        # self._logger.debug(
-        #     f"{_get_debug_info('准备调用LLM更新计划相关情感')} - plan target: {plan_target}, completed: {completed}, prompt length: {len(prompt)}"
-        # )
-        # self._logger.debug(
-        #     f"{_get_debug_info('发送给LLM的完整prompt（更新计划情感）')}:\n{prompt}"
-        # )
 
         response = await self.acompletion_with_pydantic_validation(
             model_type=EmotionUpdateResult,
@@ -2181,441 +1764,162 @@ Your response is:
 
         return response
 
-    async def _update_emotion_and_thought(self) -> None:
-        """根据历史记忆和当前Need满足度更新Emotion和thought。"""
-        assert self._tick is not None and self._t is not None, "tick and t are not set"
-        assert self._need is not None, "need is not set"
-
-        # 获取agent状态
-        state_text = await self.get_state()
-
-        # 获取当前observation
-        current_observation_text = (
-            self._observation if self._observation else "No current observation."
-        )
-
-        prompt = f"""{state_text}
-
-<task>
-Reflect on your recent experiences, current observation, and current need satisfaction levels, then update your thoughts and emotional state accordingly.
-</task>
-
-<current_observation>
-Here is the current observation from the environment in this time step. You should use this information to help you update your thoughts and emotions.
-{current_observation_text}
-</current_observation>
-
-<instructions>
-Review your recent memories, current observation, current need satisfaction levels, and current state, then:
-
-1. **Thought Update**: 
-   - Reflect on what has happened recently and how it relates to your goals, values, and personality
-   - Consider how your current need satisfaction levels affect your thoughts
-   - Formulate a natural, coherent thought that captures your current mental state
-   - The thought should be a complete sentence or short paragraph that reflects your genuine reflection
-
-2. **Emotion Intensity Update**:
-   - Consider how recent events AND your current need satisfaction levels have affected your emotional state
-   - Low need satisfaction (especially for urgent needs) may cause negative emotions
-   - High need satisfaction may cause positive emotions
-   - Update emotion intensities to accurately reflect your current feelings
-   - Values should be integers between 0-10, where:
-     * 0-2: Very low intensity
-     * 3-4: Low intensity  
-     * 5-6: Moderate intensity
-     * 7-8: High intensity
-     * 9-10: Very high intensity
-   - Only update if there has been a meaningful change; otherwise, keep values similar to current state
-
-3. **Emotion Type Selection**:
-   - Choose the single emotion type that best describes your overall current emotional state
-   - Consider the dominant emotion you're experiencing right now, influenced by both recent memories and need satisfaction
-   - Select from: Joy, Distress, Resentment, Pity, Hope, Fear, Satisfaction, Relief, Disappointment, Pride, Admiration, Shame, Reproach, Liking, Disliking, Gratitude, Anger, Gratification, Remorse, Love, Hate
-
-Your response should reflect genuine introspection and emotional awareness based on your personality, recent experiences, and current need satisfaction levels.
-</instructions>
-
-<format>
-You should return the result in JSON format with the following structure:
-```json
-{{
-    "thought": "Your updated thoughts - a natural, reflective statement about your current mental state and recent experiences",
-    "emotion": {{
-        "sadness": int (0-10),
-        "joy": int (0-10),
-        "fear": int (0-10),
-        "disgust": int (0-10),
-        "anger": int (0-10),
-        "surprise": int (0-10)
-    }},
-    "emotion_types": "One word from: Joy, Distress, Resentment, Pity, Hope, Fear, Satisfaction, Relief, Disappointment, Pride, Admiration, Shame, Reproach, Liking, Disliking, Gratitude, Anger, Gratification, Remorse, Love, Hate"
-}}
-```
-</format>
-
-Your response is:
-```json
-"""
-
-        # self._logger.debug(
-        #     f"{_get_debug_info('准备调用LLM更新情感和思考')} - prompt length: {len(prompt)}"
-        # )
-        # self._logger.debug(
-        #     f"{_get_debug_info('发送给LLM的完整prompt（更新情感和思考）')}:\n{prompt}"
-        # )
-
-        response = await self.acompletion_with_pydantic_validation(
-            model_type=CognitionUpdateResult,
-            messages=[{"role": "user", "content": prompt}],
-            tick=self._tick,
-            t=self._t,
-        )
-
-        self._logger.debug(
-            f"{_get_debug_info('收到LLM响应（更新情感和思考）')} - emotion_type: {response.emotion_types.value}, emotion: {response.emotion}, thought: {response.thought[:200]}..."
-        )
-
-        self._thought = response.thought
-        self._emotion = response.emotion
-        self._emotion_types = response.emotion_types
-
-        # 记录情感和思考更新记忆到cognition_memory（不立即加入mem0）
-        self._add_cognition_memory(
-            f"Updated thought: {response.thought}\nUpdated emotion: {response.emotion_types.value}",
-            memory_type="cognition",
-        )
-
-    async def _update_intention(self) -> IntentionUpdate:
-        """根据历史记忆、当前Need需求满足度、最紧迫的need、当前Emotion和thought，使用计划行为理论更新意图。
-
-        Returns:
-            IntentionUpdate: 包含候选意图列表和更新理由（将选择优先级最高的一个）
-        """
-        assert self._tick is not None and self._t is not None, "tick and t are not set"
-        assert self._need is not None, "need is not set"
-        t = self._t
-
-        # 获取agent状态
-        state_text = await self.get_state()
-
-        # 获取当前observation
-        current_observation_text = (
-            self._observation if self._observation else "No current observation."
-        )
-
-        prompt = f"""{state_text}
-
-<task>
-Update your intention based on your current situation, current observation, and focusing on the most urgent need. Use the Theory of Planned Behavior (TPB) to evaluate candidate intentions.
-</task>
-
-<current_observation>
-Here is the current observation from the environment in this time step. You should use this information to help you generate and evaluate candidate intentions.
-{current_observation_text}
-</current_observation>
-
-<explanation>
-Theory of Planned Behavior (TPB) evaluates intentions based on three factors:
-1. **Attitude**: Personal preference and evaluation of the behavior (0.0-1.0)
-2. **Subjective Norm**: Social environment and others' views on this behavior (0.0-1.0)
-3. **Perceived Control**: Difficulty and controllability of executing this behavior (0.0-1.0)
-
-An intention with higher scores in these three dimensions is more likely to be executed.
-</explanation>
-
-<instructions>
-Based on your current situation, current observation, especially focusing on the most urgent need, generate candidate intentions:
-
-1. **Generate candidate intentions**: 
-   - Consider what intentions would help satisfy your current urgent need
-   - Generate intentions that are relevant to your current situation
-   - Evaluate each intention using TPB (attitude, subjective_norm, perceived_control)
-   - Assign appropriate priority (lower number = higher priority)
-
-2. **Total control**: 
-   - Keep the total number of candidate intentions within {self.max_intentions} (you can have fewer)
-   - Prioritize intentions that address your most urgent need
-   - Ensure intentions are realistic and actionable based on the AVAILABLE ACTIONS in the environment
-   - You can include the current intention if it is still relevant, or create entirely new ones
-   - Your intention should not include too many details, it's a intention, not a plan or movement
-
-3. **Reasoning**: Provide overall reasoning for the intention update.
-</instructions>
-
-<format>
-You should return the result in JSON format with the following structure:
-```json
-{{
-    "intentions": [
-        {{
-            "intention": "Description of the intention",
-            "priority": int (lower = higher priority),
-            "attitude": 0.0-1.0,
-            "subjective_norm": 0.0-1.0,
-            "perceived_control": 0.0-1.0,
-            "reasoning": "Why this intention is included"
-        }},
-        ...
-    ],
-    "reasoning": "Overall reasoning for the intention update"
-}}
-```
-</format>
-
-Your response is:
-```json
-"""
-
-        # self._logger.debug(
-        #     f"{_get_debug_info('准备调用LLM更新意图')} - prompt length: {len(prompt)}"
-        # )
-        # self._logger.debug(
-        #     f"{_get_debug_info('发送给LLM的完整prompt（更新意图）')}:\n{prompt}"
-        # )
-
-        result = await self.acompletion_with_pydantic_validation(
-            model_type=IntentionUpdate,
-            messages=[{"role": "user", "content": prompt}],
-            tick=self._tick,
-            t=t,
-        )
-
-        self._logger.debug(
-            f"{_get_debug_info('收到LLM响应（更新意图）')} - intentions: {result.intentions}, reasoning: {result.reasoning[:100]}..."
-        )
-
-        # 按优先级排序并只保留 top1
-        result.intentions.sort(key=lambda x: x.priority)
-        # 只保留优先级最高的 1 个 intention
-        self._intention = result.intentions[0] if result.intentions else None
-
-        # 记录更新记忆到cognition_memory（不立即加入mem0）
-        intention_text = ""
-        if self._intention:
-            intention_text = f"Selected intention: {self._intention.intention} (Priority: {self._intention.priority})"
-        self._add_cognition_memory(
-            f"Updated intention: {result.reasoning}\n{intention_text}",
-            memory_type="intention",
-        )
-
-        return result
-
     # ==================== 主执行方法 ====================
 
     async def init(
         self,
         env: RouterBase,
     ):
-        """
-        Initialize the agent.
-
-        Args:
-            llm: The LLM of the agent.
-            env: The environment router of the agent.
-        """
+        """初始化：调用基类 init，获取 world description，扫描 env 附带的 skill。"""
         await super().init(env=env)
         self._world_description = await env.get_world_description()
 
+        # 扫描 env 模块附带的 agent skill
+        env_skills_found = False
+        for module in env.env_modules:
+            skills_dir = module.get_agent_skills_dir()
+            if skills_dir:
+                new = self._skill_registry.scan_env_skills(skills_dir, type(module).__name__)
+                if new:
+                    env_skills_found = True
+        if env_skills_found:
+            # 更新分类
+            self._always_on_names = {s.name for s in self._skill_registry.list_always()}
+            self._finalize_names = {s.name for s in self._skill_registry.list_finalize()}
+            # 重新预加载 always + finalize
+            always_and_finalize = list(self._always_on_names) + list(self._finalize_names)
+            self._loaded_skills.update({s.name: s for s in self._skill_registry.load_filtered(always_and_finalize) if s.name not in self._loaded_skills})
+            # 更新可用 dynamic skill
+            all_skills = self._skill_registry.list_enabled()
+            self._available_dynamic_names.update(s.name for s in all_skills if s.auto_load == "dynamic")
+            self._logger.info(f"Skills updated with env skills: preloaded={list(self._loaded_skills.keys())}, dynamic={sorted(self._available_dynamic_names)}")
+
     async def step(self, tick: int, t: datetime) -> str:
         """
-        执行一个完整的agent step。
+        执行一个完整的 agent step — 三层 skill pipeline。
 
-        执行顺序：
-        1. 使用<observe>对环境进行观察，作为最新的记忆
-        2. 根据历史记忆，对需求（Need）进行调整，按调整的类型和列表返回，并且需要给出reasoning
-        3. 根据历史记忆、当前Need满足度，更新Emotion和thought
-        4. 根据历史记忆、当前Need需求满足度以及最紧迫的need、当前Emotion和thought，着重关注当前最紧迫的need，使用计划行为理论更新意图（从候选意图中选择优先级最高的一个）。
-        5. 根据选中的意图以及与该意图相关的记忆，生成详细的执行计划 Plan，然后开始与环境交互以便完成这个Plan的每个Step。与环境交互的部分采用ReAct范式，对于一个Step最多与环境进行3次交互（参数，可以设置）。交互的过程将存入记忆中。环境交互的成功与否将在下一个循环时影响agent的需求和情绪
-
-        Args:
-            tick: 当前tick数
-            t: 当前时间
-
-        Returns:
-            本步执行的描述文本
+        Layer 1 (always-on):  observation 等基础感知
+        Layer 2 (dynamic):    LLM 根据 observation + skill 描述选择激活 → needs / cognition / plan
+        Layer 3 (finalize):   memory flush 等收尾操作
         """
-        # 保存tick和t到实例变量
         self._tick = tick
         self._t = t
-
         self._step_count += 1
-        step_log = []
-
-        # 初始化当前时间步的所有acts记录
         self._current_step_acts = []
-        # 清空当前step的认知记忆列表
         self._cognition_memory.clear()
+
         self._logger.debug(
             f"{_get_debug_info('开始执行agent step')} - step_count: {self._step_count}, tick: {tick}, t: {t.isoformat()}"
         )
 
-        self._observation_ctx = None
-        self._observation = None
+        ctx: dict[str, Any] = {
+            "step_log": [],
+            "tick": tick,
+            "t": t,
+            "stop": False,
+            "cognition_ran": False,
+        }
 
-        self._logger.debug(
-            f"{_get_debug_info('准备调用环境router进行观察')} - instruction: <observe>"
-        )
+        # ── Layer 1: always-on skills（已预加载） ──
+        for skill in self._get_loaded_skills_sorted():
+            if skill.name in self._always_on_names:
+                await skill.run(self, ctx)
+                if ctx.get("stop"):
+                    break
 
-        observe_ctx, observation = await self.ask_env(
-            {"id": self._id}, "<observe>", readonly=True
-        )
+        if ctx.get("stop"):
+            await self._record_step_details()
+            return ctx.get("early_return", " | ".join(ctx["step_log"]))
 
-        # self._logger.debug(
-        #     f"{_get_debug_info('收到环境router观察响应')} - observation length: {len(observation) if observation else 0}"
-        # )
-        self._logger.debug(
-            f"{_get_debug_info('环境router返回的完整observation')}:\n{observation if observation else 'None'}"
-        )
+        # ── LLM skill selection ──
+        selected = await self._select_skills_for_step(ctx)
 
-        # 检查observe的status状态
-        observe_status = (
-            observe_ctx.get("status", "unknown") if observe_ctx else "unknown"
-        )
-        self._logger.debug(
-            f"{_get_debug_info('observe操作返回的status')} - status: {observe_status}"
-        )
+        # ── Layer 2: 按需加载并执行选中的 dynamic skills ──
+        for name in sorted(selected):  # 按名称排序保证确定性
+            skill = self._get_or_load_skill(name)
+            if skill and skill.name not in self._always_on_names and skill.name not in self._finalize_names:
+                await skill.run(self, ctx)
+                if ctx.get("stop"):
+                    break
 
-        # 如果status不是in_progress，则认为observe操作完成
-        if observe_status not in ["in_progress"]:
-            self._observation_ctx = observe_ctx
-            self._observation = observation
-            # 将观察结果存入记忆
-            await self._add_memory_with_timestamp(
-                f"Observed environment: {observation}",
-                metadata={"type": "observation"},
-                t=t,
-            )
-            step_log.append(f"Observe: OK (status={observe_status})")
-        else:
-            step_log.append(f"Observe: InProgress (status={observe_status})")
-            return "Skipped (observe in progress)"
+        # ── Layer 3: finalize skills（已预加载） ──
+        for skill in self._get_loaded_skills_sorted():
+            if skill.name in self._finalize_names:
+                await skill.run(self, ctx)
 
-        # 2-4. 合并执行需求调整、确定当前需求、更新情感思考、更新意图
-        cognition_result = await self._update_cognition_and_intention()
-        need_adjustment_result = cognition_result.need_adjustment
-        step_log.append(
-            f"NeedAdjust: {len(need_adjustment_result.adjustments)} adjustments"
-        )
-        step_log.append(f"Need: {self._need}")
-        step_log.append(f"Emotion: {self._emotion_types.value}")
-        step_log.append(
-            f"Intention: {self._intention.intention if self._intention else 'None'}"
-        )
-
-        # 5. Plan相关的步骤处理
-        if not self._intention:
-            step_log.append("No intention available")
-            return " | ".join(step_log)
-
-        # 使用当前意图（LLM已返回优先级最高的一个）
-        step_log.append(f"SelectedIntention: {self._intention.intention}")
-
-        # 5.1 如果有活跃计划，根据observation和历史记忆，确定当前step的完成情况
-        if self._plan and not self._plan.completed and not self._plan.failed:
-            current_step_index = self._plan.index
-            if current_step_index < len(self._plan.steps):
-                current_step = self._plan.steps[current_step_index]
-                # 如果步骤状态是进行中，检查完成情况
-                if current_step.status == PlanStepStatus.IN_PROGRESS:
-                    status = await self._check_step_completion(current_step)
-                    current_step.status = status
-
-                    if status == PlanStepStatus.COMPLETED:
-                        # 步骤已完成，移动到下一步
-                        if current_step_index + 1 < len(self._plan.steps):
-                            self._plan.index = current_step_index + 1
-                        else:
-                            self._plan.completed = True
-                            self._plan.end_time = self._t
-                            await self._emotion_update_for_plan(
-                                self._plan, completed=True
-                            )
-                        step_log.append(f"Step {current_step_index} completed")
-                    elif status == PlanStepStatus.FAILED:
-                        current_step.status = PlanStepStatus.FAILED
-                        self._plan.failed = True
-                        self._plan.end_time = self._t
-                        await self._emotion_update_for_plan(self._plan, completed=False)
-                        step_log.append(f"Step {current_step_index} failed")
-                    else:
-                        step_log.append(
-                            f"Step {current_step_index} in progress, waiting"
-                        )
-
-        # 5.2 结合最新的意图，判定是否要中断计划
-        should_interrupt = False
-        if self._plan and not self._plan.completed and not self._plan.failed:
-            should_interrupt = await self._should_interrupt_plan()
-            if should_interrupt:
-                step_log.append("Plan interrupted")
-                self._plan = None
-
-        # 5.3 如果没有活跃计划，根据最新意图生成计划
-        if self._plan is None or self._plan.completed or self._plan.failed:
-            await self._generate_plan_from_intention(self._intention)
-            step_log.append(f"PlanGen: {self._plan.target if self._plan else 'N/A'}")
-
-        # 5.4 有计划，执行计划的下一个step并根据与环境的交互结果判定这个step的状态
-        if self._plan and not self._plan.completed and not self._plan.failed:
-            current_step_index = self._plan.index
-            if current_step_index < len(self._plan.steps):
-                current_step = self._plan.steps[current_step_index]
-
-                # 如果当前步骤是进行中，不再执行新步骤
-                if current_step.status == PlanStepStatus.IN_PROGRESS:
-                    step_log.append(f"Step {current_step_index} in progress, waiting")
-                else:
-                    # 执行步骤
-                    step_status, step_acts = await self._step_execution()
-                    self._current_step_acts.extend(step_acts)  # 收集acts
-                    step_log.append(f"StepExec: {step_status.value}")
-
-                    # 如果步骤完成或失败，继续处理后续步骤（如果可能）
-                    # 如果步骤是进行中，停止处理
-                    if step_status == PlanStepStatus.IN_PROGRESS:
-                        step_log.append("Stopped: step in progress")
-                    elif step_status == PlanStepStatus.COMPLETED:
-                        # 继续执行后续步骤（如果还有）
-                        while (
-                            self._plan
-                            and not self._plan.completed
-                            and not self._plan.failed
-                            and self._plan.index < len(self._plan.steps)
-                        ):
-                            next_step_status, next_step_acts = (
-                                await self._step_execution()
-                            )
-                            self._current_step_acts.extend(next_step_acts)  # 收集acts
-                            step_log.append(f"StepExec: {next_step_status.value}")
-                            if next_step_status == PlanStepStatus.IN_PROGRESS:
-                                step_log.append("Stopped: step in progress")
-                                break
-                            elif next_step_status == PlanStepStatus.FAILED:
-                                break
-
-        summary = " | ".join(step_log)
-
-        # 记录当前时间步的详细信息
+        summary = " | ".join(ctx["step_log"])
         await self._record_step_details()
 
-        # 将当前step的认知记忆统一刷新到memory
-        await self._flush_cognition_memory_to_memory()
+        return ctx.get("early_return", summary)
 
-        # 每两步查询一次agent的意图（第0、2、4步等）
-        if self.ask_intention_enabled and self._step_count % 2 == 0:
-            await self._query_current_intention()
+    async def _select_skills_for_step(self, ctx: dict[str, Any]) -> set[str]:
+        """LLM 阅读 skill 描述，根据当前情境自主选择要激活的 dynamic skills。
 
-        # # 写入回放数据快照
-        # await self._write_replay_snapshot(step=self._step_count, t=t)
+        使用 _available_dynamic_names（元数据级别），不依赖已加载的 Python 模块。
+        """
+        if not self._available_dynamic_names:
+            return set()
 
-        return summary
+        # 构建 skill 目录：名称 + 描述（来自 registry 元数据）
+        catalog_lines = []
+        valid_names = set()
+        for name in sorted(self._available_dynamic_names):
+            info = self._skill_registry.get_skill_info(name, load_content=False)
+            if info:
+                desc = info.description or "(无描述)"
+                catalog_lines.append(f"- **{name}**: {desc}")
+                valid_names.add(name)
+
+        if not valid_names:
+            return set()
+
+        observation = self._observation or "（无观测信息）"
+
+        state_parts = []
+        if self._need:
+            state_parts.append(f"当前需求: {self._need}")
+        state_parts.append(f"情绪: {self._emotion_types.value}")
+        if self._intention:
+            state_parts.append(f"意图: {self._intention.intention}")
+        if self._plan and not self._plan.completed and not self._plan.failed:
+            state_parts.append(f"活跃计划: {self._plan.target}")
+        state_summary = " | ".join(state_parts) if state_parts else "初始状态"
+
+        prompt = f"""You are an autonomous agent deciding which cognitive abilities to activate this step.
+
+## Current Observation
+{observation}
+
+## Current State
+{state_summary}
+
+## Available Skills
+{chr(10).join(catalog_lines)}
+
+## Instructions
+Select only the skills you truly need for this step. Unselected skills will NOT run.
+Return the selected skill names as a JSON list.
+
+```json
+"""
+        try:
+            result = await self.acompletion_with_pydantic_validation(
+                model_type=SkillSelection,
+                messages=[{"role": "user", "content": prompt}],
+                tick=self._tick,
+                t=self._t,
+            )
+            selected = {name for name in result.selected_skills if name in valid_names}
+            self._logger.info(f"[SkillSelector] LLM selected: {sorted(selected)} — {result.reasoning}")
+            ctx["step_log"].append(f"SkillSelect: {sorted(selected)}")
+            return selected
+        except Exception as e:
+            self._logger.warning(f"[SkillSelector] LLM selection failed ({e}), fallback to all dynamic skills")
+            ctx["step_log"].append("SkillSelect: fallback(all)")
+            return valid_names
 
     async def get_state(self) -> str:
-        """返回agent的当前状态的字符串表示，用于放在prompt的最上方以提高缓存利用率。
-
-        Returns:
-            str: 格式化的状态字符串
-        """
+        """构建当前状态字符串（profile + 记忆 + 需求 + 情感 + 计划），供 prompt 使用。"""
         # 获取最近的记忆
         recent_memories = await self._get_recent_memories(limit=10)
         memories_text = ""
@@ -2711,80 +2015,62 @@ Intensities (0-10):
 
         return state_text
 
-    # ==================== 回放数据写入方法 ====================
+    async def dump(self) -> dict:
+        """序列化 Agent 状态为字典。
 
-    async def _write_replay_snapshot(self, step: int, t: datetime) -> None:
-        """写入回放状态快照。
+        Returns:
+            包含 Agent 状态的字典
 
-        收集当前 Agent 的状态信息并写入回放数据库。
-
-        Args:
-            step: 当前步数
-            t: 当前模拟时间
+        Note:
+            子类应重写此方法实现具体的序列化逻辑。
         """
-        if self._replay_writer is None:
-            return
-
-        # 确定当前动作描述
-        action = None
-        if self._plan and self._plan.index < len(self._plan.steps):
-            current_step = self._plan.steps[self._plan.index]
-            action = current_step.intention
-
-        # 构建状态 JSON
-        status: dict[str, Any] = {
-            "satisfactions": self._satisfactions.model_dump() if self._satisfactions else None,
-            "emotion": self._emotion.model_dump() if self._emotion else None,
-            "emotion_type": self._emotion_types.value if self._emotion_types else None,
+        return {
+            "id": self._id,
+            "name": self._name,
+            "step_count": self._step_count,
+            "satisfactions": {
+                "satiety": self._satisfactions.satiety,
+                "energy": self._satisfactions.energy,
+                "safety": self._satisfactions.safety,
+                "social": self._satisfactions.social,
+            },
+            "need": self._need,
+            "emotion": self._emotion.model_dump(),
+            "emotion_types": self._emotion_types.value,
             "thought": self._thought,
-            "need": self._need,  # _need is a string (NeedType), not a Pydantic model
-            "intention": self._intention.model_dump() if self._intention else None,
-            "plan": {
-                "target": self._plan.target,
-                "index": self._plan.index,
-                "completed": self._plan.completed,
-                "failed": self._plan.failed,
-                "steps": [
-                    {
-                        "intention": s.intention,
-                        "status": s.status.value,
-                    }
-                    for s in self._plan.steps
-                ],
-            } if self._plan else None,
         }
 
-        await self._write_status_snapshot(
-            step=step,
-            t=t,
-            action=action,
-            status=status,
-        )
-
-        # 记录思考作为对话（如果有）
-        if self._thought:
-            await self._write_dialog(
-                step=step,
-                t=t,
-                dialog_type=DIALOG_TYPE_REFLECTION,
-                speaker=self.name,
-                content=self._thought,
-            )
-
-    async def dump(self) -> dict:
-        # TODO: implement
-        ...
-
     async def load(self, dump_data: dict):
-        # TODO: implement
-        ...
-
-    async def ask(self, message: str, readonly: bool = True) -> str:
-        """询问agent问题。
+        """从字典恢复 Agent 状态。
 
         Args:
-            message: 要询问的问题
-            readonly: 是否只读
+            dump_data: 之前通过 dump() 序列化的状态字典
+        """
+        self._step_count = dump_data.get("step_count", 0)
+        if "satisfactions" in dump_data:
+            sat = dump_data["satisfactions"]
+            self._satisfactions.satiety = sat.get("satiety", 0.5)
+            self._satisfactions.energy = sat.get("energy", 0.5)
+            self._satisfactions.safety = sat.get("safety", 0.5)
+            self._satisfactions.social = sat.get("social", 0.5)
+        self._need = dump_data.get("need")
+        if "emotion" in dump_data:
+            self._emotion = Emotion(**dump_data["emotion"])
+        if "emotion_types" in dump_data:
+            self._emotion_types = EmotionType(dump_data["emotion_types"])
+        self._thought = dump_data.get("thought", "")
+
+    async def ask(self, message: str, readonly: bool = True) -> str:
+        """处理来自用户或环境的问题。
+
+        从记忆中搜索相关信息，结合当前状态生成回答。
+
+        Args:
+            message: 问题或指令
+            readonly: 是否只读模式（True = 不修改环境状态）
+
+        Returns:
+            Agent 的回答字符串
         """
         # 获取agent状态
         state_text = await self.get_state()
@@ -2867,23 +2153,11 @@ Answer the question based on your current state.
 
 Your answer:"""
 
-        self._logger.debug(
-            f"{_get_debug_info('准备调用LLM回答用户问题')} - question: {message[:100]}..., prompt length: {len(prompt)}"
-        )
-        # self._logger.debug(
-        #     f"{_get_debug_info('发送给LLM的完整prompt（回答用户问题）')}:\n{prompt}"
-        # )
-
-        # 使用LLM生成回答（不使用system_prompt）
         response = await self.acompletion(
             [{"role": "user", "content": prompt}],
             stream=False,
         )
         content = response.choices[0].message.content  # type: ignore
-
-        # self._logger.debug(
-        #     f"{_get_debug_info('收到LLM响应（回答用户问题）')} - answer length: {len(str(content)) if content else 0}"
-        # )
         self._logger.debug(
             f"{_get_debug_info('LLM返回的完整answer')}:\n{content if content else 'None'}"
         )
@@ -2993,17 +2267,6 @@ Your answer:"""
         )
 
     def _save_step_record_immediately(self, step_record: dict) -> None:
-        """
-        立即保存单条时间步记录到文件（使用格式化的JSON，带缩进，提高可读性）。
-
-        Args:
-            step_record: 要保存的时间步记录
-        """
-        import os
-        import json
-        from datetime import datetime
-
-        # 如果是第一次记录，初始化文件路径
         if self._step_records_file is None:
             os.makedirs("logs", exist_ok=True)
             timestamp = datetime.now().strftime("%Y%m%d%H%M%S")
@@ -3034,12 +2297,8 @@ Your answer:"""
         except Exception as e:
             self._logger.error(f"Failed to save step record: {e}")
 
-    # TODO: 临时代码，后续修改为从外部ask agent
     async def _query_current_intention(self) -> None:
-        """
-        Query the agent's current intention every two steps.
-        Valid intentions: sleep, home activity, other, work, shopping, eating out, leisure and entertainment.
-        """
+        """每两步一次，用 LLM 将当前状态映射为标准意图标签。"""
         assert self._t is not None, "current time is not set"
 
         # Define valid intentions
@@ -3078,10 +2337,6 @@ Respond with ONLY the intention name from the list above. Do not include any exp
 
 Your response:"""
 
-        # self._logger.debug(
-        #     f"{_get_debug_info('准备查询当前意图')} - step: {self._step_count}, t: {self._t.isoformat()}"
-        # )
-
         # Query using LLM
         response = await self.acompletion(
             [{"role": "user", "content": prompt}],
@@ -3116,33 +2371,18 @@ Your response:"""
         )
 
     async def close(self):
-        """关闭agent，清理资源。"""
-        # Save intention history
-        self._save_intention_history()
+        """关闭 Agent，释放资源。
 
-        # 重置memory（带3次重试机制）
-        await self._retry_async_operation(
-            "reset memory",
-            self._memory.reset
-        )
-        self._logger.info(f"PersonAgent '{self.id}' (ID: {self.id}) 已关闭")
-        return None
+        保存意图历史到文件，重置 mem0 内存。
+        """
+        self._save_intention_history()
+        await self._retry_async_operation("reset memory", self._memory.reset)
+        self._logger.info(f"PersonAgent({self.id}) closed")
 
     def _save_intention_history(self) -> None:
-        """
-        Save the agent's intention history to a log file (with timestamp).
-        """
-        import os
-        import json
-        from datetime import datetime
-
         os.makedirs("logs", exist_ok=True)
-
         timestamp = datetime.now().strftime("%Y%m%d%H%M%S")
         log_file = f"logs/agent_{self._id}_intention_history-{timestamp}.json"
         with open(log_file, "w", encoding="utf-8") as f:
             json.dump(self._intention_history, f, indent=2, ensure_ascii=False)
-
-        self._logger.info(
-            f"Agent {self._id} intention history saved to {log_file} ({len(self._intention_history)} records)"
-        )
+        self._logger.info(f"Intention history saved: {log_file}")

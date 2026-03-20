@@ -34,6 +34,7 @@ import { localize } from './i18n';
 import { BackendManager } from './services/backendManager';
 import { MinerUParser } from './mineruParser';
 import { AIChatInvoker } from './aiChatInvoker';
+import { LiteratureIndexViewer } from './literatureIndexViewer';
 
 // Global backend manager instance
 let backendManager: BackendManager | null = null;
@@ -598,6 +599,149 @@ export function activate(context: vscode.ExtensionContext) {
     }
   );
 
+  // ========== Agent Skills Commands ==========
+
+  const scanAgentSkillsCommand = vscode.commands.registerCommand(
+    'aiSocialScientist.scanAgentSkills',
+    async () => {
+      await projectStructureProvider.scanAgentSkills();
+    }
+  );
+
+  const importAgentSkillCommand = vscode.commands.registerCommand(
+    'aiSocialScientist.importAgentSkill',
+    async () => {
+      await projectStructureProvider.importAgentSkill();
+    }
+  );
+
+  const toggleAgentSkillCommand = vscode.commands.registerCommand(
+    'aiSocialScientist.toggleAgentSkill',
+    async (item: any) => {
+      await projectStructureProvider.toggleAgentSkill(item);
+    }
+  );
+
+  // 删除自定义 Skill 命令
+  const removeAgentSkillCommand = vscode.commands.registerCommand(
+    'aiSocialScientist.removeAgentSkill',
+    async (item: any) => {
+      if (!item) { return; }
+
+      // 获取 skill 名称
+      const skillName = item.skillName;
+      if (!skillName) {
+        vscode.window.showErrorMessage('无法获取 Skill 名称');
+        return;
+      }
+
+      // 确认删除
+      const confirm = await vscode.window.showWarningMessage(
+        localize('projectStructure.skillRemoveConfirm', skillName),
+        { modal: true },
+        localize('extension.deleteLiterature.confirmButton'),
+        localize('extension.deleteLiterature.cancelButton')
+      );
+
+      if (confirm !== localize('extension.deleteLiterature.confirmButton')) {
+        return;
+      }
+
+      try {
+        const response = await apiClient.removeAgentSkill(skillName);
+        if (response.success) {
+          vscode.window.showInformationMessage(response.message);
+          await projectStructureProvider.refreshAgentSkillsCache();
+          projectStructureProvider.refresh();
+        }
+      } catch (error: any) {
+        vscode.window.showErrorMessage(`删除 Skill 失败: ${error.message || error}`);
+      }
+    }
+  );
+
+  // 打开 Skill 目录命令
+  const openSkillFolderCommand = vscode.commands.registerCommand(
+    'aiSocialScientist.openSkillFolder',
+    async (item: any) => {
+      if (!item) { return; }
+
+      // 获取 skill 目录路径
+      const skillDirPath = item.skillDirPath || item.filePath;
+      if (!skillDirPath) {
+        vscode.window.showErrorMessage('无法获取 Skill 目录路径');
+        return;
+      }
+
+      // 在 VSCode 中打开文件夹
+      const folderUri = vscode.Uri.file(skillDirPath);
+      try {
+        // 在新窗口中打开文件夹
+        vscode.commands.executeCommand('revealFileInOS', folderUri);
+      } catch (error: any) {
+        vscode.window.showErrorMessage(`打开 Skill 目录失败: ${error.message || error}`);
+      }
+    }
+  );
+
+  // 格式化查看 JSON 文件命令
+  const formatJsonCommand = vscode.commands.registerCommand(
+    'aiSocialScientist.formatJsonFile',
+    async (item: any) => {
+      if (!item || !item.filePath) {
+        vscode.window.showErrorMessage('无法获取文件路径');
+        return;
+      }
+
+      const filePath = item.filePath;
+
+      // 检查是否为 JSON 文件
+      if (!filePath.toLowerCase().endsWith('.json')) {
+        vscode.window.showWarningMessage('此命令仅适用于 JSON 文件');
+        return;
+      }
+
+      try {
+        // 打开文件
+        const document = await vscode.workspace.openTextDocument(vscode.Uri.file(filePath));
+        const editor = await vscode.window.showTextDocument(document);
+
+        // 格式化文档
+        await vscode.commands.executeCommand('editor.action.formatDocument');
+
+        // 可选：切换到更友好的视图（如果安装了 JSON tools 等扩展）
+        vscode.window.showInformationMessage(`JSON 文件已格式化显示`);
+      } catch (error: any) {
+        vscode.window.showErrorMessage(`打开 JSON 文件失败: ${error.message || error}`);
+      }
+    }
+  );
+
+  // 文献索引预览命令
+  const viewLiteratureIndexCommand = vscode.commands.registerCommand(
+    'aiSocialScientist.viewLiteratureIndex',
+    async (item: any) => {
+      if (!item || !item.filePath) {
+        vscode.window.showErrorMessage('无法获取文献索引文件路径');
+        return;
+      }
+
+      const filePath = item.filePath;
+
+      // 检查文件是否存在
+      if (!fs.existsSync(filePath)) {
+        vscode.window.showErrorMessage('文献索引文件不存在');
+        return;
+      }
+
+      try {
+        await LiteratureIndexViewer.show(context, filePath);
+      } catch (error: any) {
+        vscode.window.showErrorMessage(`打开文献索引预览失败: ${error.message || error}`);
+      }
+    }
+  );
+
   // Register all commands
   context.subscriptions.push(
     initProjectCommand,
@@ -618,7 +762,14 @@ export function activate(context: vscode.ExtensionContext) {
     openConfigPageCommand,
     scanCustomModulesCommand,
     testCustomModulesCommand,
-    listCustomModulesCommand
+    listCustomModulesCommand,
+    scanAgentSkillsCommand,
+    importAgentSkillCommand,
+    toggleAgentSkillCommand,
+    removeAgentSkillCommand,
+    openSkillFolderCommand,
+    formatJsonCommand,
+    viewLiteratureIndexCommand
   );
 }
 

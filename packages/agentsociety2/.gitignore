@@ -1,0 +1,6 @@
+.env
+.claude/
+# Python cache files in custom/
+custom/**/__pycache__/
+custom/**/*.pyc
+custom/**/.pytest_cache/

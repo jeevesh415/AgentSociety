@@ -4,13 +4,13 @@ from __future__ import annotations
 
 import asyncio
 import json
-import os
 from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any, Dict, List, Optional
 from uuid import uuid4
 
 import json_repair
+from agentsociety2.config import Config
 from agentsociety2.designer.exp_designer import (
     ExperimentDesign,
 )
@@ -29,6 +29,46 @@ from pydantic import BaseModel, Field
 logger = get_logger()
 
 _project_root = Path(__file__).resolve().parents[2]
+
+
+# ── Settings 兼容层 ──
+# 为 designer 模块提供统一的配置访问接口
+
+
+class _DesignerSettings:
+    """Designer 模块的配置封装，兼容旧代码的 settings 接口"""
+
+    @property
+    def llm_model(self) -> str:
+        return Config.LLM_MODEL
+
+    @property
+    def API_KEY(self) -> Optional[str]:
+        return Config.LLM_API_KEY
+
+    @property
+    def api_base(self) -> str:
+        return Config.LLM_API_BASE
+
+    @property
+    def log_dir(self) -> Path:
+        return Path(Config.HOME_DIR) / "designer_logs"
+
+    @property
+    def max_retries(self) -> int:
+        return 3
+
+    @property
+    def agent_model_name(self) -> str:
+        return Config.LLM_MODEL
+
+    @property
+    def mcp_server_url(self) -> str:
+        import os
+        return os.getenv("AGENTSOCIETY_MCP_SERVER_URL", "http://localhost:8001")
+
+
+settings = _DesignerSettings()
 
 
 PROMPT_FIX_CONFIG = """You are a configuration repair assistant. Fix ONLY format/structure issues so the config validates.
@@ -289,7 +329,7 @@ class ConfigBuilder:
                         env_modules=env_modules,
                         agents=agents,
                         start_t=start_t,
-                        tick=600, # TODO
+                        tick=600,
                     )
 
                     configs.append(

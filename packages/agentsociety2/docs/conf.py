@@ -22,11 +22,29 @@ extensions = [
     'sphinx.ext.graphviz',
     'sphinx.ext.napoleon',
     'sphinx.ext.intersphinx',
+    'sphinx.ext.autodoc',      # 自动从代码生成 API 文档
+    'sphinx.ext.autosummary',  # 自动生成 API 摘要
+    'sphinx.ext.viewcode',     # 添加 [source] 链接
     'myst_parser',
 ]
 
 templates_path = ['_templates']
 exclude_patterns = ['_build', 'Thumbs.db', '.DS_Store']
+
+# -- Autodoc configuration ---------------------------------------------------
+autodoc_default_options = {
+    'members': True,
+    'member-order': 'bysource',
+    'special-members': '__init__',
+    'undoc-members': True,
+    'exclude-members': '__weakref__',
+}
+autodoc_typehints = 'description'
+autodoc_typehints_description_target = 'documented'
+
+# -- Autosummary configuration -----------------------------------------------
+autosummary_generate = True
+autosummary_imported_members = True
 
 # The suffix(es) of source filenames.
 source_suffix = {

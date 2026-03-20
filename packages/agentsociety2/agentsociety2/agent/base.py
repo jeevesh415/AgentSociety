@@ -18,22 +18,15 @@ from litellm import AllMessageValues
 from litellm.exceptions import RateLimitError
 from litellm.litellm_core_utils.streaming_handler import CustomStreamWrapper
 from litellm.types.utils import ModelResponse
-try:
-    from litellm.types.router import RouterRateLimitError
-except Exception:  # pragma: no cover - compatibility across litellm versions
-    RouterRateLimitError = None
+from litellm.types.router import RouterRateLimitError
 from pydantic import BaseModel, ValidationError
 
 T = TypeVar("T", bound=BaseModel)
 
 
 def _is_rate_limit_like_error(error: Exception) -> bool:
-    """
-    Return True for rate-limit related exceptions, including LiteLLM router cooldown errors.
-    """
-    if isinstance(error, RateLimitError):
-        return True
-    if RouterRateLimitError is not None and isinstance(error, RouterRateLimitError):
+    """Check if the error is a rate-limit related exception."""
+    if isinstance(error, (RateLimitError, RouterRateLimitError)):
         return True
     # Fallback for version differences where RouterRateLimitError class is not importable.
     err_type_name = type(error).__name__
@@ -79,8 +72,32 @@ class LLMInteractionHistory:
 
 
 class AgentBase(ABC):
-    """
-    Agent base class
+    """智能体抽象基类。
+
+    所有智能体实现都应继承此类。提供基础功能：
+
+    - LLM 交互（通过 litellm Router）
+    - 环境交互（通过 RouterBase）
+    - 回放写入（通过 ReplayWriter）
+    - Token 使用统计
+
+    子类必须实现以下抽象方法：
+
+    - :meth:`ask` — 处理问题并返回响应
+    - :meth:`step` — 执行一个模拟步骤
+    - :meth:`dump` — 序列化智能体状态
+    - :meth:`load` — 从字典恢复智能体状态
+
+    Example:
+        >>> class MyAgent(AgentBase):
+        ...     async def ask(self, message: str, readonly: bool = True) -> str:
+        ...         return f"Received: {message}"
+        ...     async def step(self, tick: int, t: datetime) -> str:
+        ...         return "Step completed"
+        ...     async def dump(self) -> dict:
+        ...         return {"id": self._id}
+        ...     async def load(self, dump_data: dict):
+        ...         pass
     """
 
     def __init__(
@@ -438,7 +455,6 @@ Remember: You are simulating a real person living in a simulated world. Your beh
         """
         raise NotImplementedError
 
-    # TODO: load
     @abstractmethod
     async def load(self, dump_data: dict):
         """

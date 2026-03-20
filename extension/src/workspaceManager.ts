@@ -672,7 +672,8 @@ Follow this sequence for social science research:
 
 2. Literature Review
    └─> agentsociety-literature-search
-   └─> agentsociety-web-research
+   └─> agentsociety-quick-web-search（简单的快速联网检索）
+   └─> agentsociety-web-research（复杂的深挖/多轮研究）
 
 3. Generate Hypothesis
    └─> agentsociety-hypothesis add

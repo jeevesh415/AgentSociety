@@ -91,8 +91,7 @@ class DoNothingAgent(AgentBase):
                     items = res
                 memories.extend(items)
         except Exception as e:
-            # ignore mem0 dump errors, keep minimal dump
-            print(f"Warning: Failed to dump memories for agent {self._id}: {e}")
+            self._logger.warning(f"Failed to dump memories for agent {self._id}: {e}")
 
         return {
             "profile": self._profile,
@@ -100,10 +99,7 @@ class DoNothingAgent(AgentBase):
         }
 
     async def load(self, dump_data: dict):
-        try:
-            self._profile = dump_data.get("profile")
-        except Exception as e:
-            print(f"Warning: Failed to load profile for agent {self._id}: {e}")
+        self._profile = dump_data.get("profile")
 
         # Restore memories to mem0
         try:
@@ -122,7 +118,7 @@ class DoNothingAgent(AgentBase):
                             memory_text, user_id=self._memory_user_id
                         )
         except Exception as e:
-            print(f"Warning: Failed to load memories for agent {self._id}: {e}")
+            self._logger.warning(f"Failed to load memories for agent {self._id}: {e}")
 
     async def ask(self, message: str, readonly: bool = True) -> str:
         assert self._memory is not None, "Memory is not initialized"
