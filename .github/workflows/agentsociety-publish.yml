@@ -29,4 +29,4 @@ jobs:
           bash scripts/rebuild_frontend.sh
       - uses: astral-sh/setup-uv@v3
       - run: cd packages/agentsociety && uv build
-      - run: uv publish --trusted-publishing always
+      - run: cd packages/agentsociety && uv publish --trusted-publishing always
