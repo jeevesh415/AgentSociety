@@ -38,3 +38,4 @@ node_modules/style-loader/**
 node_modules/less/**
 node_modules/less-loader/**
 node_modules/vscode/**
+**/__pycache__/**
