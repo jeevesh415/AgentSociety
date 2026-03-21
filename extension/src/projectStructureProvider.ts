@@ -112,7 +112,8 @@ export class ProjectItem extends vscode.TreeItem {
       'syncBuiltinSkillsGroup': 'package', // 内置 Skills 分组图标
       'syncBuiltinSkillItem': 'puzzle', // 内置 Skill 项图标
       'syncCustomSkillsGroup': 'tools', // 自定义 Skills 分组图标
-      'custom': 'workspace-trusted', // 自定义模块根图标
+      'custom': 'extensions', // 自定义模块根图标
+      'customWorkspace': 'extensions', // custom/ 目录节点图标
       'customScan': 'refresh', // 扫描图标
       'customTest': 'play', // 测试图标
       'customAgentItem': 'symbol-class', // 自定义Agent图标
@@ -1389,12 +1390,24 @@ export class ProjectStructureProvider implements vscode.TreeDataProvider<Project
           const filePath = path.join(initDir, file);
           const stat = fs.statSync(filePath);
           if (stat.isFile()) {
-            items.push(new ProjectItem(
+            const fileItem = new ProjectItem(
               `Init: ${file}`,  // 添加"Init:"前缀以便区分
               vscode.TreeItemCollapsibleState.None,
               'file',
               filePath
-            ));
+            );
+
+            // 为 steps.yaml 设置特殊的 contextValue 和点击命令
+            if (file === 'steps.yaml') {
+              fileItem.contextValue = 'yaml stepsYaml';
+              fileItem.command = {
+                command: 'aiSocialScientist.viewStepsYaml',
+                title: 'View Steps Timeline',
+                arguments: [{ filePath: filePath }]
+              };
+            }
+
+            items.push(fileItem);
           }
         }
       }
@@ -1427,6 +1440,24 @@ export class ProjectStructureProvider implements vscode.TreeDataProvider<Project
           }
 
           items.push(item);
+        }
+
+        // 检查 experiment_results.json 文件
+        const resultsFile = path.join(runDir, 'experiment_results.json');
+        if (fs.existsSync(resultsFile)) {
+          const resultsItem = new ProjectItem(
+            '📊 实验结果',
+            vscode.TreeItemCollapsibleState.None,
+            'file',
+            resultsFile
+          );
+          resultsItem.contextValue = 'json experimentResults';
+          resultsItem.command = {
+            command: 'aiSocialScientist.viewExperimentResults',
+            title: 'View Experiment Results',
+            arguments: [{ filePath: resultsFile }]
+          };
+          items.push(resultsItem);
         }
       }
 

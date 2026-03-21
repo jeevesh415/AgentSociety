@@ -165,6 +165,16 @@
         "icon": "$(book)"
       },
       {
+        "command": "aiSocialScientist.viewStepsYaml",
+        "title": "AI Social Scientist: View Steps Timeline",
+        "icon": "$(list-ordered)"
+      },
+      {
+        "command": "aiSocialScientist.viewExperimentResults",
+        "title": "AI Social Scientist: View Experiment Results",
+        "icon": "$(graph)"
+      },
+      {
         "command": "aiSocialScientist.removeAgentSkill",
         "title": "AI Social Scientist: Remove Custom Skill",
         "icon": "$(trash)"
@@ -232,6 +242,16 @@
           "command": "aiSocialScientist.viewLiteratureIndex",
           "when": "view == projectStructureView && viewItem =~ /literatureIndex/",
           "group": "1_actions"
+        },
+        {
+          "command": "aiSocialScientist.viewStepsYaml",
+          "when": "view == projectStructureView && viewItem =~ /stepsYaml/",
+          "group": "1_actions"
+        },
+        {
+          "command": "aiSocialScientist.viewExperimentResults",
+          "when": "view == projectStructureView && viewItem =~ /experimentResults/",
+          "group": "1_actions"
         }
       ]
     },
@@ -249,6 +269,16 @@
         "selector": [
           {
             "filenamePattern": "**/SIM_SETTINGS.json"
+          }
+        ],
+        "priority": "default"
+      },
+      {
+        "viewType": "aiSocialScientist.initConfig",
+        "displayName": "Init Config Editor",
+        "selector": [
+          {
+            "filenamePattern": "**/init/init_config.json"
           }
         ],
         "priority": "default"
@@ -480,6 +510,7 @@
     "test": "node ./out/test/runTest.js"
   },
   "devDependencies": {
+    "@types/js-yaml": "^4.0.9",
     "@types/node": "^20.0.0",
     "@types/react": "^18.2.0",
     "@types/react-dom": "^18.2.0",
@@ -504,6 +535,7 @@
     "@deck.gl/core": "^9.0.38",
     "@deck.gl/layers": "^9.0.38",
     "@deck.gl/react": "^9.0.38",
+    "@deck.gl/widgets": "^9.2.11",
     "antd": "^6.0.0",
     "dayjs": "^1.11.19",
     "i18next": "^23.7.0",

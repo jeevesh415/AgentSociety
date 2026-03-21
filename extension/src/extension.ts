@@ -23,6 +23,7 @@ import * as path from 'path';
 import * as fs from 'fs';
 import { ProjectStructureProvider } from './projectStructureProvider';
 import { SimSettingsEditorProvider } from './simSettingsEditorProvider';
+import { InitConfigEditorProvider } from './initConfigEditorProvider';
 import { PrefillParamsViewProvider } from './prefillParamsViewProvider';
 import { ReplayWebviewProvider } from './replayWebviewProvider';
 import { ConfigPageViewProvider } from './configPageViewProvider';
@@ -35,6 +36,8 @@ import { BackendManager } from './services/backendManager';
 import { MinerUParser } from './mineruParser';
 import { AIChatInvoker } from './aiChatInvoker';
 import { LiteratureIndexViewer } from './literatureIndexViewer';
+import { StepsViewer } from './stepsViewer';
+import { ExperimentResultsViewer } from './experimentResultsViewer';
 
 // Global backend manager instance
 let backendManager: BackendManager | null = null;
@@ -386,6 +389,20 @@ export function activate(context: vscode.ExtensionContext) {
     vscode.window.registerCustomEditorProvider(
       'aiSocialScientist.simSettings',
       new SimSettingsEditorProvider(context),
+      {
+        webviewOptions: {
+          retainContextWhenHidden: true
+        },
+        supportsMultipleEditorsPerDocument: false
+      }
+    )
+  );
+
+  // Register custom editor for init_config.json
+  context.subscriptions.push(
+    vscode.window.registerCustomEditorProvider(
+      'aiSocialScientist.initConfig',
+      new InitConfigEditorProvider(context),
       {
         webviewOptions: {
           retainContextWhenHidden: true
@@ -763,6 +780,112 @@ export function activate(context: vscode.ExtensionContext) {
     }
   );
 
+  // Steps YAML 预览命令
+  const viewStepsYamlCommand = vscode.commands.registerCommand(
+    'aiSocialScientist.viewStepsYaml',
+    async (item: any) => {
+      let filePath: string | undefined;
+
+      if (item && item.filePath) {
+        filePath = item.filePath;
+      } else {
+        // 如果没有传入文件路径，让用户选择
+        const workspaceFolder = vscode.workspace.workspaceFolders?.[0];
+        if (!workspaceFolder) {
+          vscode.window.showErrorMessage('请先打开工作区');
+          return;
+        }
+
+        const files = await vscode.workspace.findFiles('**/init/steps.yaml');
+        if (files.length === 0) {
+          vscode.window.showErrorMessage('未找到 steps.yaml 文件');
+          return;
+        }
+
+        if (files.length === 1) {
+          filePath = files[0].fsPath;
+        } else {
+          const picks = files.map(f => ({
+            label: vscode.workspace.asRelativePath(f),
+            path: f.fsPath
+          }));
+          const selected = await vscode.window.showQuickPick(picks, {
+            placeHolder: '选择要预览的 steps.yaml 文件'
+          });
+          if (!selected) {
+            return;
+          }
+          filePath = selected.path;
+        }
+      }
+
+      // 检查文件是否存在
+      if (!filePath || !fs.existsSync(filePath)) {
+        vscode.window.showErrorMessage('steps.yaml 文件不存在');
+        return;
+      }
+
+      try {
+        await StepsViewer.show(context, filePath);
+      } catch (error: any) {
+        vscode.window.showErrorMessage(`打开步骤预览失败: ${error.message || error}`);
+      }
+    }
+  );
+
+  // 实验结果可视化命令
+  const viewExperimentResultsCommand = vscode.commands.registerCommand(
+    'aiSocialScientist.viewExperimentResults',
+    async (item: any) => {
+      let filePath: string | undefined;
+
+      if (item && item.filePath) {
+        filePath = item.filePath;
+      } else {
+        // 如果没有传入文件路径，让用户选择
+        const workspaceFolder = vscode.workspace.workspaceFolders?.[0];
+        if (!workspaceFolder) {
+          vscode.window.showErrorMessage('请先打开工作区');
+          return;
+        }
+
+        const files = await vscode.workspace.findFiles('**/run/experiment_results.json');
+        if (files.length === 0) {
+          vscode.window.showErrorMessage('未找到 experiment_results.json 文件');
+          return;
+        }
+
+        if (files.length === 1) {
+          filePath = files[0].fsPath;
+        } else {
+          const picks = files.map(f => ({
+            label: vscode.workspace.asRelativePath(f),
+            path: f.fsPath
+          }));
+          const selected = await vscode.window.showQuickPick(picks, {
+            placeHolder: '选择要查看的实验结果文件'
+          });
+          if (!selected) {
+            return;
+          }
+          filePath = selected.path;
+        }
+      }
+
+      // 检查文件是否存在
+      if (!filePath || !fs.existsSync(filePath)) {
+        vscode.window.showErrorMessage('experiment_results.json 文件不存在');
+        return;
+      }
+
+      try {
+        await ExperimentResultsViewer.show(context, filePath);
+      } catch (error: any) {
+        vscode.window.showErrorMessage(`打开实验结果可视化失败: ${error.message || error}`);
+      }
+    }
+  );
+
   // Register all commands
   context.subscriptions.push(
     initProjectCommand,
@@ -791,7 +914,9 @@ export function activate(context: vscode.ExtensionContext) {
     removeAgentSkillCommand,
     openSkillFolderCommand,
     formatJsonCommand,
-    viewLiteratureIndexCommand
+    viewLiteratureIndexCommand,
+    viewStepsYamlCommand,
+    viewExperimentResultsCommand
   );
 }
 

@@ -19,6 +19,11 @@ interface LiteratureEntry {
   keywords?: string[];
   doi?: string;
   url?: string;
+  journal?: string;
+  extra_fields?: {
+    article_id?: string;
+    [key: string]: any;
+  };
   [key: string]: any;
 }
 
@@ -67,6 +72,36 @@ export class LiteratureIndexViewer {
     panel.onDidDispose(() => {
       this.currentPanel = undefined;
     });
+
+    // 处理来自 webview 的消息
+    panel.webview.onDidReceiveMessage(
+      async (message) => {
+        if (message.command === 'openFile') {
+          try {
+            const workspaceFolder = vscode.workspace.workspaceFolders?.[0];
+            if (workspaceFolder && message.filePath) {
+              // 处理相对路径
+              const filePath = message.filePath.startsWith('/')
+                ? message.filePath
+                : path.join(workspaceFolder.uri.fsPath, message.filePath);
+
+              const uri = vscode.Uri.file(filePath);
+              const doc = await vscode.workspace.openTextDocument(uri);
+              await vscode.window.showTextDocument(doc, vscode.ViewColumn.One);
+            }
+          } catch (error: any) {
+            vscode.window.showErrorMessage(`无法打开文件: ${error.message}`);
+          }
+        } else if (message.command === 'openUrl') {
+          // 打开外部链接（DOI、URL 等）
+          if (message.url) {
+            vscode.env.openExternal(vscode.Uri.parse(message.url));
+          }
+        }
+      },
+      undefined,
+      context.subscriptions
+    );
 
     // 更新内容
     this.updateWebview(panel, data, filePath);
@@ -254,6 +289,84 @@ export class LiteratureIndexViewer {
       border-radius: 4px;
       font-size: 12px;
     }
+
+    .entry-actions {
+      display: flex;
+      gap: 8px;
+      margin-top: 10px;
+      flex-wrap: wrap;
+    }
+
+    .action-btn {
+      padding: 4px 10px;
+      border: 1px solid var(--vscode-button-border);
+      background-color: var(--vscode-button-secondaryBackground);
+      color: var(--vscode-button-secondaryForeground);
+      border-radius: 4px;
+      cursor: pointer;
+      font-size: 11px;
+      display: inline-flex;
+      align-items: center;
+      gap: 4px;
+    }
+
+    .action-btn:hover {
+      background-color: var(--vscode-button-secondaryHoverBackground);
+    }
+
+    .action-btn.primary {
+      background-color: var(--vscode-button-background);
+      color: var(--vscode-button-foreground);
+    }
+
+    .action-btn.primary:hover {
+      background-color: var(--vscode-button-hoverBackground);
+    }
+
+    .entry-journal {
+      color: var(--vscode-textPreformat-foreground);
+      font-size: 12px;
+      font-style: italic;
+      margin-bottom: 6px;
+    }
+
+    .abstract-toggle {
+      color: var(--vscode-textLink-foreground);
+      cursor: pointer;
+      font-size: 12px;
+      margin-top: 4px;
+      display: inline-block;
+    }
+
+    .abstract-toggle:hover {
+      text-decoration: underline;
+    }
+
+    .abstract-full {
+      display: none;
+    }
+
+    .abstract-full.show {
+      display: block;
+    }
+
+    .abstract-preview {
+      display: block;
+    }
+
+    .abstract-preview.hide {
+      display: none;
+    }
+
+    .doi-link {
+      color: var(--vscode-textLink-foreground);
+      font-size: 11px;
+      font-family: var(--vscode-editor-font-family);
+    }
+
+    .doi-link:hover {
+      text-decoration: underline;
+    }
   </style>
 </head>
 <body>
@@ -305,22 +418,90 @@ export class LiteratureIndexViewer {
         const abstract = entry.abstract || '';
         const keywords = entry.keywords || [];
         const filePath = entry.file_path || '';
+        const journal = entry.journal || '';
+        const doi = entry.doi || '';
+        const articleId = entry.extra_fields?.article_id || '';
+        const url = entry.url || '';
+
+        // 构建 DOI/文章链接
+        let doiLink = '';
+        if (doi) {
+          doiLink = \`<a class="doi-link" href="#" onclick="openUrl('https://doi.org/\${doi}'); return false;">DOI: \${doi}</a>\`;
+        } else if (articleId) {
+          // 如果 articleId 看起来像 DOI
+          if (articleId.includes('/')) {
+            doiLink = \`<a class="doi-link" href="#" onclick="openUrl('https://doi.org/\${articleId}'); return false;">DOI: \${articleId}</a>\`;
+          } else {
+            doiLink = \`<span class="doi-link">ID: \${articleId}</span>\`;
+          }
+        }
+        if (url) {
+          doiLink += \` <a class="doi-link" href="#" onclick="openUrl('\${url}'); return false;">🔗 \${isChinese ? '链接' : 'Link'}</a>\`;
+        }
+
+        // 构建摘要显示
+        let abstractHtml = '';
+        if (abstract) {
+          const needsTruncate = abstract.length > 300;
+          abstractHtml = \`
+            <div class="entry-abstract">
+              <div class="abstract-preview" id="abstract-preview-\${index}">\${abstract.substring(0, 300)}\${needsTruncate ? '...' : ''}</div>
+              <div class="abstract-full" id="abstract-full-\${index}">\${abstract}</div>
+              \${needsTruncate ? \`<span class="abstract-toggle" onclick="toggleAbstract(\${index})">\${isChinese ? '展开全文' : 'Show more'}</span>\` : ''}
+            </div>
+          \`;
+        }
 
         div.innerHTML = \`
           <div class="entry-header">
             <div class="entry-title" onclick="openFile('\${filePath}')">\${title}</div>
             \${year ? \`<span class="entry-year">\${year}</span>\` : ''}
           </div>
+          \${journal ? \`<div class="entry-journal">\${journal}</div>\` : ''}
           \${authors.length > 0 ? \`<div class="entry-authors">\${authors.join(', ')}</div>\` : ''}
-          \${abstract ? \`<div class="entry-abstract">\${abstract.substring(0, 300)}\${abstract.length > 300 ? '...' : ''}</div>\` : ''}
+          \${abstractHtml}
           <div class="entry-meta">
             \${keywords.slice(0, 5).map(k => \`<span class="keyword">\${k}</span>\`).join('')}
           </div>
           \${filePath ? \`<div class="file-path">📄 \${filePath}</div>\` : ''}
+          \${doiLink ? \`<div style="margin-top: 6px;">\${doiLink}</div>\` : ''}
+          <div class="entry-actions">
+            <button class="action-btn primary" onclick="openFile('\${filePath}')">
+              📖 \${isChinese ? '打开全文' : 'Open'}
+            </button>
+            \${doi || articleId ? \`<button class="action-btn" onclick="openUrl('https://doi.org/\${doi || articleId}')">🔗 DOI</button>\` : ''}
+            \${url ? \`<button class="action-btn" onclick="openUrl('\${url}')">🌐 \${isChinese ? '网页' : 'Web'}</button>\` : ''}
+          </div>
         \`;
 
         container.appendChild(div);
       });
+    }
+
+    function toggleAbstract(index) {
+      const preview = document.getElementById('abstract-preview-' + index);
+      const full = document.getElementById('abstract-full-' + index);
+      const toggle = preview.parentElement.querySelector('.abstract-toggle');
+
+      if (full.classList.contains('show')) {
+        full.classList.remove('show');
+        preview.classList.remove('hide');
+        toggle.textContent = isChinese ? '展开全文' : 'Show more';
+      } else {
+        full.classList.add('show');
+        preview.classList.add('hide');
+        toggle.textContent = isChinese ? '收起' : 'Show less';
+      }
+    }
+
+    function openUrl(url) {
+      if (url) {
+        const vscode = acquireVsCodeApi();
+        vscode.postMessage({
+          command: 'openUrl',
+          url: url
+        });
+      }
     }
 
     function openFile(filePath) {
@@ -368,13 +549,14 @@ export class LiteratureIndexViewer {
         const title = (entry.title || '').toLowerCase();
         const authors = (entry.authors || []).join(' ').toLowerCase();
         const keywords = (entry.keywords || []).join(' ').toLowerCase();
-        return title.includes(query) || authors.includes(query) || keywords.includes(query);
+        const abstract = (entry.abstract || '').toLowerCase();
+        return title.includes(query) || authors.includes(query) || keywords.includes(query) || abstract.includes(query);
       });
       applySort(filtered);
     });
 
-    // 初始渲染
-    renderEntries(entries);
+    // 初始渲染（应用当前排序设置）
+    applySort(entries);
   </script>
 </body>
 </html>`;
