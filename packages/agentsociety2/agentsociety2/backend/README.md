@@ -197,18 +197,32 @@ response2 = requests.post(
 result2 = response2.json()
 ```
 
+### 3. Agent Skills 管理 (`/api/v1/agent-skills`)
+
+| 端点 | 方法 | 功能 |
+|------|------|------|
+| `/api/v1/agent-skills/list` | GET | 列出所有 agent skill（builtin + custom） |
+| `/api/v1/agent-skills/enable` | POST | 启用指定 skill |
+| `/api/v1/agent-skills/disable` | POST | 禁用指定 skill |
+| `/api/v1/agent-skills/scan` | POST | 扫描 workspace/custom/skills/ 下的自定义 skill |
+| `/api/v1/agent-skills/import` | POST | 从外部路径导入 skill 目录 |
+| `/api/v1/agent-skills/reload` | POST | 热重载指定 skill 的 Python 模块 |
+| `/api/v1/agent-skills/{name}/info` | GET | 获取 SKILL.md 内容和元数据 |
+| `/api/v1/agent-skills/remove` | POST | 移除自定义 skill |
+
 ## 项目结构
 
 ```
 backend/
 ├── __init__.py
-├── main.py                    # FastAPI应用入口
+├── app.py                     # FastAPI应用入口
 ├── models.py                  # Pydantic模型定义
 ├── run.py                     # 便捷启动脚本
 ├── README.md                  # 使用文档
 ├── routers/                   # API路由
 │   ├── __init__.py
-│   └── chat.py               # LLM对话路由
+│   ├── chat.py               # LLM对话路由
+│   └── agent_skills.py       # Agent Skills 管理路由
 ├── services/                  # 业务逻辑服务层
 │   ├── __init__.py
 │   ├── completion_service.py # LLM对话服务

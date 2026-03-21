@@ -1,3 +1,35 @@
+"""环境模块基类。
+
+本模块提供环境模块的基类 :class:`EnvBase` 和工具注册装饰器 :func:`tool`。
+
+环境模块定义智能体可执行的操作和可观察的状态。通过 ``@tool`` 装饰器
+注册方法为可调用工具，供 Router 调用执行。
+
+工具类型
+========
+
+- **常规工具**: ``@tool(readonly=False)`` — 可修改环境状态
+- **只读工具**: ``@tool(readonly=True)`` — 仅查询，不修改状态
+- **观察工具**: ``@tool(readonly=True, kind="observe")`` — 每个 step 自动调用
+- **统计工具**: ``@tool(readonly=True, kind="statistics")`` — 统计信息
+
+Example::
+
+    from agentsociety2.env import EnvBase, tool
+
+    class MyEnv(EnvBase):
+        @tool(readonly=True, kind="observe")
+        def get_location(self, agent_id: int) -> str:
+            '''获取 Agent 当前位置'''
+            return self._locations.get(agent_id, "unknown")
+
+        @tool(readonly=False)
+        def move(self, agent_id: int, destination: str) -> str:
+            '''移动 Agent 到指定位置'''
+            self._locations[agent_id] = destination
+            return f"Moved to {destination}"
+"""
+
 import functools
 import inspect
 import json
@@ -395,8 +427,30 @@ It contains no functions or methods.
 
         Returns:
             A string description of the environment module for MCP registration.
+
+        Format:
+            The description uses Markdown format with the following structure:
+            - Class name and brief description
+            - Detailed description section
+            - Initialization parameters (if applicable)
+            - Example config or JSON schema (if applicable)
         """
-        return f"{cls.__name__}: {cls.__doc__ or 'No description available'}"
+        # Check if this is the base class being called directly
+        if cls is EnvBase:
+            return f"""{cls.__name__}: Abstract base class for environment modules.
+
+**Description:** {cls.__doc__ or 'No description available'}
+
+**Note:** This is an abstract base class. Do not use it directly. Subclasses should override this method to provide specific descriptions, initialization parameters, and usage examples.
+"""
+        else:
+            # For subclasses that don't override this method
+            return f"""{cls.__name__}: Environment module.
+
+**Description:** {cls.__doc__ or 'No description available'}
+
+**Note:** This subclass has not provided a detailed description. Please refer to the class documentation or source code for initialization parameters and usage.
+"""
 
     @classmethod
     def get_agent_skills_dir(cls) -> "Path | None":

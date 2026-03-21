@@ -185,14 +185,12 @@ agent/skills/
 ```
 
 Each skill has:
-- `SKILL.md` — YAML frontmatter (name, description, auto_load, triggers) + behavior docs
+- `SKILL.md` — YAML frontmatter (name, description, priority, requires/provides) + behavior docs
 - `scripts/<name>.py` — exports `async def run(agent, ctx)`
 
-Skills are classified by `auto_load`（pipeline 三层执行）:
-- **always** — 每步必执行的基础感知（如 observation）
-- **dynamic** — LLM 阅读 skill 描述后自主选择激活（如 needs, cognition, plan）
-- **finalize** — 所有 dynamic 完成后的收尾操作（如 memory flush）
-- **manual** — 仅在显式请求时加载
+Skills follow metadata-first progressive selection:
+- selection stage reads compact metadata (name/description/priority/requires/provides)
+- execution stage loads and runs only LLM-selected skills
 
 Custom skills can be placed in `workspace/custom/skills/` and hot-loaded at runtime via the API or VSCode extension.
 

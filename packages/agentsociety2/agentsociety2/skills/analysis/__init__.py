@@ -1,5 +1,35 @@
-"""
-分析子智能体
+"""数据分析子智能体模块。
+
+本模块提供实验结果分析和报告生成的完整工具链，包含两个核心子智能体：
+
+- :class:`InsightAgent` — 洞察智能体，生成 insights、findings、conclusions 和 recommendations
+- :class:`DataExplorer` — 数据探索智能体，决定分析策略、选表选工具、生成图表
+
+核心功能：
+
+- **数据分析**: 使用 LLM 和代码执行器分析 SQLite 数据库
+- **可视化生成**: 自动生成图表和 EDA 报告
+- **报告生成**: 产出结构化的分析报告（支持中英双语）
+
+主要入口函数：
+
+- :func:`run_analysis` — 运行完整的分析流程
+- :func:`run_synthesis` — 生成综合报告
+
+Example::
+
+    from agentsociety2.skills.analysis import run_analysis, Analyzer
+
+    # 使用便捷函数
+    result = await run_analysis(
+        workspace_path=Path("./workspace"),
+        hypothesis_id="1",
+        experiment_id="1",
+    )
+
+    # 使用 Analyzer 类
+    analyzer = Analyzer(workspace_path=Path("./workspace"))
+    await analyzer.analyze(hypothesis_id="1", experiment_id="1")
 """
 
 from .models import (

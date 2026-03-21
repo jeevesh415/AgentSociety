@@ -169,7 +169,20 @@ export function activate(context: vscode.ExtensionContext) {
         return;
       }
 
-      const fileName = item.label || item.filePath.split(/[/\\]/).pop();
+      const filePath = item.filePath;
+      const fileName = item.label || filePath.split(/[/\\]/).pop();
+
+      // 检查是否是目录
+      const isDirectory = fs.existsSync(filePath) && fs.statSync(filePath).isDirectory();
+
+      // 对于目录，不应该使用此命令删除（目录删除需要特殊处理）
+      if (isDirectory) {
+        vscode.window.showWarningMessage(
+          `"${fileName}" 是一个目录，请使用专门的删除命令或手动删除。`
+        );
+        return;
+      }
+
       const confirm = await vscode.window.showWarningMessage(
         localize('extension.deleteLiterature.confirm', fileName),
         { modal: true },
@@ -183,7 +196,7 @@ export function activate(context: vscode.ExtensionContext) {
 
       try {
         // Delete the file
-        fs.unlinkSync(item.filePath);
+        fs.unlinkSync(filePath);
         vscode.window.showInformationMessage(`Deleted: ${fileName}`);
 
         // Update literature_index.json if it exists
@@ -193,7 +206,7 @@ export function activate(context: vscode.ExtensionContext) {
           if (fs.existsSync(indexPath)) {
             try {
               const indexData = JSON.parse(fs.readFileSync(indexPath, 'utf-8'));
-              const relativePath = path.relative(workspaceFolder.uri.fsPath, item.filePath).replace(/\\/g, '/');
+              const relativePath = path.relative(workspaceFolder.uri.fsPath, filePath).replace(/\\/g, '/');
               indexData.entries = (indexData.entries || []).filter((e: any) => e.file_path !== relativePath);
               indexData.updated_at = new Date().toISOString();
               fs.writeFileSync(indexPath, JSON.stringify(indexData, null, 2), 'utf-8');

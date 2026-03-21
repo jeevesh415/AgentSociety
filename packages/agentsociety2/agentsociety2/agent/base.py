@@ -1,3 +1,40 @@
+"""智能体基类模块。
+
+本模块提供智能体的抽象基类 :class:`AgentBase`，所有智能体实现都应继承此类。
+
+核心功能：
+
+- **LLM 交互**: 通过 litellm Router 实现与各种 LLM 的统一交互
+- **环境交互**: 通过 :class:`~agentsociety2.env.RouterBase` 与仿真环境交互
+- **回放写入**: 通过 :class:`~agentsociety2.storage.ReplayWriter` 记录仿真状态
+- **Token 统计**: 追踪 LLM 调用的 token 使用量
+- **Skill 状态管理**: 支持动态 skill 状态的注册与访问
+
+子类必须实现的抽象方法：
+
+- :meth:`ask` — 处理问题并返回响应
+- :meth:`step` — 执行一个模拟步骤
+- :meth:`dump` — 序列化智能体状态
+- :meth:`load` — 从字典恢复智能体状态
+
+Example::
+
+    from agentsociety2.agent import AgentBase
+
+    class MyAgent(AgentBase):
+        async def ask(self, message: str, readonly: bool = True) -> str:
+            return f"Received: {message}"
+
+        async def step(self, tick: int, t: datetime) -> str:
+            return "Step completed"
+
+        async def dump(self) -> dict:
+            return {"id": self.id}
+
+        async def load(self, dump_data: dict):
+            pass
+"""
+
 import asyncio
 import logging
 import os
@@ -133,23 +170,39 @@ class AgentBase(ABC):
         self._token_usage_stats: dict[str, TokenUsageStats] = {}
         self._replay_writer = replay_writer
 
+        # ── Skill 动态状态容器 ──
+        # skills 可以通过 set_skill_state/get_skill_state 管理自己的状态
+        self._skill_states: dict[str, Any] = {}
+
     @classmethod
     def mcp_description(cls) -> str:
         """
         Return a description text for MCP agent module candidate list.
         Includes parameter descriptions.
+
+        Returns:
+            A string description of the agent class for MCP registration.
+
+        Format:
+            The description uses Markdown format with the following structure:
+            - Class name and brief description
+            - Detailed description section
+            - Initialization parameters
+            - Example config or JSON schema (if applicable)
         """
-        description = f"""{cls.__name__}: Base agent class.
+        # Check if this is the base class being called directly
+        if cls is AgentBase:
+            description = f"""{cls.__name__}: Abstract base class for agents.
 
 **Description:** {cls.__doc__ or 'No description available'}
 
 **Initialization Parameters:**
 - id (int): The unique identifier for the agent.
 - profile (dict | Any): The profile of the agent. Can be a dictionary with agent attributes (name, gender, age, education, occupation, marriage_status, persona, background_story, etc.) or any other type that the agent subclass can parse.
-- name (str, optional): Display name. If omitted, taken from profile["name"] or "Agent_{id}".
+- name (str, optional): Display name. If omitted, taken from profile["name"] or "Agent_{{id}}".
 - replay_writer (ReplayWriter, optional): Replay writer for storing simulation state. Can also be set later via set_replay_writer().
 
-**Note:** Agent subclasses should override this method to provide specific descriptions and schemas for their profile format.
+**Note:** This is an abstract base class. Do not use it directly. Subclasses should override this method to provide specific descriptions and schemas for their profile format.
 
 **Example initialization config:**
 ```json
@@ -167,6 +220,20 @@ class AgentBase(ABC):
   }}
 }}
 ```
+"""
+        else:
+            # For subclasses that don't override this method
+            description = f"""{cls.__name__}: Agent class.
+
+**Description:** {cls.__doc__ or 'No description available'}
+
+**Initialization Parameters:**
+- id (int): The unique identifier for the agent.
+- profile (dict | Any): The profile of the agent. Can be a dictionary with agent attributes or any other type that the agent subclass can parse.
+- name (str, optional): Display name. If omitted, taken from profile["name"] or "Agent_{{id}}".
+- replay_writer (ReplayWriter, optional): Replay writer for storing simulation state.
+
+**Note:** This subclass has not provided a detailed description. Please refer to the class documentation or source code for specific initialization parameters and profile format.
 """
         return description
 
@@ -265,6 +332,72 @@ class AgentBase(ABC):
 
     def reset_token_usages(self):
         self._token_usage_stats.clear()
+
+    # ==================== Skill State Management ====================
+
+    def set_skill_state(self, skill_name: str, state: Any) -> None:
+        """设置某个 skill 的状态。
+
+        由 skill 的 run() 函数调用，用于注册或更新自己的状态。
+
+        Args:
+            skill_name: skill 名称
+            state: 该 skill 的状态对象（可以是任意类型）
+
+        Example:
+            在 skill 的 run() 函数中::
+
+                async def run(agent, ctx):
+                    # 首次运行时初始化状态
+                    if agent.get_skill_state("observation") is None:
+                        agent.set_skill_state("observation", {"last_observation": None})
+                    # 执行逻辑...
+        """
+        self._skill_states[skill_name] = state
+
+    def get_skill_state(self, skill_name: str) -> Any:
+        """获取某个 skill 的状态。
+
+        Args:
+            skill_name: skill 名称
+
+        Returns:
+            该 skill 的状态对象，如果不存在则返回 None
+        """
+        return self._skill_states.get(skill_name)
+
+    def has_skill_state(self, skill_name: str) -> bool:
+        """检查某个 skill 是否有状态。
+
+        Args:
+            skill_name: skill 名称
+
+        Returns:
+            是否存在该 skill 的状态
+        """
+        return skill_name in self._skill_states
+
+    def clear_skill_state(self, skill_name: str) -> bool:
+        """清除某个 skill 的状态。
+
+        Args:
+            skill_name: skill 名称
+
+        Returns:
+            是否成功清除（如果不存在则返回 False）
+        """
+        if skill_name in self._skill_states:
+            del self._skill_states[skill_name]
+            return True
+        return False
+
+    def get_all_skill_states(self) -> dict[str, Any]:
+        """获取所有 skill 状态的副本。
+
+        Returns:
+            所有 skill 状态的字典副本
+        """
+        return self._skill_states.copy()
 
     @overload
     async def acompletion(

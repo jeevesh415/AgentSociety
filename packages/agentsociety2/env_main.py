@@ -4,7 +4,6 @@ from datetime import datetime, timedelta
 from typing import cast
 
 from agentsociety2.agent.base import AgentBase
-from agentsociety2.agent.donothing import DoNothingAgent
 from agentsociety2.contrib.env.global_information import GlobalInformationEnv
 from agentsociety2.contrib.env.mobility_space import MobilitySpace
 from agentsociety2.env import EnvBase, EnvLLM, CodeGenRouter
@@ -101,7 +100,7 @@ async def main():
             },
         ],
     )
-    
+
     env_modules = cast(list[EnvBase], [mobility, global_info])
 
     env_router = CodeGenRouter(env_modules=env_modules)

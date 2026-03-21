@@ -549,7 +549,7 @@ Agent Skills 是 PersonAgent 的认知能力模块，采用渐进式加载设计
 
 Agent Skills 采用两阶段加载：
 
-1. **扫描阶段**：只解析 SKILL.md 的 YAML frontmatter 元数据（name, description, priority, auto_load），不读取完整文件内容
+1. **扫描阶段**：只解析 SKILL.md 的 YAML frontmatter 元数据（name, description, priority, requires, provides），不读取完整文件内容
 2. **启用阶段**：当 skill 被选中或请求详情时，才加载完整的 skill_md 和 Python 模块
 
 这种设计优化了内存使用，特别是当存在大量 skill 时。

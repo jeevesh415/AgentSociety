@@ -1,3 +1,35 @@
+"""仿真社会编排模块。
+
+本模块提供 :class:`AgentSociety` 类，是 AgentSociety2 框架的核心编排器，
+负责协调智能体和环境模块的仿真运行。
+
+主要功能：
+
+- **仿真初始化**: 初始化智能体、环境路由器和回放写入器
+- **时间推进**: 通过 ``step()`` 和 ``run()`` 方法推进仿真时间
+- **交互接口**: 提供 ``ask()`` 和 ``intervene()`` 方法与仿真交互
+- **状态持久化**: 支持 ``dump()`` 和 ``load()`` 保存和恢复仿真状态
+
+Example::
+
+    from datetime import datetime
+    from pathlib import Path
+    from agentsociety2.society import AgentSociety
+
+    # 创建仿真
+    society = AgentSociety(
+        agents=[agent1, agent2],
+        env_router=router,
+        start_t=datetime.now(),
+        run_dir=Path("./run"),
+    )
+
+    # 使用上下文管理器运行
+    async with society:
+        await society.run(num_steps=100, tick=3600)
+        answer = await society.ask("当前有多少智能体？")
+"""
+
 import asyncio
 from datetime import datetime, timedelta
 from pathlib import Path
@@ -12,6 +44,36 @@ __all__ = ["AgentSociety"]
 
 
 class AgentSociety:
+    """仿真社会编排器，协调智能体和环境模块的仿真运行。
+
+    AgentSociety 是框架的核心类，负责管理仿真生命周期：
+
+    - 初始化智能体和环境模块
+    - 推进仿真时间
+    - 处理外部问答和干预请求
+    - 持久化仿真状态
+
+    Attributes:
+        current_time: 当前仿真时间
+        step_count: 已执行的仿真步数
+
+    Example::
+
+        from datetime import datetime
+        from pathlib import Path
+        from agentsociety2.society import AgentSociety
+
+        society = AgentSociety(
+            agents=[agent1, agent2],
+            env_router=router,
+            start_t=datetime.now(),
+            run_dir=Path("./run"),
+        )
+
+        async with society:
+            await society.run(num_steps=100, tick=3600)
+    """
+
     def __init__(
         self,
         agents: Sequence[AgentBase],

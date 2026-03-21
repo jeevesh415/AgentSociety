@@ -219,7 +219,29 @@ async def get_experiment_info(
     experiment_id: str,
     workspace_path: str = Query(..., description="Workspace root path"),
 ) -> ExperimentInfo:
-    """Get basic information about an experiment."""
+    """
+    获取实验基本信息
+
+    返回指定实验的基本信息，包括总步数、时间范围、Agent数量等。
+
+    Args:
+        hypothesis_id: 假设ID
+        experiment_id: 实验ID
+        workspace_path: 工作区根目录路径
+
+    Returns:
+        ExperimentInfo: 实验基本信息，包含：
+            - hypothesis_id: 假设ID
+            - experiment_id: 实验ID
+            - total_steps: 总模拟步数
+            - start_time: 开始时间
+            - end_time: 结束时间
+            - agent_count: Agent数量
+            - has_social: 是否包含社交媒体数据
+
+    Raises:
+        HTTPException: 404 - 数据库不存在
+    """
     db_path = get_db_path(workspace_path, hypothesis_id, experiment_id)
 
     async for session in get_db_session(db_path):
@@ -263,7 +285,24 @@ async def get_timeline(
     experiment_id: str,
     workspace_path: str = Query(..., description="Workspace root path"),
 ) -> List[TimelinePoint]:
-    """Get the experiment timeline (all time steps)."""
+    """
+    获取实验时间线
+
+    返回实验所有模拟时间步，用于回放功能的时间轴展示。
+
+    Args:
+        hypothesis_id: 假设ID
+        experiment_id: 实验ID
+        workspace_path: 工作区根目录路径
+
+    Returns:
+        List[TimelinePoint]: 时间点列表，每个时间点包含：
+            - step: 步骤编号
+            - t: 时间戳
+
+    Raises:
+        HTTPException: 404 - 数据库不存在
+    """
     db_path = get_db_path(workspace_path, hypothesis_id, experiment_id)
 
     async for session in get_db_session(db_path):
@@ -286,7 +325,22 @@ async def get_agent_profiles(
     experiment_id: str,
     workspace_path: str = Query(..., description="Workspace root path"),
 ) -> List[AgentProfile]:
-    """Get all agent profiles."""
+    """
+    获取所有Agent配置
+
+    返回实验中所有Agent的配置信息，用于回放界面展示Agent列表。
+
+    Args:
+        hypothesis_id: 假设ID
+        experiment_id: 实验ID
+        workspace_path: 工作区根目录路径
+
+    Returns:
+        List[AgentProfile]: Agent配置列表
+
+    Raises:
+        HTTPException: 404 - 数据库不存在
+    """
     db_path = get_db_path(workspace_path, hypothesis_id, experiment_id)
 
     async for session in get_db_session(db_path):
@@ -306,7 +360,30 @@ async def get_agents_status_at_step(
         None, description="Specific step to query. If not provided, returns the latest."
     ),
 ) -> List[AgentStatusResponse]:
-    """Get all agents' status at a specific step."""
+    """
+    获取指定步骤所有Agent状态
+
+    返回某个模拟步骤下所有Agent的状态快照。
+
+    Args:
+        hypothesis_id: 假设ID
+        experiment_id: 实验ID
+        workspace_path: 工作区根目录路径
+        step: 可选，指定查询的步骤编号，不提供则返回最新状态
+
+    Returns:
+        List[AgentStatusResponse]: Agent状态列表，每个状态包含：
+            - id: Agent ID
+            - step: 步骤编号
+            - t: 时间戳
+            - lng: 经度（需要MobilitySpace）
+            - lat: 纬度（需要MobilitySpace）
+            - action: 当前动作
+            - status: 状态详情字典
+
+    Raises:
+        HTTPException: 404 - 数据库不存在
+    """
     db_path = get_db_path(workspace_path, hypothesis_id, experiment_id)
 
     async for session in get_db_session(db_path):
@@ -389,7 +466,23 @@ async def get_agent_status_history(
     agent_id: int,
     workspace_path: str = Query(..., description="Workspace root path"),
 ) -> List[AgentStatusResponse]:
-    """Get the complete status history of a specific agent."""
+    """
+    获取指定Agent的完整状态历史
+
+    返回某个Agent在整个实验过程中的状态变化记录。
+
+    Args:
+        hypothesis_id: 假设ID
+        experiment_id: 实验ID
+        agent_id: Agent的唯一标识符
+        workspace_path: 工作区根目录路径
+
+    Returns:
+        List[AgentStatusResponse]: Agent状态历史列表
+
+    Raises:
+        HTTPException: 404 - 数据库不存在
+    """
     db_path = get_db_path(workspace_path, hypothesis_id, experiment_id)
 
     async for session in get_db_session(db_path):
@@ -467,7 +560,32 @@ async def get_agent_trajectory(
     start_step: Optional[int] = Query(None, description="Start step (inclusive)"),
     end_step: Optional[int] = Query(None, description="End step (inclusive)"),
 ) -> List[Dict[str, Any]]:
-    """Get the movement trajectory of a specific agent (requires MobilitySpace)."""
+    """
+    获取Agent移动轨迹
+
+    返回指定Agent的移动轨迹数据（需要环境包含MobilitySpace模块）。
+
+    Args:
+        hypothesis_id: 假设ID
+        experiment_id: 实验ID
+        agent_id: Agent的唯一标识符
+        workspace_path: 工作区根目录路径
+        start_step: 可选，起始步骤（包含）
+        end_step: 可选，结束步骤（包含）
+
+    Returns:
+        List[Dict[str, Any]]: 轨迹点列表，每个点包含：
+            - step: 步骤编号
+            - t: 时间戳
+            - lng: 经度
+            - lat: 纬度
+
+    Note:
+        如果实验未使用MobilitySpace模块，返回空列表。
+
+    Raises:
+        HTTPException: 404 - 数据库不存在
+    """
     db_path = get_db_path(workspace_path, hypothesis_id, experiment_id)
 
     async for session in get_db_session(db_path):
@@ -510,7 +628,27 @@ async def get_agent_dialogs(
         None, description="Dialog type filter: 0=thought, 1=agent-to-agent, 2=user"
     ),
 ) -> List[AgentDialog]:
-    """Get dialog records for a specific agent."""
+    """
+    获取Agent对话记录
+
+    返回指定Agent的对话/思考记录。
+
+    Args:
+        hypothesis_id: 假设ID
+        experiment_id: 实验ID
+        agent_id: Agent的唯一标识符
+        workspace_path: 工作区根目录路径
+        dialog_type: 可选，对话类型过滤：
+            - 0: 思考/反思 (thought)
+            - 1: Agent间对话
+            - 2: 与用户对话
+
+    Returns:
+        List[AgentDialog]: 对话记录列表
+
+    Raises:
+        HTTPException: 404 - 数据库不存在
+    """
     db_path = get_db_path(workspace_path, hypothesis_id, experiment_id)
 
     async for session in get_db_session(db_path):
@@ -537,7 +675,24 @@ async def get_dialogs_at_step(
         description="Dialog type filter: 0=反思 (thought/reflection); V2 only has type 0",
     ),
 ) -> List[AgentDialog]:
-    """Get all dialog records at a specific step."""
+    """
+    获取指定步骤所有对话记录
+
+    返回某个模拟步骤下所有Agent的对话/思考记录。
+
+    Args:
+        hypothesis_id: 假设ID
+        experiment_id: 实验ID
+        step: 步骤编号
+        workspace_path: 工作区根目录路径
+        dialog_type: 可选，对话类型过滤（V2版本仅支持type 0: 反思）
+
+    Returns:
+        List[AgentDialog]: 对话记录列表
+
+    Raises:
+        HTTPException: 404 - 数据库不存在
+    """
     db_path = get_db_path(workspace_path, hypothesis_id, experiment_id)
 
     async for session in get_db_session(db_path):
@@ -572,7 +727,31 @@ async def get_social_user(
     user_id: int,
     workspace_path: str = Query(..., description="Workspace root path"),
 ) -> SocialUser:
-    """Get social media profile for a user (table owned by social_media module)."""
+    """
+    获取社交媒体用户信息
+
+    返回指定用户的社交媒体账号信息。
+
+    Args:
+        hypothesis_id: 假设ID
+        experiment_id: 实验ID
+        user_id: 用户ID（对应Agent ID）
+        workspace_path: 工作区根目录路径
+
+    Returns:
+        SocialUser: 社交媒体用户信息，包含：
+            - user_id: 用户ID
+            - username: 用户名
+            - bio: 个人简介
+            - created_at: 创建时间
+            - followers_count: 粉丝数
+            - following_count: 关注数
+            - posts_count: 发帖数
+            - profile: 详细配置
+
+    Raises:
+        HTTPException: 404 - 用户不存在或数据库无社交媒体表
+    """
     db_path = get_db_path(workspace_path, hypothesis_id, experiment_id)
 
     async for session in get_db_session(db_path):
@@ -603,7 +782,38 @@ async def get_social_posts(
     ),
     limit: int = Query(200, ge=1, le=500),
 ) -> List[SocialPost]:
-    """Get posts from a social media user (table owned by social_media module)."""
+    """
+    获取用户的社交媒体帖子
+
+    返回指定用户发布的所有社交媒体帖子。
+
+    Args:
+        hypothesis_id: 假设ID
+        experiment_id: 实验ID
+        user_id: 用户ID
+        workspace_path: 工作区根目录路径
+        max_step: 可选，只返回步骤号<=max_step的帖子
+        limit: 返回数量限制，默认200，范围1-500
+
+    Returns:
+        List[SocialPost]: 帖子列表，每个帖子包含：
+            - post_id: 帖子ID
+            - step: 发布步骤
+            - author_id: 作者ID
+            - content: 帖子内容
+            - post_type: 帖子类型
+            - parent_id: 父帖子ID（转发时）
+            - created_at: 创建时间
+            - likes_count: 点赞数
+            - reposts_count: 转发数
+            - comments_count: 评论数
+            - view_count: 浏览数
+            - tags: 标签
+            - topic_category: 话题分类
+
+    Raises:
+        HTTPException: 404 - 数据库不存在
+    """
     db_path = get_db_path(workspace_path, hypothesis_id, experiment_id)
 
     async for session in get_db_session(db_path):
@@ -634,7 +844,24 @@ async def get_all_social_posts(
     ),
     limit: int = Query(500, ge=1, le=2000),
 ) -> List[SocialPost]:
-    """Get all posts from all users (table owned by social_media module)."""
+    """
+    获取所有社交媒体帖子
+
+    返回实验中所有用户发布的社交媒体帖子。
+
+    Args:
+        hypothesis_id: 假设ID
+        experiment_id: 实验ID
+        workspace_path: 工作区根目录路径
+        max_step: 可选，只返回步骤号<=max_step的帖子
+        limit: 返回数量限制，默认500，范围1-2000
+
+    Returns:
+        List[SocialPost]: 所有帖子列表
+
+    Raises:
+        HTTPException: 404 - 数据库不存在
+    """
     db_path = get_db_path(workspace_path, hypothesis_id, experiment_id)
 
     async for session in get_db_session(db_path):
@@ -662,7 +889,31 @@ async def get_post_comments(
     post_id: int,
     workspace_path: str = Query(..., description="Workspace root path"),
 ) -> List[SocialComment]:
-    """Get all comments for a post (table owned by social_media module)."""
+    """
+    获取帖子的所有评论
+
+    返回指定帖子的所有评论。
+
+    Args:
+        hypothesis_id: 假设ID
+        experiment_id: 实验ID
+        post_id: 帖子ID
+        workspace_path: 工作区根目录路径
+
+    Returns:
+        List[SocialComment]: 评论列表，每条评论包含：
+            - comment_id: 评论ID
+            - step: 评论步骤
+            - post_id: 所属帖子ID
+            - author_id: 评论者ID
+            - content: 评论内容
+            - parent_comment_id: 父评论ID（回复时）
+            - created_at: 创建时间
+            - likes_count: 点赞数
+
+    Raises:
+        HTTPException: 404 - 数据库不存在
+    """
     db_path = get_db_path(workspace_path, hypothesis_id, experiment_id)
 
     async for session in get_db_session(db_path):
@@ -693,7 +944,32 @@ async def get_social_direct_messages(
     ),
     limit: int = Query(500, ge=1, le=2000),
 ) -> List[SocialDirectMessage]:
-    """Get direct messages for a user (table owned by social_media module)."""
+    """
+    获取用户的私信
+
+    返回指定用户发送和接收的所有私信。
+
+    Args:
+        hypothesis_id: 假设ID
+        experiment_id: 实验ID
+        user_id: 用户ID
+        workspace_path: 工作区根目录路径
+        max_step: 可选，只返回步骤号<=max_step的消息
+        limit: 返回数量限制，默认500，范围1-2000
+
+    Returns:
+        List[SocialDirectMessage]: 私信列表，每条私信包含：
+            - message_id: 消息ID
+            - step: 消息步骤
+            - from_user_id: 发送者ID
+            - to_user_id: 接收者ID
+            - content: 消息内容
+            - created_at: 创建时间
+            - read: 已读状态
+
+    Raises:
+        HTTPException: 404 - 数据库不存在
+    """
     db_path = get_db_path(workspace_path, hypothesis_id, experiment_id)
 
     async for session in get_db_session(db_path):
@@ -726,7 +1002,32 @@ async def get_social_group_messages(
     ),
     limit: int = Query(500, ge=1, le=2000),
 ) -> List[SocialGroupMessage]:
-    """Get group messages for a user (tables owned by social_media module)."""
+    """
+    获取用户的群消息
+
+    返回指定用户发送的所有群消息。
+
+    Args:
+        hypothesis_id: 假设ID
+        experiment_id: 实验ID
+        user_id: 用户ID
+        workspace_path: 工作区根目录路径
+        max_step: 可选，只返回步骤号<=max_step的消息
+        limit: 返回数量限制，默认500，范围1-2000
+
+    Returns:
+        List[SocialGroupMessage]: 群消息列表，每条消息包含：
+            - message_id: 消息ID
+            - step: 消息步骤
+            - group_id: 群组ID
+            - from_user_id: 发送者ID
+            - content: 消息内容
+            - created_at: 创建时间
+            - group_name: 群组名称
+
+    Raises:
+        HTTPException: 404 - 数据库不存在
+    """
     db_path = get_db_path(workspace_path, hypothesis_id, experiment_id)
 
     async for session in get_db_session(db_path):
@@ -767,7 +1068,24 @@ async def get_social_network(
     experiment_id: str,
     workspace_path: str = Query(..., description="Workspace root path"),
 ) -> SocialNetwork:
-    """Get social network graph (tables owned by social_media module)."""
+    """
+    获取社交网络图
+
+    返回社交媒体网络的节点和边，用于可视化社交关系图。
+
+    Args:
+        hypothesis_id: 假设ID
+        experiment_id: 实验ID
+        workspace_path: 工作区根目录路径
+
+    Returns:
+        SocialNetwork: 社交网络图，包含：
+            - nodes: 节点列表（用户），每个节点包含 user_id 和 username
+            - edges: 边列表（关注关系），每条边包含 source 和 target 用户ID
+
+    Raises:
+        HTTPException: 404 - 数据库不存在
+    """
     db_path = get_db_path(workspace_path, hypothesis_id, experiment_id)
 
     async for session in get_db_session(db_path):
@@ -811,7 +1129,27 @@ async def get_social_activity_at_step(
     step: int = Query(..., ge=0, description="Simulation step to query"),
     workspace_path: str = Query(..., description="Workspace root path"),
 ) -> SocialActivityResponse:
-    """Get which agents had social activity (received/sent DM, sent group message) at a given step."""
+    """
+    获取指定步骤的社交活动
+
+    返回某个步骤下哪些Agent参与了社交媒体活动（收到/发送私信、发送群消息）。
+
+    Args:
+        hypothesis_id: 假设ID
+        experiment_id: 实验ID
+        step: 模拟步骤号（>=0）
+        workspace_path: 工作区根目录路径
+
+    Returns:
+        SocialActivityResponse: 社交活动信息，包含：
+            - step: 步骤号
+            - received_dm_agent_ids: 收到私信的Agent ID列表
+            - sent_dm_agent_ids: 发送私信的Agent ID列表
+            - sent_group_message_agent_ids: 发送群消息的Agent ID列表
+
+    Raises:
+        HTTPException: 404 - 数据库不存在
+    """
     db_path = get_db_path(workspace_path, hypothesis_id, experiment_id)
 
     received_dm: List[int] = []
@@ -860,7 +1198,23 @@ async def get_tables(
     experiment_id: str,
     workspace_path: str = Query(..., description="Workspace root path"),
 ) -> TableList:
-    """Get list of all tables in the database."""
+    """
+    获取数据库表列表
+
+    返回实验数据库中所有表的名称列表，用于数据探索。
+
+    Args:
+        hypothesis_id: 假设ID
+        experiment_id: 实验ID
+        workspace_path: 工作区根目录路径
+
+    Returns:
+        TableList: 表列表，包含：
+            - tables: 表名列表
+
+    Raises:
+        HTTPException: 404 - 数据库不存在
+    """
     db_path = get_db_path(workspace_path, hypothesis_id, experiment_id)
 
     # Inspection usually requires standard SQLAlchemy inspection, easier with async engine
@@ -888,7 +1242,28 @@ async def get_table_content(
     page: int = Query(1, ge=1),
     page_size: int = Query(20, ge=1, le=100),
 ) -> TableContent:
-    """Get content of a specific table."""
+    """
+    获取数据表内容
+
+    返回指定表的数据内容，支持分页。
+
+    Args:
+        hypothesis_id: 假设ID
+        experiment_id: 实验ID
+        table_name: 表名
+        workspace_path: 工作区根目录路径
+        page: 页码，从1开始
+        page_size: 每页行数，默认20，范围1-100
+
+    Returns:
+        TableContent: 表内容，包含：
+            - columns: 列名列表
+            - rows: 数据行列表（每行为字典）
+            - total: 总行数
+
+    Raises:
+        HTTPException: 404 - 数据库或表不存在
+    """
     db_path = get_db_path(workspace_path, hypothesis_id, experiment_id)
 
     async for session in get_db_session(db_path):

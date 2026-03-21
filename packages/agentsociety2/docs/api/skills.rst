@@ -41,7 +41,6 @@ Skill 支持 ``requires`` 和 ``provides`` 字段声明依赖关系：
    name: cognition
    description: Update emotions and form intentions
    priority: 40
-   auto_load: dynamic
    requires:
      - observation           # skill 名称
      - intention_formation   # 或能力标签

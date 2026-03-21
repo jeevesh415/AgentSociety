@@ -2,7 +2,6 @@
 name: needs
 description: Adjust physiological and social need satisfaction levels (satiety, energy, safety, social). Activate when the agent's physical or social state may have changed.
 priority: 30
-auto_load: dynamic
 requires:
   - observation
 provides:

@@ -207,10 +207,6 @@ custom/skills/my-skill/
 name: my-skill
 description: My custom skill description
 priority: 60
-auto_load: dynamic
-triggers:
-  - keyword1
-  - keyword2
 ---
 
 # My Skill

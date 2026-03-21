@@ -23,14 +23,6 @@ PersonAgent
    :show-inheritance:
    :special-members: __init__
 
-DoNothingAgent
-~~~~~~~~~~~~~~
-
-.. autoclass:: agentsociety2.agent.DoNothingAgent
-   :members:
-   :undoc-members:
-   :show-inheritance:
-
 数据模型
 --------
 

@@ -186,7 +186,9 @@ class Plan(BaseModel):
                     f"Step: {step.intention}, Result: {eval_result.evaluation}"
                 )
         evaluation_results = (
-            "\n".join(execution_results) if execution_results else "No execution results"
+            "\n".join(execution_results)
+            if execution_results
+            else "No execution results"
         )
         return f"Goal: {self.target}\nExecution situation:\n{evaluation_results}\n"
 
@@ -230,7 +232,9 @@ class NeedAdjustment(BaseModel):
     """
 
     need_type: NeedType = Field(description="需求类型")
-    adjustment_type: Literal["increase", "decrease", "maintain"] = Field(description="调整类型")
+    adjustment_type: Literal["increase", "decrease", "maintain"] = Field(
+        description="调整类型"
+    )
     new_value: float = Field(ge=0.0, le=1.0, description="调整后的新值")
     reasoning: str = Field(default="")
 
@@ -315,6 +319,27 @@ class SkillSelection(BaseModel):
     reasoning: str = Field(default="", description="选择理由")
 
 
+class SkillMetaSelection(BaseModel):
+    """Skill 元工具的结构化输出。
+
+    主 LLM 基于 skill 元数据（而非全文 SKILL.md）做语义匹配与选择。
+    仅当 skill 被选中时，运行时才会加载该 skill 的完整内容与代码。
+
+    Attributes:
+        selected_skills: 本步决定启用的 dynamic skill 名称列表
+        reasoning: 总体选择理由
+        rationale_by_skill: 按 skill 名称给出的简短理由
+    """
+
+    selected_skills: list[str] = Field(
+        default_factory=list, description="本步决定启用的技能名称列表"
+    )
+    reasoning: str = Field(default="", description="总体选择理由")
+    rationale_by_skill: Dict[str, str] = Field(
+        default_factory=dict, description="每个已选技能的简短理由"
+    )
+
+
 class ReActInstructionResponse(BaseModel):
     """ReAct 循环中的指令响应。
 
@@ -340,8 +365,7 @@ class ReActInstructionResponseWithTemplate(ReActInstructionResponse):
     """
 
     instruction: str = Field(
-        default="",
-        description="Action instruction with {variable_name} placeholders."
+        default="", description="Action instruction with {variable_name} placeholders."
     )
     variables: Dict[str, Any] = Field(default_factory=dict)
 

@@ -9,8 +9,10 @@ API 参考
    agent
    skills
    env
+   society
    storage
    config
+   registry
    backend
 
 .. note::

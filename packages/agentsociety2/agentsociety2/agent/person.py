@@ -19,11 +19,21 @@ from agentsociety2.agent import AgentBase
 from agentsociety2.env import RouterBase
 from agentsociety2.config import Config
 from agentsociety2.agent.models import (
-    EmotionType, Emotion, Satisfactions, Need, PlanStepStatus, PlanStep, PlanStepEvaluation, Plan,
-    EmotionUpdateResult, NeedAdjustmentResult,
-    Intention, CognitionIntentionUpdateResult,
-    ReActInstructionResponse, ReActInstructionResponseWithTemplate,
-    SkillSelection,
+    EmotionType,
+    Emotion,
+    Satisfactions,
+    Need,
+    PlanStepStatus,
+    PlanStep,
+    PlanStepEvaluation,
+    Plan,
+    EmotionUpdateResult,
+    NeedAdjustmentResult,
+    Intention,
+    CognitionIntentionUpdateResult,
+    ReActInstructionResponse,
+    ReActInstructionResponseWithTemplate,
+    SkillMetaSelection,
     NEED_DESCRIPTION,
 )
 
@@ -44,10 +54,10 @@ def _get_debug_info(description: str = "") -> str:
 class PersonAgent(AgentBase):
     """Skills-based agent — 一个轻量编排器，所有能力由 skills pipeline 提供。
 
-    step() 执行三层 pipeline：
-      1. always-on  — 每步必执行（observation）
-      2. dynamic    — LLM 阅读 skill 描述后自主选择激活（needs, cognition, plan）
-      3. finalize   — 所有 dynamic 完成后收尾（memory flush）
+    step() 采用完全渐进式执行：
+        1. 主 LLM 基于技能元数据选择本步要启用的 skills
+        2. 仅加载被选中的 skills（按需加载）
+        3. 未被选中的 skills 不加载、不执行
     """
 
     @classmethod
@@ -61,11 +71,10 @@ class PersonAgent(AgentBase):
 **Description:** {cls.__doc__}
 
 **Behavior:** On each step, the agent:
-1. Observes the environment using <observe> and stores it as memory
-2. Adjusts needs (satiety, energy, safety, social) based on historical memories
-3. Updates emotions and thoughts based on memories and current need satisfaction
-4. Updates intentions using Theory of Planned Behavior (TPB), focusing on the most urgent need
-5. Generates detailed execution plans and interacts with the environment using ReAct paradigm to complete plan steps
+1. Selects needed skills using metadata-only skill selection
+2. Loads only the selected skills on demand
+3. Executes selected skills in priority order
+4. Records step traces, memory updates, and action outcomes
 
 **Initialization Parameters:**
 - id (int, required): The unique identifier for the agent.
@@ -133,6 +142,27 @@ class PersonAgent(AgentBase):
         ask_intention_enabled: bool = True,
         skill_names: Optional[list[str]] = None,
     ):
+        """初始化 PersonAgent 实例。
+
+        Args:
+            id: 智能体唯一标识符
+            profile: 智能体画像，可以是字典或任意类型。常见字段包括：
+                name, gender, age, education, occupation, marriage_status,
+                persona, background_story, profile_text
+            name: 智能体显示名称，若未提供则从 profile['name'] 提取
+            replay_writer: 回放写入器，用于记录仿真状态
+            T_H: 饥饿阈值，低于此值会触发饥饿需求
+            T_D: 精力阈值，低于此值会触发休息需求
+            T_P: 安全阈值，低于此值会触发安全需求
+            T_C: 社交阈值，低于此值会触发社交需求
+            max_plan_steps: 计划最大步数
+            short_memory_window_size: 短期记忆窗口大小
+            max_intentions: 候选意图最大数量
+            max_react_interactions_per_step: 每个计划步骤最多环境交互次数
+            template_mode_enabled: 是否启用环境交互模板模式
+            ask_intention_enabled: 是否启用意图询问功能
+            skill_names: 要启用的技能名称列表，None 表示启用所有技能
+        """
         super().__init__(id=id, profile=profile, name=name, replay_writer=replay_writer)
 
         # ── 记忆 ──
@@ -164,7 +194,9 @@ class PersonAgent(AgentBase):
         self._emotion = Emotion()
         self._emotion_types = EmotionType.RELIEF
         self._thought: str = "Currently nothing good or bad is happening"
-        self._last_cognition_intention_update: Optional[CognitionIntentionUpdateResult] = None
+        self._last_cognition_intention_update: Optional[
+            CognitionIntentionUpdateResult
+        ] = None
         self._plan: Optional[Plan] = None
         self._intention: Intention | None = None
         self._intention_history: list[dict] = []
@@ -173,29 +205,20 @@ class PersonAgent(AgentBase):
 
         # ── Skills pipeline ──
         from agentsociety2.agent.skills import get_skill_registry
+
         self._skill_registry = get_skill_registry()
         self._skill_names = skill_names
 
-        # 按需加载：初始化时只加载 always + finalize skill，dynamic skill 在 step 时按需加载
-        self._always_on_names = {s.name for s in self._skill_registry.list_always()}
-        self._finalize_names = {s.name for s in self._skill_registry.list_finalize()}
-
-        # 只预加载 always + finalize skill
-        always_and_finalize = list(self._always_on_names) + list(self._finalize_names)
-        if self._skill_names is not None:
-            # 用户指定的 skill 列表：过滤出 always + finalize
-            always_and_finalize = [n for n in self._skill_names if n in always_and_finalize]
+        # 裸人模式：初始化不预加载任何 skill，全部按需加载
         self._loaded_skills: dict[str, Any] = {}  # LoadedSkill 缓存
-        self._loaded_skills.update({s.name: s for s in self._skill_registry.load_filtered(always_and_finalize)})
 
-        # 获取所有可用的 dynamic skill 名称（不加载 Python，只取元数据）
-        all_skills = self._skill_registry.list_enabled()
-        if self._skill_names is not None:
-            self._available_dynamic_names = {s.name for s in all_skills if s.name in self._skill_names and s.auto_load == "dynamic"}
-        else:
-            self._available_dynamic_names = {s.name for s in all_skills if s.auto_load == "dynamic"}
+        # 获取所有可选 skill 名称（不加载 Python，只取元数据）
+        self._selectable_skill_names: set[str] = set()
+        self._refresh_selectable_skills()
 
-        self._logger.info(f"PersonAgent({id}) preloaded: {list(self._loaded_skills.keys())}, dynamic available: {sorted(self._available_dynamic_names)}")
+        self._logger.info(
+            f"PersonAgent({id}) preloaded: {list(self._loaded_skills.keys())}, selectable: {sorted(self._selectable_skill_names)}"
+        )
 
     # ==================== Skills 管理 ====================
 
@@ -206,7 +229,8 @@ class PersonAgent(AgentBase):
         """
         if name in self._loaded_skills:
             return self._loaded_skills[name]
-        loaded = self._skill_registry.load_single(name)
+        # 只加载被选中的技能本体，不做自动依赖补全。
+        loaded = self._skill_registry.load_single(name, load_dependencies=False)
         if loaded:
             self._loaded_skills[name] = loaded
         return loaded
@@ -215,30 +239,30 @@ class PersonAgent(AgentBase):
         """获取所有已加载的 skill，按 priority 排序"""
         return sorted(self._loaded_skills.values(), key=lambda s: s.priority)
 
+    def _refresh_selectable_skills(self) -> None:
+        """从 registry 刷新当前可选 skill 池（仅元数据，不预加载）。"""
+        all_skills = self._skill_registry.list_enabled()
+        if self._skill_names is not None:
+            self._selectable_skill_names = {
+                s.name for s in all_skills if s.name in self._skill_names
+            }
+        else:
+            self._selectable_skill_names = {s.name for s in all_skills}
+
     def reload_skills(self, skill_names: list[str] | None = None):
         """热重载 skills pipeline（可在运行时调用）"""
         if skill_names is not None:
             self._skill_names = skill_names
 
-        # 重新计算 always/finalize/dynamic 分类
-        self._always_on_names = {s.name for s in self._skill_registry.list_always()}
-        self._finalize_names = {s.name for s in self._skill_registry.list_finalize()}
-
-        # 清空已加载缓存，重新预加载 always + finalize
+        # 清空已加载缓存（不预加载，保持裸人模式）
         self._loaded_skills.clear()
-        always_and_finalize = list(self._always_on_names) + list(self._finalize_names)
-        if self._skill_names is not None:
-            always_and_finalize = [n for n in self._skill_names if n in always_and_finalize]
-        self._loaded_skills.update({s.name: s for s in self._skill_registry.load_filtered(always_and_finalize)})
 
-        # 更新可用 dynamic skill
-        all_skills = self._skill_registry.list_enabled()
-        if self._skill_names is not None:
-            self._available_dynamic_names = {s.name for s in all_skills if s.name in self._skill_names and s.auto_load == "dynamic"}
-        else:
-            self._available_dynamic_names = {s.name for s in all_skills if s.auto_load == "dynamic"}
+        # 更新可选 skill
+        self._refresh_selectable_skills()
 
-        self._logger.info(f"Skills reloaded: preloaded={list(self._loaded_skills.keys())}, dynamic={sorted(self._available_dynamic_names)}")
+        self._logger.info(
+            f"Skills reloaded: preloaded={list(self._loaded_skills.keys())}, selectable={sorted(self._selectable_skill_names)}"
+        )
 
     def add_skill(self, name: str) -> bool:
         """运行时添加一个 skill 到 pipeline"""
@@ -246,17 +270,12 @@ class PersonAgent(AgentBase):
             self._skill_names.append(name)
         self._skill_registry.enable(name)
 
-        # 添加到可用列表并立即加载
+        # 添加到可选列表（保持按需加载，不立即加载）
         info = self._skill_registry.get_skill_info(name, load_content=False)
         if info:
-            if info.auto_load in ("always", "finalize"):
-                loaded = self._skill_registry.load_single(name)
-                if loaded:
-                    self._loaded_skills[name] = loaded
-            else:
-                self._available_dynamic_names.add(name)
+            self._selectable_skill_names.add(name)
 
-        return name in self._loaded_skills or name in self._available_dynamic_names
+        return name in self._loaded_skills or name in self._selectable_skill_names
 
     def remove_skill(self, name: str) -> bool:
         """运行时从 pipeline 移除一个 skill"""
@@ -265,8 +284,8 @@ class PersonAgent(AgentBase):
             self._skill_names.remove(name)
         # 从已加载缓存中移除
         self._loaded_skills.pop(name, None)
-        # 从可用列表中移除
-        self._available_dynamic_names.discard(name)
+        # 从可选列表中移除
+        self._selectable_skill_names.discard(name)
         return True
 
     # ==================== 重试辅助方法 ====================
@@ -368,15 +387,17 @@ class PersonAgent(AgentBase):
         memory_type: str = "cognition",
         metadata: Optional[dict] = None,
     ) -> None:
-        """暂存认知记忆到 _cognition_memory，step 结束时由 flush 写入 mem0。"""
-        self._cognition_memory.append({
-            "content": memory_text,
-            "type": memory_type,
-            "metadata": metadata or {},
-        })
+        """暂存认知记忆到 _cognition_memory，由 memory skill 或 close() 时 flush 到 mem0。"""
+        self._cognition_memory.append(
+            {
+                "content": memory_text,
+                "type": memory_type,
+                "metadata": metadata or {},
+            }
+        )
 
     async def _flush_cognition_memory_to_memory(self) -> None:
-        """将当前 step 的 cognition_memory 合并写入 mem0 长期记忆。"""
+        """将缓冲区中的 cognition_memory 合并写入 mem0 长期记忆。"""
         if not self._cognition_memory:
             return
 
@@ -396,11 +417,13 @@ class PersonAgent(AgentBase):
         structured_parts = []
         for mem_type, contents in memory_by_type.items():
             if contents:
-                structured_parts.append(f"## {mem_type.upper()}\n" + "\n".join(f"- {c}" for c in contents))
+                structured_parts.append(
+                    f"## {mem_type.upper()}\n" + "\n".join(f"- {c}" for c in contents)
+                )
 
         if structured_parts:
             structured_memory_text = "\n\n".join(structured_parts)
-            
+
             # 一次性添加到memory（已包含3次重试机制）
             await self._add_memory_with_timestamp(
                 structured_memory_text,
@@ -612,7 +635,7 @@ Your response is:
                 self.memory.search,
                 intention.intention,
                 user_id=self._memory_user_id,
-                limit=10
+                limit=10,
             )
 
         related_memories_text = ""
@@ -718,7 +741,9 @@ Your response is:
         self._plan = plan
 
         # 记录计划生成记忆到cognition_memory（不立即加入mem0）
-        plan_steps_text = "\n".join([f"{i+1}. {step.intention}" for i, step in enumerate(plan.steps)])
+        plan_steps_text = "\n".join(
+            [f"{i+1}. {step.intention}" for i, step in enumerate(plan.steps)]
+        )
         self._add_cognition_memory(
             f"Generated plan for intention: {intention.intention}\nPlan steps:\n{plan_steps_text}\nReasoning: {plan.reasoning}",
             memory_type="plan",
@@ -738,7 +763,7 @@ Your response is:
                 self.memory.search,
                 step.intention,
                 user_id=self._memory_user_id,
-                limit=5
+                limit=5,
             )
 
         related_memories_text = ""
@@ -917,7 +942,7 @@ Your response (yes/no only):"""
                 self.memory.search,
                 intention,
                 user_id=self._memory_user_id,
-                limit=5
+                limit=5,
             )
 
         related_memories_text = ""
@@ -986,26 +1011,36 @@ Now, I will provide you with the initial observation from the environment. Based
         ]
 
         # 添加assistant消息，表示调用observe工具获取初始observation
-        messages.append({
-            "role": "assistant",
-            "content": "I need to observe the environment first.",
-            "tool_calls": [{
-                "id": "observe_initial",
-                "type": "function",
-                "function": {
-                    "name": "env_router",
-                    "arguments": json.dumps({"instruction": "<observe>"})
-                }
-            }]
-        })
+        messages.append(
+            {
+                "role": "assistant",
+                "content": "I need to observe the environment first.",
+                "tool_calls": [
+                    {
+                        "id": "observe_initial",
+                        "type": "function",
+                        "function": {
+                            "name": "env_router",
+                            "arguments": json.dumps({"instruction": "<observe>"}),
+                        },
+                    }
+                ],
+            }
+        )
 
         # 将observation作为第一轮tool响应（环境响应）
-        observation_message = current_observation_text if current_observation_text else "No observation available."
-        messages.append({
-            "role": "tool",
-            "content": observation_message,
-            "tool_call_id": "observe_initial",
-        })
+        observation_message = (
+            current_observation_text
+            if current_observation_text
+            else "No observation available."
+        )
+        messages.append(
+            {
+                "role": "tool",
+                "content": observation_message,
+                "tool_call_id": "observe_initial",
+            }
+        )
 
         final_answer = ""
         final_status = "unknown"
@@ -1088,21 +1123,29 @@ Your instruction:"""
             )
 
             try:
-                response_model = ReActInstructionResponseWithTemplate if self.template_mode_enabled else ReActInstructionResponse
+                response_model = (
+                    ReActInstructionResponseWithTemplate
+                    if self.template_mode_enabled
+                    else ReActInstructionResponse
+                )
                 response = await self.acompletion_with_pydantic_validation(
                     model_type=response_model,
                     messages=messages,
                     tick=self._tick,
                     t=self._t,
                 )
-                instruction = response.instruction.strip() if response.instruction else ""
+                instruction = (
+                    response.instruction.strip() if response.instruction else ""
+                )
                 reasoning = response.reasoning.strip() if response.reasoning else ""
                 llm_status = response.status
-                variables = getattr(response, "variables", {})  # 仅template模式有variables字段
+                variables = getattr(
+                    response, "variables", {}
+                )  # 仅template模式有variables字段
             except Exception as e:
                 self._logger.warning(
-                f"{_get_debug_info('ReAct Act阶段Pydantic验证失败')} - {str(e)}, 使用默认指令"
-            )
+                    f"{_get_debug_info('ReAct Act阶段Pydantic验证失败')} - {str(e)}, 使用默认指令"
+                )
                 instruction = ""
                 reasoning = ""
                 llm_status = None
@@ -1152,18 +1195,22 @@ Your instruction:"""
             tool_call_id = f"call_{interaction_num}_{interaction_count}"
 
             # 添加assistant消息（instruction），包含tool_calls表示调用env_router
-            messages.append({
-                "role": "assistant",
-                "content": f"Reasoning: {reasoning}\nInstruction: {instruction}",
-                "tool_calls": [{
-                    "id": tool_call_id,
-                    "type": "function",
-                    "function": {
-                        "name": "env_router",
-                        "arguments": json.dumps({"instruction": instruction})
-                    }
-                }]
-            })
+            messages.append(
+                {
+                    "role": "assistant",
+                    "content": f"Reasoning: {reasoning}\nInstruction: {instruction}",
+                    "tool_calls": [
+                        {
+                            "id": tool_call_id,
+                            "type": "function",
+                            "function": {
+                                "name": "env_router",
+                                "arguments": json.dumps({"instruction": instruction}),
+                            },
+                        }
+                    ],
+                }
+            )
 
             self._logger.debug(
                 f"{_get_debug_info('收到LLM响应（ReAct Act）')} - reasoning: {reasoning}, instruction: {instruction}, status: {llm_status}, variables: {variables}"
@@ -1176,14 +1223,16 @@ Your instruction:"""
                 )
                 final_status = llm_status
                 final_answer = f"Step status determined directly: {llm_status}. Reasoning: {reasoning}"
-                
+
                 # 添加tool消息（模拟环境响应，但使用LLM返回的status）
-                messages.append({
-                    "role": "tool",
-                    "content": final_answer,
-                    "tool_call_id": tool_call_id,
-                })
-                
+                messages.append(
+                    {
+                        "role": "tool",
+                        "content": final_answer,
+                        "tool_call_id": tool_call_id,
+                    }
+                )
+
                 # 记录act信息（跳过环境调用的情况）
                 step_acts.append(
                     {
@@ -1196,7 +1245,7 @@ Your instruction:"""
                         "skipped_env": True,  # 标记跳过了环境调用
                     }
                 )
-                
+
                 # 保存记忆到cognition_memory
                 self._add_cognition_memory(
                     f"ReAct interaction {interaction_num + 1} for step '{intention}': {instruction} -> Status determined directly: {llm_status}",
@@ -1207,9 +1256,9 @@ Your instruction:"""
                         "skipped_env": True,
                     },
                 )
-                
+
                 interaction_count += 1
-                
+
                 # 如果status不是in_progress，退出循环
                 if final_status not in ["in_progress", "unknown"]:
                     break
@@ -1224,9 +1273,13 @@ Your instruction:"""
                     # 构建包含variables的ctx
                     template_ctx = ctx.copy()
                     template_ctx["variables"] = variables
-                    updated_ctx, answer = await self.ask_env(template_ctx, instruction, readonly=False, template_mode=True)
+                    updated_ctx, answer = await self.ask_env(
+                        template_ctx, instruction, readonly=False, template_mode=True
+                    )
                 else:
-                    updated_ctx, answer = await self.ask_env(ctx, instruction, readonly=False, template_mode=False)
+                    updated_ctx, answer = await self.ask_env(
+                        ctx, instruction, readonly=False, template_mode=False
+                    )
 
                 self._logger.debug(
                     f"{_get_debug_info('环境router返回answer')}:\n{answer}"
@@ -1239,56 +1292,68 @@ Your instruction:"""
                 final_answer = answer
 
                 # 添加tool消息（环境响应），使用之前生成的tool_call_id
-                messages.append({
-                    "role": "tool",
-                    "content": answer,
-                    "tool_call_id": tool_call_id,
-                })
+                messages.append(
+                    {
+                        "role": "tool",
+                        "content": answer,
+                        "tool_call_id": tool_call_id,
+                    }
+                )
 
                 # 每次调用ask_env完成后，重新执行<observe>来获取环境的最新状态
                 # 这保证了agent的"观察-思考-执行"循环
                 self._logger.debug(
                     f"{_get_debug_info('重新执行observe获取最新环境状态')} - instruction: <observe>"
                 )
-                
+
                 # 生成observe的tool_call_id
                 observe_tool_call_id = f"observe_{interaction_num}_{interaction_count}"
-                
+
                 # 添加assistant消息，表示调用observe工具
-                messages.append({
-                    "role": "assistant",
-                    "content": "I need to observe the environment to get the latest state.",
-                    "tool_calls": [{
-                        "id": observe_tool_call_id,
-                        "type": "function",
-                        "function": {
-                            "name": "env_router",
-                            "arguments": json.dumps({"instruction": "<observe>"})
-                        }
-                    }]
-                })
-                
+                messages.append(
+                    {
+                        "role": "assistant",
+                        "content": "I need to observe the environment to get the latest state.",
+                        "tool_calls": [
+                            {
+                                "id": observe_tool_call_id,
+                                "type": "function",
+                                "function": {
+                                    "name": "env_router",
+                                    "arguments": json.dumps(
+                                        {"instruction": "<observe>"}
+                                    ),
+                                },
+                            }
+                        ],
+                    }
+                )
+
                 observe_ctx, observation = await self.ask_env(
                     {"id": self._id}, "<observe>", readonly=True
                 )
-                
+
                 # 检查observe的status状态
                 observe_status = (
                     observe_ctx.get("status", "unknown") if observe_ctx else "unknown"
                 )
-                
+
                 # 更新observation
                 self._observation_ctx = observe_ctx
                 self._observation = observation
-                
+
                 # 将observe结果添加到对话历史中
-                observation_message = observation if observation else "No observation available."
-                messages.append({
-                    "role": "tool",
-                    "content": observation_message,
-                    "tool_call_id": observe_tool_call_id,
-                })
-                
+                observation_message = (
+                    observation if observation else "No observation available."
+                )
+                messages.append(
+                    {
+                        "role": "tool",
+                        "content": observation_message,
+                        "tool_call_id": observe_tool_call_id,
+                    }
+                )
+
                 self._logger.debug(
                     f"{_get_debug_info('observe操作完成，已更新环境状态并加入对话历史')} - status: {observe_status}, observation length: {len(observation) if observation else 0}"
                 )
@@ -1323,7 +1388,9 @@ Your instruction:"""
 
         # 根据执行结果确定步骤状态
         # final_status 来自代码生成的results['status']，包括：success, in_progress, fail, error
-        self._logger.info(f"ReAct循环完成，最终status: {final_status}, 交互次数: {interaction_count}")
+        self._logger.info(
+            f"ReAct循环完成，最终status: {final_status}, 交互次数: {interaction_count}"
+        )
 
         if final_status == "success":
             # 代码执行成功，步骤完成
@@ -1784,34 +1851,28 @@ Your response is:
         for module in env.env_modules:
             skills_dir = module.get_agent_skills_dir()
             if skills_dir:
-                new = self._skill_registry.scan_env_skills(skills_dir, type(module).__name__)
+                new = self._skill_registry.scan_env_skills(
+                    skills_dir, type(module).__name__
+                )
                 if new:
                     env_skills_found = True
         if env_skills_found:
-            # 更新分类
-            self._always_on_names = {s.name for s in self._skill_registry.list_always()}
-            self._finalize_names = {s.name for s in self._skill_registry.list_finalize()}
-            # 重新预加载 always + finalize
-            always_and_finalize = list(self._always_on_names) + list(self._finalize_names)
-            self._loaded_skills.update({s.name: s for s in self._skill_registry.load_filtered(always_and_finalize) if s.name not in self._loaded_skills})
-            # 更新可用 dynamic skill
-            all_skills = self._skill_registry.list_enabled()
-            self._available_dynamic_names.update(s.name for s in all_skills if s.auto_load == "dynamic")
-            self._logger.info(f"Skills updated with env skills: preloaded={list(self._loaded_skills.keys())}, dynamic={sorted(self._available_dynamic_names)}")
+            # 裸人模式下仅更新可选技能池，不做任何预加载
+            self._refresh_selectable_skills()
+            self._logger.info(
+                f"Skills updated with env skills: preloaded={list(self._loaded_skills.keys())}, selectable={sorted(self._selectable_skill_names)}"
+            )
 
     async def step(self, tick: int, t: datetime) -> str:
         """
-        执行一个完整的 agent step — 三层 skill pipeline。
+        执行一个完整的 agent step — 完全渐进式 skill pipeline。
 
-        Layer 1 (always-on):  observation 等基础感知
-        Layer 2 (dynamic):    LLM 根据 observation + skill 描述选择激活 → needs / cognition / plan
-        Layer 3 (finalize):   memory flush 等收尾操作
+        仅执行本步被 selector 选中的 skills，不存在默认自动执行层。
         """
         self._tick = tick
         self._t = t
         self._step_count += 1
         self._current_step_acts = []
-        self._cognition_memory.clear()
 
         self._logger.debug(
             f"{_get_debug_info('开始执行agent step')} - step_count: {self._step_count}, tick: {tick}, t: {t.isoformat()}"
@@ -1825,32 +1886,32 @@ Your response is:
             "cognition_ran": False,
         }
 
-        # ── Layer 1: always-on skills（已预加载） ──
-        for skill in self._get_loaded_skills_sorted():
-            if skill.name in self._always_on_names:
-                await skill.run(self, ctx)
-                if ctx.get("stop"):
-                    break
-
-        if ctx.get("stop"):
-            await self._record_step_details()
-            return ctx.get("early_return", " | ".join(ctx["step_log"]))
-
         # ── LLM skill selection ──
         selected = await self._select_skills_for_step(ctx)
 
-        # ── Layer 2: 按需加载并执行选中的 dynamic skills ──
-        for name in sorted(selected):  # 按名称排序保证确定性
+        # ── 按需加载并执行选中的 skills（按 priority 排序） ──
+        selected_ordered = sorted(
+            selected,
+            key=lambda n: (
+                (
+                    self._skill_registry.get_skill_info(n, load_content=False).priority
+                    if self._skill_registry.get_skill_info(n, load_content=False)
+                    else 10**9
+                ),
+                n,
+            ),
+        )
+        for name in selected_ordered:
             skill = self._get_or_load_skill(name)
-            if skill and skill.name not in self._always_on_names and skill.name not in self._finalize_names:
+            if skill:
                 await skill.run(self, ctx)
                 if ctx.get("stop"):
                     break
 
-        # ── Layer 3: finalize skills（已预加载） ──
-        for skill in self._get_loaded_skills_sorted():
-            if skill.name in self._finalize_names:
-                await skill.run(self, ctx)
+        if self._cognition_memory and "memory" not in selected:
+            self._logger.debug(
+                f"[Memory] Buffered cognition records pending flush: {len(self._cognition_memory)}"
+            )
 
         summary = " | ".join(ctx["step_log"])
         await self._record_step_details()
@@ -1858,21 +1919,20 @@ Your response is:
         return ctx.get("early_return", summary)
 
     async def _select_skills_for_step(self, ctx: dict[str, Any]) -> set[str]:
-        """LLM 阅读 skill 描述，根据当前情境自主选择要激活的 dynamic skills。
+        """通过内置 skill 元工具协议，让主 LLM 基于元数据自主选择 skills。
 
-        使用 _available_dynamic_names（元数据级别），不依赖已加载的 Python 模块。
+        渐进式披露策略：
+        1) 选择阶段仅提供技能元数据目录（不加载 SKILL.md 全文）
+        2) 执行阶段只加载被选中的 skill（按需加载）
         """
-        if not self._available_dynamic_names:
+        if not self._selectable_skill_names:
             return set()
 
-        # 构建 skill 目录：名称 + 描述（来自 registry 元数据）
-        catalog_lines = []
+        # 收集当前可用 skills 名单（仅元数据）。
         valid_names = set()
-        for name in sorted(self._available_dynamic_names):
+        for name in sorted(self._selectable_skill_names):
             info = self._skill_registry.get_skill_info(name, load_content=False)
             if info:
-                desc = info.description or "(无描述)"
-                catalog_lines.append(f"- **{name}**: {desc}")
                 valid_names.add(name)
 
         if not valid_names:
@@ -1890,7 +1950,26 @@ Your response is:
             state_parts.append(f"活跃计划: {self._plan.target}")
         state_summary = " | ".join(state_parts) if state_parts else "初始状态"
 
-        prompt = f"""You are an autonomous agent deciding which cognitive abilities to activate this step.
+        candidate_names = sorted(valid_names)
+        catalog = self._skill_registry.list_selection_metadata(
+            names=candidate_names, only_enabled=True
+        )
+        if not catalog:
+            return set()
+
+        self._logger.debug(f"[SkillSelector] candidate pool: {candidate_names}")
+        ctx["step_log"].append(f"SkillCandidates: {candidate_names}")
+
+        catalog_json = json.dumps(catalog, ensure_ascii=False, separators=(",", ":"))
+        prompt = f"""You are the orchestrator calling an internal meta-tool named `skill_meta_selector`.
+The meta-tool can only read skill metadata and decide which skills to activate.
+Do NOT assume full skill content is loaded.
+
+## Decision Policy
+- Select only skills that are necessary for this step.
+- If none is needed, return an empty list.
+- Do not auto-add skills just because they are related.
+- Unselected skills will NOT run.
 
 ## Current Observation
 {observation}
@@ -1898,30 +1977,117 @@ Your response is:
 ## Current State
 {state_summary}
 
-## Available Skills
-{chr(10).join(catalog_lines)}
+## Skill Metadata Catalog (JSON)
+{catalog_json}
 
 ## Instructions
-Select only the skills you truly need for this step. Unselected skills will NOT run.
-Return the selected skill names as a JSON list.
+Return a JSON object matching schema:
+- selected_skills: string[]
+- reasoning: string
+- rationale_by_skill: object<string,string>
 
 ```json
 """
-        try:
-            result = await self.acompletion_with_pydantic_validation(
-                model_type=SkillSelection,
-                messages=[{"role": "user", "content": prompt}],
+        decision = await self.acompletion_with_pydantic_validation(
+            model_type=SkillMetaSelection,
+            messages=[{"role": "user", "content": prompt}],
+            tick=self._tick,
+            t=self._t,
+        )
+        selected = {
+            name for name in decision.selected_skills if name in set(candidate_names)
+        }
+        final_reasoning = decision.reasoning
+
+        # 依赖校验：不做系统自动补选；若缺失，交回主 LLM 修正一次。
+        missing = self._find_missing_skill_dependencies(selected)
+        if missing:
+            self._logger.warning(f"[SkillSelector] dependency gaps detected: {missing}")
+            ctx["step_log"].append(f"SkillDepsMissing: {missing}")
+            repair_prompt = f"""You are fixing a skill selection output from `skill_meta_selector`.
+
+Current selected skills: {sorted(selected)}
+Missing dependencies map: {json.dumps(missing, ensure_ascii=False, separators=(",", ":"))}
+
+Rules:
+- Do NOT invent new skill names.
+- You may either add required dependencies or remove dependent skills.
+- Return a dependency-valid selection only.
+
+Skill Metadata Catalog (JSON):
+{catalog_json}
+
+Return JSON object:
+- selected_skills: string[]
+- reasoning: string
+- rationale_by_skill: object<string,string>
+
+```json
+"""
+            repaired = await self.acompletion_with_pydantic_validation(
+                model_type=SkillMetaSelection,
+                messages=[{"role": "user", "content": repair_prompt}],
                 tick=self._tick,
                 t=self._t,
             )
-            selected = {name for name in result.selected_skills if name in valid_names}
-            self._logger.info(f"[SkillSelector] LLM selected: {sorted(selected)} — {result.reasoning}")
-            ctx["step_log"].append(f"SkillSelect: {sorted(selected)}")
-            return selected
-        except Exception as e:
-            self._logger.warning(f"[SkillSelector] LLM selection failed ({e}), fallback to all dynamic skills")
-            ctx["step_log"].append("SkillSelect: fallback(all)")
-            return valid_names
+            selected = {
+                name
+                for name in repaired.selected_skills
+                if name in set(candidate_names)
+            }
+            final_reasoning = repaired.reasoning or final_reasoning
+            missing_after = self._find_missing_skill_dependencies(selected)
+            if missing_after:
+                selected = self._prune_dependency_invalid_skills(selected)
+                self._logger.warning(
+                    f"[SkillSelector] repaired selection still invalid, pruned to {sorted(selected)}"
+                )
+                ctx["step_log"].append(f"SkillDepsPruned: {sorted(selected)}")
+
+        self._logger.info(
+            f"[SkillSelector] LLM selected: {sorted(selected)} — {final_reasoning}"
+        )
+        if decision.rationale_by_skill:
+            self._logger.debug(
+                f"[SkillSelector] rationale_by_skill={decision.rationale_by_skill}"
+            )
+        ctx["step_log"].append(f"SkillSelect: {sorted(selected)}")
+        return selected
+
+    def _find_missing_skill_dependencies(
+        self, selected: set[str]
+    ) -> dict[str, list[str]]:
+        """返回 selected 中每个技能缺失的依赖（仅检查技能级依赖）。"""
+        if not selected:
+            return {}
+
+        satisfied = set(selected)
+        missing: dict[str, list[str]] = {}
+
+        for name in sorted(selected):
+            info = self._skill_registry.get_skill_info(name, load_content=False)
+            if not info:
+                continue
+            dep_names = self._skill_registry.resolve_capability_dependencies(
+                info.requires
+            )
+            need = [dep for dep in dep_names if dep not in satisfied]
+            if need:
+                missing[name] = sorted(set(need))
+
+        return missing
+
+    def _prune_dependency_invalid_skills(self, selected: set[str]) -> set[str]:
+        """移除依赖不满足的技能，直到选择集满足依赖闭包。"""
+        pruned = set(selected)
+        while True:
+            missing = self._find_missing_skill_dependencies(pruned)
+            if not missing:
+                return pruned
+            before = set(pruned)
+            pruned -= set(missing.keys())
+            if pruned == before:
+                return pruned
 
     async def get_state(self) -> str:
         """构建当前状态字符串（profile + 记忆 + 需求 + 情感 + 计划），供 prompt 使用。"""
@@ -2088,7 +2254,7 @@ Intensities (0-10):
                 self.memory.search,
                 message,
                 user_id=self._memory_user_id,
-                limit=20
+                limit=20,
             )
 
         memory_text = ""
@@ -2378,8 +2544,9 @@ Your response:"""
     async def close(self):
         """关闭 Agent，释放资源。
 
-        保存意图历史到文件，重置 mem0 内存。
+        关闭前先刷写认知缓冲，保存意图历史到文件，再重置 mem0 内存。
         """
+        await self._flush_cognition_memory_to_memory()
         self._save_intention_history()
         await self._retry_async_operation("reset memory", self._memory.reset)
         self._logger.info(f"PersonAgent({self.id}) closed")

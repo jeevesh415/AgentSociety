@@ -2,7 +2,6 @@
 name: observation
 description: Environment perception — the agent's eyes and ears.
 priority: 0
-auto_load: always
 provides:
   - observation
   - environment awareness

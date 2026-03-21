@@ -46,11 +46,12 @@ class SkillInfo:
         description: 简短描述，供 LLM Skill Selector 选择使用
         source: 来源类型 — "builtin"、"custom" 或 "env:<ClassName>"
         path: Skill 目录的绝对路径
-        auto_load: 加载策略 — "always"（每步必执行）、"dynamic"（LLM 选择）、
-                   "finalize"（收尾阶段）、"manual"（仅手动启用）
         enabled: 是否启用
         requires: 依赖的其他 skill 名称或能力标签列表
         provides: 此 skill 提供的能力标签列表（用于能力发现）
+        provides_state: 此 skill 会给 agent 添加的状态字段列表
+                       例如: ["memory", "needs", "emotion", "plan"]
+                       用于渐进式披露时确定需要初始化哪些状态
 
     Example:
         在 SKILL.md 的 frontmatter 中声明::
@@ -59,26 +60,30 @@ class SkillInfo:
             name: cognition
             description: Update emotions and form intentions
             priority: 40
-            auto_load: dynamic
             requires:
               - observation        # skill 名称
               - intention_formation  # 或能力标签
             provides:
               - intention_formation
               - emotion_update
+            provides_state:
+              - emotion
+              - thought
+              - intention
             ---
     """
+
     name: str
     priority: int
-    skill_md: str = ""                    # 延迟加载：启用时才填充
-    description: str = ""                 # 短描述，LLM Skill Selector 的输入
-    source: str = ""                      # "builtin" | "custom" | "env:<ClassName>"
-    path: str = ""                        # 目录绝对路径
-    auto_load: str = "dynamic"            # "always" | "dynamic" | "finalize" | "manual"
+    skill_md: str = ""  # 延迟加载：启用时才填充
+    description: str = ""  # 短描述，LLM Skill Selector 的输入
+    source: str = ""  # "builtin" | "custom" | "env:<ClassName>"
+    path: str = ""  # 目录绝对路径
     enabled: bool = True
     requires: list[str] = field(default_factory=list)  # 依赖的其他 skill 名称或能力标签
     provides: list[str] = field(default_factory=list)  # 提供的能力标签
-    _skill_md_loaded: bool = False        # 内部标记：skill_md 是否已加载
+    provides_state: list[str] = field(default_factory=list)  # 提供的状态字段
+    _skill_md_loaded: bool = False  # 内部标记：skill_md 是否已加载
 
 
 @dataclass
@@ -95,7 +100,9 @@ class LoadedSkill:
         run: 异步执行函数，签名为 ``async def run(agent, ctx) -> None``
         requires: 依赖的 skill 名称列表
         provides: 提供的能力标签列表
+        provides_state: 提供的状态字段列表
     """
+
     name: str
     priority: int
     skill_md: str
@@ -103,9 +110,11 @@ class LoadedSkill:
     run: RunFn
     requires: list[str] = field(default_factory=list)
     provides: list[str] = field(default_factory=list)
+    provides_state: list[str] = field(default_factory=list)
 
 
 # ── 全局 registry（单例） ─────────────────────────────
+
 
 class SkillRegistry:
     """管理所有可用的 agent skill，支持热插拔和渐进式加载。
@@ -157,7 +166,9 @@ class SkillRegistry:
         for info in _discover_skills(root, source="builtin"):
             self._skills[info.name] = info
         self._builtin_scanned = True
-        logger.info(f"[Skills] Scanned builtin: {[n for n in self._skills if self._skills[n].source == 'builtin']}")
+        logger.info(
+            f"[Skills] Scanned builtin: {[n for n in self._skills if self._skills[n].source == 'builtin']}"
+        )
 
     def scan_custom(self, workspace_path: str | Path) -> list[str]:
         """扫描 workspace/custom/skills/ 下的自定义 skill。
@@ -175,7 +186,10 @@ class SkillRegistry:
 
         new_names: list[str] = []
         for info in _discover_skills(custom_root, source="custom"):
-            if info.name not in self._skills or self._skills[info.name].source == "custom":
+            if (
+                info.name not in self._skills
+                or self._skills[info.name].source == "custom"
+            ):
                 self._skills[info.name] = info
                 # 如果之前加载过同名 skill，清除缓存以便重载
                 self._loaded.pop(info.name, None)
@@ -203,7 +217,10 @@ class SkillRegistry:
         source = f"env:{env_name}"
         new_names: list[str] = []
         for info in _discover_skills(skills_dir, source=source):
-            if info.name in self._skills and self._skills[info.name].source == "builtin":
+            if (
+                info.name in self._skills
+                and self._skills[info.name].source == "builtin"
+            ):
                 continue
             self._skills[info.name] = info
             self._loaded.pop(info.name, None)
@@ -282,26 +299,41 @@ class SkillRegistry:
         """
         return [s for s in self.list_all() if s.enabled]
 
-    def list_always(self) -> list[SkillInfo]:
-        """返回 auto_load=always 的 skill。
+    def list_selection_metadata(
+        self,
+        names: list[str] | None = None,
+        only_enabled: bool = True,
+    ) -> list[dict[str, Any]]:
+        """导出用于 LLM 选择的紧凑 skill 元数据目录。
 
-        这类 skill 在每个 step 都会执行，如 observation。
+        只包含选择阶段所需的字段，不触发 SKILL.md 全文加载。
+
+        Args:
+            names: 可选，限定导出的 skill 名称集合
+            only_enabled: 是否仅导出已启用技能（默认 True）
+
+        Returns:
+            按 priority 排序的元数据字典列表
         """
-        return [s for s in self.list_all() if s.auto_load == "always"]
+        base = self.list_enabled() if only_enabled else self.list_all()
+        name_set = set(names) if names is not None else None
 
-    def list_dynamic(self) -> list[SkillInfo]:
-        """返回 auto_load=dynamic 的 skill。
+        result: list[dict[str, Any]] = []
+        for info in base:
+            if name_set is not None and info.name not in name_set:
+                continue
+            result.append(
+                {
+                    "name": info.name,
+                    "description": info.description or "",
+                    "priority": info.priority,
+                    "requires": list(info.requires),
+                    "provides": list(info.provides),
+                    "source": info.source,
+                }
+            )
 
-        这类 skill 可被 LLM Skill Selector 自主选择激活。
-        """
-        return [s for s in self.list_all() if s.auto_load == "dynamic"]
-
-    def list_finalize(self) -> list[SkillInfo]:
-        """返回 auto_load=finalize 的 skill。
-
-        这类 skill 在所有 dynamic skill 执行完毕后执行，用于收尾操作。
-        """
-        return [s for s in self.list_all() if s.auto_load == "finalize"]
+        return result
 
     # ── 加载 ──
 
@@ -346,7 +378,9 @@ class SkillRegistry:
 
             run_fn = _import_skill_run(info)
             if run_fn is None:
-                logger.warning(f"[Skills] Failed to load run() from skill '{info.name}', skipping")
+                logger.warning(
+                    f"[Skills] Failed to load run() from skill '{info.name}', skipping"
+                )
                 continue
 
             ls = LoadedSkill(
@@ -357,6 +391,7 @@ class SkillRegistry:
                 run=run_fn,
                 requires=info.requires,
                 provides=info.provides,
+                provides_state=info.provides_state,
             )
             self._loaded[info.name] = ls
             result.append(ls)
@@ -386,6 +421,7 @@ class SkillRegistry:
             run=run_fn,
             requires=info.requires,
             provides=info.provides,
+            provides_state=info.provides_state,
         )
         return True
 
@@ -405,7 +441,9 @@ class SkillRegistry:
             _ensure_skill_md_loaded(info)
         return info
 
-    def load_single(self, name: str, load_dependencies: bool = True) -> LoadedSkill | None:
+    def load_single(
+        self, name: str, load_dependencies: bool = False
+    ) -> LoadedSkill | None:
         """按需加载单个 skill（渐进式加载的第二阶段）。
 
         用于 step 执行时，只加载 LLM 选择后的 skill。
@@ -413,7 +451,7 @@ class SkillRegistry:
 
         Args:
             name: skill 名称
-            load_dependencies: 是否自动加载依赖的 skill（默认 True）
+            load_dependencies: 是否自动加载依赖的 skill（默认 False）
 
         Returns:
             LoadedSkill 实例，如果加载失败则返回 None
@@ -432,7 +470,9 @@ class SkillRegistry:
                 if dep_name not in self._loaded:
                     dep = self.load_single(dep_name, load_dependencies=True)
                     if dep is None:
-                        logger.warning(f"[Skills] Failed to load dependency '{dep_name}' for skill '{name}'")
+                        logger.warning(
+                            f"[Skills] Failed to load dependency '{dep_name}' for skill '{name}'"
+                        )
 
         # 加载 skill_md 和 Python 模块
         skill_md = _ensure_skill_md_loaded(info)
@@ -449,9 +489,13 @@ class SkillRegistry:
             run=run_fn,
             requires=info.requires,
             provides=info.provides,
+            provides_state=info.provides_state,
         )
         self._loaded[name] = ls
-        logger.debug(f"[Skills] Loaded skill: {name}" + (f" (requires: {info.requires})" if info.requires else ""))
+        logger.debug(
+            f"[Skills] Loaded skill: {name}"
+            + (f" (requires: {info.requires})" if info.requires else "")
+        )
         return ls
 
     def get_dependencies(self, name: str) -> list[str]:
@@ -513,6 +557,31 @@ class SkillRegistry:
                 return name
         return None
 
+    def find_skill_by_state(self, state_name: str) -> str | None:
+        """根据状态字段名查找提供该状态的 skill。
+
+        Args:
+            state_name: 状态字段名（如 'emotion', 'plan', 'needs'）
+
+        Returns:
+            提供该状态的 skill 名称，如果没有则返回 None
+        """
+        for name, info in self._skills.items():
+            if state_name in info.provides_state:
+                return name
+        return None
+
+    def get_all_provided_states(self) -> set[str]:
+        """获取所有 skill 提供的状态字段集合。
+
+        Returns:
+            所有状态字段名的集合
+        """
+        states: set[str] = set()
+        for info in self._skills.values():
+            states.update(info.provides_state)
+        return states
+
     def resolve_capability_dependencies(self, requires: list[str]) -> list[str]:
         """将能力标签依赖解析为 skill 名称依赖。
 
@@ -535,7 +604,9 @@ class SkillRegistry:
                 if skill_name:
                     result.append(skill_name)
                 else:
-                    logger.warning(f"[Skills] Cannot resolve dependency: '{dep}' (not a skill name or capability)")
+                    logger.warning(
+                        f"[Skills] Cannot resolve dependency: '{dep}' (not a skill name or capability)"
+                    )
         return result
 
     def clear(self) -> None:
@@ -569,6 +640,7 @@ def get_skill_registry() -> SkillRegistry:
 
 # ── 内部工具函数 ─────────────────────────────
 
+
 def _discover_skills(root: Path, source: str) -> list[SkillInfo]:
     """从给定根目录发现 skill 子目录
 
@@ -592,7 +664,9 @@ def _discover_skills(root: Path, source: str) -> list[SkillInfo]:
     return result
 
 
-def _make_skill_info(skill_dir: Path, name: str, priority: int, source: str) -> SkillInfo:
+def _make_skill_info(
+    skill_dir: Path, name: str, priority: int, source: str
+) -> SkillInfo:
     """创建 SkillInfo，只解析 frontmatter 元数据，不加载完整 skill_md。
 
     这是渐进式加载的第一阶段：只读取必要的信息用于 LLM 选择。
@@ -603,12 +677,26 @@ def _make_skill_info(skill_dir: Path, name: str, priority: int, source: str) -> 
     # 只读取 frontmatter 部分（前几行），不读取整个文件
     meta = _parse_frontmatter_from_file(skill_md_path) if skill_md_path.exists() else {}
 
-    # 解析 requires 和 provides（支持列表格式）
+    # 解析 requires、provides 和 provides_state（支持列表格式）
     requires_raw = meta.get("requires", [])
     provides_raw = meta.get("provides", [])
+    provides_state_raw = meta.get("provides_state", [])
 
-    requires = requires_raw if isinstance(requires_raw, list) else [requires_raw] if requires_raw else []
-    provides = provides_raw if isinstance(provides_raw, list) else [provides_raw] if provides_raw else []
+    requires = (
+        requires_raw
+        if isinstance(requires_raw, list)
+        else [requires_raw] if requires_raw else []
+    )
+    provides = (
+        provides_raw
+        if isinstance(provides_raw, list)
+        else [provides_raw] if provides_raw else []
+    )
+    provides_state = (
+        provides_state_raw
+        if isinstance(provides_state_raw, list)
+        else [provides_state_raw] if provides_state_raw else []
+    )
 
     return SkillInfo(
         name=meta.get("name", name),
@@ -617,10 +705,10 @@ def _make_skill_info(skill_dir: Path, name: str, priority: int, source: str) -> 
         description=meta.get("description", ""),
         source=source,
         path=str(skill_dir),
-        auto_load=meta.get("auto_load", "dynamic"),
         enabled=True,
         requires=requires,
         provides=provides,
+        provides_state=provides_state,
         _skill_md_loaded=False,
     )
 
@@ -693,7 +781,11 @@ def _parse_frontmatter_lines(lines: list[str]) -> dict[str, Any]:
             continue
 
         # 列表项
-        if line.startswith("- ") and current_key is not None and current_list is not None:
+        if (
+            line.startswith("- ")
+            and current_key is not None
+            and current_list is not None
+        ):
             current_list.append(line[2:].strip())
             continue
 
@@ -740,7 +832,11 @@ def _parse_frontmatter(md_text: str) -> dict[str, Any]:
             continue
 
         # 列表项
-        if stripped.startswith("- ") and current_key is not None and current_list is not None:
+        if (
+            stripped.startswith("- ")
+            and current_key is not None
+            and current_list is not None
+        ):
             current_list.append(stripped[2:].strip())
             continue
 
@@ -797,6 +893,14 @@ def _import_skill_run(info: SkillInfo, force_reload: bool = False) -> RunFn | No
         module_name = f"custom_skill_{info.name}_{entry.stem}"
         if force_reload and module_name in sys.modules:
             del sys.modules[module_name]
+
+        # 为自定义 skill 暴露导入路径，支持入口脚本引用同 skill 目录下的辅助模块。
+        scripts_dir_str = str(scripts_dir)
+        skill_dir_str = str(skill_dir)
+        if scripts_dir_str not in sys.path:
+            sys.path.insert(0, scripts_dir_str)
+        if skill_dir_str not in sys.path:
+            sys.path.insert(0, skill_dir_str)
 
         if module_name in sys.modules:
             mod = sys.modules[module_name]

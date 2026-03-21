@@ -91,7 +91,6 @@ SKILL.md 包含 YAML frontmatter 和 Markdown 内容：
    name: cognition
    description: Update emotions, generate thoughts, and form intentions (TPB).
    priority: 40
-   auto_load: dynamic
    ---
 
    # Cognition
@@ -103,7 +102,6 @@ SKILL.md 包含 YAML frontmatter 和 Markdown 内容：
 | ``name`` | Skill 唯一标识 |
 | ``description`` | 简短描述 — **给 LLM 看的，用于 skill selection** |
 | ``priority`` | 执行优先级（数字越小越先执行） |
-| ``auto_load`` | 加载策略：always / dynamic / finalize / manual |
 
 入口脚本约定
 ---------------------
@@ -174,7 +172,6 @@ SKILL.md 示例：
    name: market-analyst
    description: 分析市场价格趋势。当观测到市场、交易、价格等信息时应激活。
    priority: 60
-   auto_load: dynamic
    ---
 
    # Market Analyst

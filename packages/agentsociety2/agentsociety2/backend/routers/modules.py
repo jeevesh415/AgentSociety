@@ -66,10 +66,25 @@ async def get_agent_classes(
     include_custom: bool = Query(True, description="是否包含自定义模块")
 ) -> Dict[str, Any]:
     """
-    获取所有可用的 Agent 类列表
+    获取所有可用的Agent类列表
+
+    返回系统中所有已注册的Agent类，包括内置和自定义模块。
+
+    Args:
+        include_custom: 是否包含自定义模块，默认True
 
     Returns:
-        包含 Agent 类信息的字典
+        Dict[str, Any]: 包含Agent类信息的响应：
+            - success: 是否成功
+            - agents: Agent类字典，键为类型名，值为：
+                - type: 类型名
+                - class_name: 类名
+                - description: 描述
+                - is_custom: 是否为自定义模块
+            - count: Agent类总数
+
+    Raises:
+        HTTPException: 500 - 获取Agent类失败
     """
     try:
         _ = get_registry()  # 确保注册表已初始化
@@ -112,10 +127,25 @@ async def get_env_module_classes(
     include_custom: bool = Query(True, description="是否包含自定义模块")
 ) -> Dict[str, Any]:
     """
-    获取所有可用的 Environment 模块类列表
+    获取所有可用的环境模块类列表
+
+    返回系统中所有已注册的环境模块类，包括内置和自定义模块。
+
+    Args:
+        include_custom: 是否包含自定义模块，默认True
 
     Returns:
-        包含 Environment 模块类信息的字典
+        Dict[str, Any]: 包含环境模块类信息的响应：
+            - success: 是否成功
+            - modules: 环境模块类字典，键为类型名，值为：
+                - type: 类型名
+                - class_name: 类名
+                - description: 描述
+                - is_custom: 是否为自定义模块
+            - count: 模块类总数
+
+    Raises:
+        HTTPException: 500 - 获取环境模块类失败
     """
     try:
         _ = get_registry()  # 确保注册表已初始化
@@ -158,10 +188,23 @@ async def get_all_modules(
     include_custom: bool = Query(True, description="是否包含自定义模块")
 ) -> Dict[str, Any]:
     """
-    获取所有可用的 Agent 类和 Environment 模块类
+    获取所有可用的模块类
+
+    一次性返回所有Agent类和环境模块类，减少请求次数。
+
+    Args:
+        include_custom: 是否包含自定义模块，默认True
 
     Returns:
-        包含所有模块信息的字典
+        Dict[str, Any]: 包含所有模块信息的响应：
+            - success: 是否成功
+            - agents: Agent类字典
+            - agent_count: Agent类数量
+            - env_modules: 环境模块类字典
+            - env_module_count: 环境模块类数量
+
+    Raises:
+        HTTPException: 500 - 获取模块失败
     """
     try:
         _ = get_registry()  # 确保注册表已初始化

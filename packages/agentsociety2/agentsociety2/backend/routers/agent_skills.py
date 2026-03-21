@@ -89,7 +89,23 @@ class SimpleResponse(BaseModel):
 
 @router.get("/list", response_model=ListResponse)
 async def list_skills():
-    """列出所有已发现的 agent skill"""
+    """
+    列出所有已发现的Agent Skill
+
+    返回系统中所有已注册的Agent Skill，包括内置和自定义技能。
+
+    Returns:
+        ListResponse: Skill列表，包含：
+            - success: 是否成功
+            - skills: Skill列表，每个Skill包含：
+                - name: Skill名称
+                - priority: 优先级
+                - source: 来源 (builtin/custom)
+                - enabled: 是否启用
+                - path: Skill路径
+                - has_skill_md: 是否有SKILL.md文档
+            - total: Skill总数
+    """
     from pathlib import Path as PathLib
 
     reg = get_skill_registry()
@@ -102,7 +118,9 @@ async def list_skills():
             source=s.source,
             enabled=s.enabled,
             path=s.path,
-            has_skill_md=(PathLib(s.path) / "SKILL.md").exists(),  # 检查文件是否存在，而非依赖 skill_md 是否已加载
+            has_skill_md=(
+                PathLib(s.path) / "SKILL.md"
+            ).exists(),
         )
         for s in reg.list_all()
     ]
@@ -111,7 +129,21 @@ async def list_skills():
 
 @router.post("/enable", response_model=SimpleResponse)
 async def enable_skill(req: NameRequest):
-    """启用指定 skill"""
+    """
+    启用指定的Agent Skill
+
+    Args:
+        req: 请求体，包含：
+            - name: Skill名称
+
+    Returns:
+        SimpleResponse: 操作结果，包含：
+            - success: 是否成功
+            - message: 结果消息
+
+    Raises:
+        HTTPException: 404 - Skill不存在
+    """
     reg = get_skill_registry()
     if reg.enable(req.name):
         logger.info(f"[Skills] Enabled: {req.name}")
@@ -121,7 +153,21 @@ async def enable_skill(req: NameRequest):
 
 @router.post("/disable", response_model=SimpleResponse)
 async def disable_skill(req: NameRequest):
-    """禁用指定 skill"""
+    """
+    禁用指定的Agent Skill
+
+    Args:
+        req: 请求体，包含：
+            - name: Skill名称
+
+    Returns:
+        SimpleResponse: 操作结果，包含：
+            - success: 是否成功
+            - message: 结果消息
+
+    Raises:
+        HTTPException: 404 - Skill不存在
+    """
     reg = get_skill_registry()
     if reg.disable(req.name):
         logger.info(f"[Skills] Disabled: {req.name}")
@@ -131,10 +177,30 @@ async def disable_skill(req: NameRequest):
 
 @router.post("/scan", response_model=ScanResponse)
 async def scan_custom_skills(req: ScanRequest):
-    """扫描 workspace/custom/skills/ 下的自定义 skill"""
+    """
+    扫描工作区的自定义Agent Skill
+
+    扫描 {workspace}/custom/skills/ 目录下尚未注册的Skill。
+
+    Args:
+        req: 扫描请求，包含：
+            - workspace_path: 工作区路径（可选，不提供则使用环境变量）
+
+    Returns:
+        ScanResponse: 扫描结果，包含：
+            - success: 是否成功
+            - new_skills: 新发现的Skill名称列表
+            - total: Skill总数
+            - message: 结果消息
+
+    Raises:
+        HTTPException: 400 - 未提供工作区路径
+    """
     workspace = req.workspace_path or os.getenv("WORKSPACE_PATH")
     if not workspace:
-        raise HTTPException(400, "workspace_path not provided and WORKSPACE_PATH not set")
+        raise HTTPException(
+            400, "workspace_path not provided and WORKSPACE_PATH not set"
+        )
 
     reg = get_skill_registry()
     new_names = reg.scan_custom(workspace)
@@ -149,17 +215,44 @@ async def scan_custom_skills(req: ScanRequest):
 
 @router.post("/import", response_model=ImportResponse)
 async def import_skill(req: ImportRequest):
-    """从外部路径导入 skill 目录到 workspace/custom/skills/"""
+    """
+    从外部路径导入Agent Skill
+
+    将指定目录复制到工作区的 custom/skills/ 目录下。
+
+    Args:
+        req: 导入请求，包含：
+            - source_path: Skill目录的绝对路径
+            - workspace_path: 工作区路径（可选）
+
+    Returns:
+        ImportResponse: 导入结果，包含：
+            - success: 是否成功
+            - name: Skill名称（目录名）
+            - message: 结果消息
+
+    Raises:
+        HTTPException: 400 - 源路径不是目录或不是有效的Skill目录
+        HTTPException: 400 - 未提供工作区路径
+
+    Note:
+        Skill目录需要包含 SKILL.md 文件或 scripts/ 目录。
+        如果目标目录已存在，将被覆盖。
+    """
     source = Path(req.source_path)
     if not source.is_dir():
         raise HTTPException(400, f"Source path is not a directory: {source}")
 
     if not (source / "SKILL.md").exists() and not (source / "scripts").is_dir():
-        raise HTTPException(400, "Directory does not look like a skill (missing SKILL.md and scripts/)")
+        raise HTTPException(
+            400, "Directory does not look like a skill (missing SKILL.md and scripts/)"
+        )
 
     workspace = req.workspace_path or os.getenv("WORKSPACE_PATH")
     if not workspace:
-        raise HTTPException(400, "workspace_path not provided and WORKSPACE_PATH not set")
+        raise HTTPException(
+            400, "workspace_path not provided and WORKSPACE_PATH not set"
+        )
 
     dest = Path(workspace) / "custom" / "skills" / source.name
     if dest.exists():
@@ -181,7 +274,23 @@ async def import_skill(req: ImportRequest):
 
 @router.post("/reload", response_model=SimpleResponse)
 async def reload_skill(req: NameRequest):
-    """热重载指定 skill（重新导入 Python 模块）"""
+    """
+    热重载指定的Agent Skill
+
+    重新导入Skill的Python模块，用于开发时快速迭代。
+
+    Args:
+        req: 重载请求，包含：
+            - name: Skill名称
+
+    Returns:
+        SimpleResponse: 重载结果，包含：
+            - success: 是否成功
+            - message: 结果消息
+
+    Raises:
+        HTTPException: 404 - Skill不存在或重载失败
+    """
     reg = get_skill_registry()
     if reg.reload_skill(req.name):
         logger.info(f"[Skills] Reloaded: {req.name}")
@@ -191,9 +300,27 @@ async def reload_skill(req: NameRequest):
 
 @router.get("/{name}/info")
 async def get_skill_info(name: str) -> dict[str, Any]:
-    """获取 skill 的 SKILL.md 内容和元数据
+    """
+    获取Agent Skill的详细信息
 
-    这是一个按需加载的 API：只有调用此 API 时才会加载完整的 skill_md 内容。
+    返回Skill的SKILL.md内容和元数据。这是一个按需加载的API，
+    只有调用此API时才会加载完整的skill_md内容。
+
+    Args:
+        name: Skill名称
+
+    Returns:
+        dict[str, Any]: Skill详细信息，包含：
+            - success: 是否成功
+            - name: Skill名称
+            - priority: 优先级
+            - source: 来源 (builtin/custom)
+            - enabled: 是否启用
+            - path: Skill路径
+            - skill_md: SKILL.md文档内容
+
+    Raises:
+        HTTPException: 404 - Skill不存在
     """
     reg = get_skill_registry()
     info = reg.get_skill_info(name)
@@ -214,7 +341,27 @@ async def get_skill_info(name: str) -> dict[str, Any]:
 
 @router.post("/remove", response_model=SimpleResponse)
 async def remove_custom_skill(req: NameRequest):
-    """移除自定义 skill（仅限 custom 来源）"""
+    """
+        移除自定义Agent Skill
+
+        删除自定义Skill的目录并从注册表中移除。仅限source为custom的Skill。
+
+        Args:
+            req: 移除请求，包含：
+                - name: Skill名称
+
+        Returns:
+            SimpleResponse: 移除结果，包含：
+                - success: 是否成功
+                - message: 结果消息
+
+        Raises:
+            HTTPException: 404 - Skill不存在
+            HTTPException: 400 - 不能删除内置Skill
+
+    Note:
+            此操作不可逆，会删除Skill目录下的所有文件。
+    """
     reg = get_skill_registry()
     info_dict = {s.name: s for s in reg.list_all()}
     info = info_dict.get(req.name)
@@ -235,6 +382,7 @@ async def remove_custom_skill(req: NameRequest):
 
 
 # ── 辅助函数 ──
+
 
 def _ensure_custom_scanned(reg) -> None:
     """确保 custom skills 已扫描"""

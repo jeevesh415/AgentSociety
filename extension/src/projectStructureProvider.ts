@@ -54,7 +54,7 @@ export class ProjectItem extends vscode.TreeItem {
   constructor(
     public readonly label: string,
     public readonly collapsibleState: vscode.TreeItemCollapsibleState,
-    public readonly type: 'initWorkspace' | 'configureEnv' | 'fixWorkspace' | 'aiChat' | 'topic' | 'hypothesis' | 'experiment' | 'paper' | 'file' | 'papers' | 'userdata' | 'prefillParams' | 'prefillParamsGroup' | 'prefillParamsEnv' | 'prefillParamsAgent' | 'settings' | 'syncResourcesGroup' | 'syncResourcesAction' | 'syncBuiltinSkillsGroup' | 'syncBuiltinSkillItem' | 'syncCustomSkillsGroup' | 'custom' | 'customScan' | 'customTest' | 'customClean' | 'customAgentItem' | 'customEnvItem' | 'customAgentsGroup' | 'customEnvsGroup' | 'customWorkspace' | 'presentation' | 'presentationHypothesis' | 'presentationExperiment' | 'synthesis' | 'reportHtml' | 'reportMd' | 'agentSkillsGroup' | 'agentSkillItem' | 'agentSkillScan' | 'agentSkillImport' | 'agentSkillBuiltinGroup' | 'agentSkillCustomGroup',
+    public readonly type: 'initWorkspace' | 'configureEnv' | 'fixWorkspace' | 'aiChat' | 'topic' | 'hypothesis' | 'experiment' | 'paper' | 'file' | 'papers' | 'userdata' | 'prefillParams' | 'prefillParamsGroup' | 'prefillParamsEnv' | 'prefillParamsAgent' | 'settings' | 'syncResourcesGroup' | 'syncResourcesAction' | 'syncBuiltinSkillsGroup' | 'syncBuiltinSkillItem' | 'syncCustomSkillsGroup' | 'custom' | 'customScan' | 'customTest' | 'customClean' | 'customAgentItem' | 'customEnvItem' | 'customAgentsGroup' | 'customEnvsGroup' | 'customWorkspace' | 'presentation' | 'presentationHypothesis' | 'presentationExperiment' | 'synthesis' | 'reportHtml' | 'reportMd' | 'agentSkillsGroup' | 'agentSkillItem' | 'agentSkillScan' | 'agentSkillImport' | 'agentSkillBuiltinGroup' | 'agentSkillCustomGroup' | 'skillFile',
     public readonly filePath?: string
   ) {
     // 调用父类构造函数，初始化树节点
@@ -747,7 +747,7 @@ export class ProjectStructureProvider implements vscode.TreeDataProvider<Project
               skillName,
               vscode.TreeItemCollapsibleState.Collapsed,
               'syncBuiltinSkillItem',
-              skillPath
+              skillMdPath
             );
             skillItem.tooltip = skillDescription || skillName;
             skillItem.contextValue = 'syncBuiltinSkillItem';
@@ -756,7 +756,14 @@ export class ProjectStructureProvider implements vscode.TreeDataProvider<Project
             (skillItem as any).skillDirPath = skillPath;
             items.push(skillItem);
           } catch {
-            items.push(new ProjectItem(skillDir, vscode.TreeItemCollapsibleState.Collapsed, 'syncBuiltinSkillItem', skillPath));
+            const fallbackItem = new ProjectItem(
+              skillDir,
+              vscode.TreeItemCollapsibleState.Collapsed,
+              'syncBuiltinSkillItem',
+              skillMdPath
+            );
+            (fallbackItem as any).skillDirPath = skillPath;
+            items.push(fallbackItem);
           }
         }
       }
@@ -764,12 +771,17 @@ export class ProjectStructureProvider implements vscode.TreeDataProvider<Project
     }
 
     // 内置 Skill Item 展开时显示文件内容
-    if (element.type === 'syncBuiltinSkillItem' && element.filePath) {
+    if (element.type === 'syncBuiltinSkillItem') {
+      const skillDirPath = (element as any).skillDirPath || element.filePath;
+      if (!skillDirPath || !fs.existsSync(skillDirPath) || !fs.statSync(skillDirPath).isDirectory()) {
+        return [];
+      }
+
       const items: ProjectItem[] = [];
-      const entries = fs.readdirSync(element.filePath);
+      const entries = fs.readdirSync(skillDirPath);
 
       for (const entry of entries) {
-        const fullPath = path.join(element.filePath, entry);
+        const fullPath = path.join(skillDirPath, entry);
         const stat = fs.statSync(fullPath);
 
         if (stat.isFile()) {
@@ -801,7 +813,7 @@ export class ProjectStructureProvider implements vscode.TreeDataProvider<Project
 
       // 操作按钮组
       const scanItem = new ProjectItem(
-        localize('projectStructure.agentSkillsScan') || '🔄 扫描 Skills',
+        localize('projectStructure.agentSkillsScan'),
         vscode.TreeItemCollapsibleState.None,
         'agentSkillScan',
         undefined
@@ -813,7 +825,7 @@ export class ProjectStructureProvider implements vscode.TreeDataProvider<Project
       items.push(scanItem);
 
       const importItem = new ProjectItem(
-        localize('projectStructure.agentSkillsImport') || '📥 导入 Skill',
+        localize('projectStructure.agentSkillsImport'),
         vscode.TreeItemCollapsibleState.None,
         'agentSkillImport',
         undefined
@@ -831,7 +843,7 @@ export class ProjectStructureProvider implements vscode.TreeDataProvider<Project
       // Builtin Skills 分组
       if (builtinSkills.length > 0) {
         const builtinGroup = new ProjectItem(
-          `📦 ${localize('projectStructure.agentSkillsBuiltin') || '内置 Skills'} (${builtinSkills.length})`,
+          `${localize('projectStructure.agentSkillsBuiltin')} (${builtinSkills.length})`,
           vscode.TreeItemCollapsibleState.Collapsed,
           'agentSkillBuiltinGroup',
           undefined
@@ -842,7 +854,7 @@ export class ProjectStructureProvider implements vscode.TreeDataProvider<Project
       // Custom Skills 分组
       if (customSkills.length > 0) {
         const customGroup = new ProjectItem(
-          `🔧 ${localize('projectStructure.agentSkillsCustom') || '自定义 Skills'} (${customSkills.length})`,
+          `${localize('projectStructure.agentSkillsCustom')} (${customSkills.length})`,
           vscode.TreeItemCollapsibleState.Collapsed,
           'agentSkillCustomGroup',
           undefined
@@ -853,7 +865,7 @@ export class ProjectStructureProvider implements vscode.TreeDataProvider<Project
       // 如果没有任何 skill，显示提示
       if (this.agentSkillsCache.length === 0) {
         const emptyItem = new ProjectItem(
-          localize('projectStructure.agentSkillsEmpty') || '暂无 Skills，点击扫描或导入',
+          localize('projectStructure.agentSkillsEmpty'),
           vscode.TreeItemCollapsibleState.None,
           'agentSkillScan',
           undefined
@@ -895,11 +907,11 @@ export class ProjectStructureProvider implements vscode.TreeDataProvider<Project
         const stat = fs.statSync(fullPath);
 
         if (stat.isFile()) {
-          // 文件节点
+          // 文件节点 - 使用 skillFile 类型以区分普通文件
           const fileItem = new ProjectItem(
             entry,
             vscode.TreeItemCollapsibleState.None,
-            'file',
+            'skillFile',
             fullPath
           );
 
@@ -914,11 +926,11 @@ export class ProjectStructureProvider implements vscode.TreeDataProvider<Project
 
           items.push(fileItem);
         } else if (stat.isDirectory()) {
-          // 目录节点
+          // 目录节点 - 使用 skillFile 类型以区分普通文件
           items.push(new ProjectItem(
             entry,
             vscode.TreeItemCollapsibleState.Collapsed,
-            'file',
+            'skillFile',
             fullPath
           ));
         }
@@ -1649,26 +1661,26 @@ export class ProjectStructureProvider implements vscode.TreeDataProvider<Project
 
       if (fs.existsSync(synthesisDir)) {
         const entries = fs.readdirSync(synthesisDir);
-        
+
         // 分组报告：按基础名称和时间戳分组，支持双语版本
         const reportGroups: { [key: string]: { [lang: string]: string } } = {};
-        
+
         for (const entry of entries) {
           const fullPath = path.join(synthesisDir, entry);
           const stat = fs.statSync(fullPath);
-          
+
           if (stat.isFile() && entry.startsWith('synthesis_report_')) {
             // 匹配带语言后缀的文件: synthesis_report_YYYYMMDD_HHMMSS_(zh|en).(html|md)
             const langMatch = entry.match(/^synthesis_report_(\d+)_(zh|en)\.(html|md)$/);
             // 匹配通用文件: synthesis_report_YYYYMMDD_HHMMSS.(html|md)
             const genericMatch = entry.match(/^synthesis_report_(\d+)\.(html|md)$/);
-            
+
             if (langMatch) {
               const timestamp = langMatch[1];
               const lang = langMatch[2];
               const ext = langMatch[3];
               const key = `${timestamp}_${ext}`;
-              
+
               if (!reportGroups[key]) {
                 reportGroups[key] = {};
               }
@@ -1677,7 +1689,7 @@ export class ProjectStructureProvider implements vscode.TreeDataProvider<Project
               const timestamp = genericMatch[1];
               const ext = genericMatch[2];
               const key = `${timestamp}_${ext}`;
-              
+
               if (!reportGroups[key]) {
                 reportGroups[key] = {};
               }
@@ -1685,12 +1697,12 @@ export class ProjectStructureProvider implements vscode.TreeDataProvider<Project
             }
           }
         }
-        
+
         // 生成显示项：优先显示语言特定版本，如果没有则显示通用版本
         for (const [key, paths] of Object.entries(reportGroups)) {
           const [timestamp, ext] = key.split('_');
           const isHtml = ext === 'html';
-          
+
           if (isHtml) {
             // 中文 HTML
             if (paths.zh) {
@@ -1707,7 +1719,7 @@ export class ProjectStructureProvider implements vscode.TreeDataProvider<Project
               };
               items.push(item);
             }
-            
+
             // 英文 HTML
             if (paths.en) {
               const item = new ProjectItem(
@@ -1723,7 +1735,7 @@ export class ProjectStructureProvider implements vscode.TreeDataProvider<Project
               };
               items.push(item);
             }
-            
+
             // 通用 HTML（仅当没有语言特定版本时）
             if (!paths.zh && !paths.en && paths.generic) {
               const item = new ProjectItem(
@@ -1756,7 +1768,7 @@ export class ProjectStructureProvider implements vscode.TreeDataProvider<Project
               };
               items.push(item);
             }
-            
+
             // 英文 MD
             if (paths.en) {
               const item = new ProjectItem(
@@ -1772,7 +1784,7 @@ export class ProjectStructureProvider implements vscode.TreeDataProvider<Project
               };
               items.push(item);
             }
-            
+
             // 通用 MD（仅当没有语言特定版本时）
             if (!paths.zh && !paths.en && paths.generic) {
               const item = new ProjectItem(
@@ -2367,7 +2379,7 @@ export class ProjectStructureProvider implements vscode.TreeDataProvider<Project
   /**
    * 打开 Skill 文档（SKILL.md）
    *
-   * 对于内置 skill，文件路径可能在 Python 包内，前端无法直接访问，
+   * 对于内置 skill，文件路径在 Python 包内，前端无法直接访问，
    * 因此需要通过 API 获取内容并创建临时文件显示。
    * 对于自定义 skill，直接打开工作区中的文件。
    *
@@ -2376,19 +2388,31 @@ export class ProjectStructureProvider implements vscode.TreeDataProvider<Project
    * @param isBuiltin - 是否为内置 skill
    */
   async openAgentSkillDoc(skillName: string, skillPath: string, isBuiltin: boolean): Promise<void> {
-    const skillMdPath = path.join(skillPath, 'SKILL.md');
+    // 对于内置 skill，始终通过 API 获取内容（路径在 Python 包内，前端无法直接访问）
+    if (isBuiltin) {
+      await this._openBuiltinSkillDoc(skillName);
+      return;
+    }
 
     // 对于自定义 skill，尝试直接打开文件
-    if (!isBuiltin && fs.existsSync(skillMdPath)) {
+    const skillMdPath = path.join(skillPath, 'SKILL.md');
+    if (fs.existsSync(skillMdPath) && fs.statSync(skillMdPath).isFile()) {
       const uri = vscode.Uri.file(skillMdPath);
       await vscode.commands.executeCommand('markdown.showPreview', uri);
       return;
     }
 
-    // 对于内置 skill 或文件不存在的情况，通过 API 获取内容
+    // 如果文件不存在，也尝试通过 API 获取
+    await this._openBuiltinSkillDoc(skillName);
+  }
+
+  /**
+   * 通过 API 获取 skill 文档内容并显示
+   */
+  private async _openBuiltinSkillDoc(skillName: string): Promise<void> {
     try {
       const response = await this.apiClient.getAgentSkillInfo(skillName);
-      if (response.success && response.skill_md) {
+      if (response.success && response.skill_md && response.skill_md.trim()) {
         // 创建临时文件显示内容
         const tempDir = path.join(this.context.globalStorageUri.fsPath, 'skill-docs');
         if (!fs.existsSync(tempDir)) {

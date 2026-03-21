@@ -2,7 +2,6 @@
 name: cognition
 description: Update emotions, generate thoughts, and form intentions (TPB). Activate when the agent needs to reflect, decide what to do next, or process emotional events.
 priority: 40
-auto_load: dynamic
 requires:
   - observation
 provides:

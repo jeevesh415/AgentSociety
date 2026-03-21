@@ -1,3 +1,34 @@
+"""仿真社会辅助模块。
+
+本模块提供 :class:`AgentSocietyHelper` 类，实现 Plan-and-Execute 模式的外部请求处理。
+
+主要功能：
+
+- **问答处理**: 通过 :meth:`ask` 方法回答关于仿真的问题
+- **干预执行**: 通过 :meth:`intervene` 方法执行对仿真的干预
+- **动态重规划**: 当执行失败时自动调整计划
+- **工具调度**: 调度内置工具与环境路由器和智能体交互
+
+内置工具：
+
+- ``get_current_time`` — 获取当前仿真时间
+- ``filter_agents_by_profile`` — 按属性筛选智能体
+- ``ask_environment`` — 向环境路由器提问
+- ``ask_agents`` — 向特定智能体提问
+
+Example::
+
+    from agentsociety2.society.helper import AgentSocietyHelper
+
+    helper = AgentSocietyHelper(env_router=router, agents=[agent1, agent2])
+
+    # 问答模式
+    answer = await helper.ask("当前有多少智能体在线？")
+
+    # 干预模式
+    result = await helper.intervene("让所有智能体移动到城市中心")
+"""
+
 from __future__ import annotations
 
 import asyncio
