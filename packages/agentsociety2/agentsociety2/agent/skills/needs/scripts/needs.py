@@ -5,7 +5,8 @@ from typing import Any
 
 
 async def run(agent: Any, ctx: dict[str, Any]) -> None:
-    if ctx.get("cognition_ran"):
+    selected_skills = ctx.get("selected_skills", set())
+    if "cognition" in selected_skills or ctx.get("cognition_ran"):
         return
 
     result = await agent._adjust_needs_from_memory()

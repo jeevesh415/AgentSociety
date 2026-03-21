@@ -207,26 +207,26 @@ LITERATURE_SEARCH_API_URL=http://172.17.0.1:8002/api/v1/search
 
 ### 后端API端点
 
-- **POST `/api/v1/chat/completion`** - LLM对话接口
-- **GET `/api/v1/chat/tools`** - 获取可用工具列表
 - **GET `/health`** - 健康检查
 - **GET `/docs`** - API文档（Swagger UI）
+- **GET `/api/v1/agent-skills/list`** - 列出所有 Agent Skills
+- **POST `/api/v1/agent-skills/enable`** - 启用 Skill
+- **POST `/api/v1/agent-skills/disable`** - 禁用 Skill
+- **POST `/api/v1/agent-skills/import`** - 导入 Skill
+- **GET `/api/v1/modules/list`** - 列出可用模块
+- **GET `/api/v1/prefill-params`** - 获取预填充参数
 
-### 后端工具系统
+### Claude Code Skills
 
-后端采用function calling架构，LLM可以根据实际情况自主选择调用工具：
+研究工作流通过 Claude Code Skills 实现：
 
-1. **answer_directly** - 直接回答用户问题
-2. **search_literature** - 搜索相关文献
-3. **design_top_level** - 生成实验顶层设计
-
-添加新工具：
-1. 在 `packages/agentsociety2/agentsociety2/backend/tools/` 目录中创建新的工具文件
-2. 继承 `BaseTool` 类
-3. 实现必要的方法：`get_name()`, `get_description()`, `get_parameters_schema()`, `execute()`
-4. 在 `tools/registry.py` 中注册新工具
-
-详细的后端开发文档请参考：`packages/agentsociety2/agentsociety2/backend/README.md`
+- **agentsociety-literature-search** - 文献检索
+- **agentsociety-hypothesis** - 假设管理
+- **agentsociety-experiment-config** - 实验配置生成与验证
+- **agentsociety-run-experiment** - 实验执行
+- **agentsociety-analysis** - 数据分析
+- **agentsociety-synthesize** - 结果综合
+- **agentsociety-generate-paper** - 论文生成
 
 ## React Webview 开发
 

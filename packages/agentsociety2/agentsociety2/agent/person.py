@@ -1888,18 +1888,17 @@ Your response is:
 
         # ── LLM skill selection ──
         selected = await self._select_skills_for_step(ctx)
+        ctx["selected_skills"] = set(selected)
 
         # ── 按需加载并执行选中的 skills（按 priority 排序） ──
+        selected_priorities: dict[str, int] = {}
+        for name in selected:
+            info = self._skill_registry.get_skill_info(name, load_content=False)
+            selected_priorities[name] = info.priority if info else 10**9
+
         selected_ordered = sorted(
             selected,
-            key=lambda n: (
-                (
-                    self._skill_registry.get_skill_info(n, load_content=False).priority
-                    if self._skill_registry.get_skill_info(n, load_content=False)
-                    else 10**9
-                ),
-                n,
-            ),
+            key=lambda n: (selected_priorities.get(n, 10**9), n),
         )
         for name in selected_ordered:
             skill = self._get_or_load_skill(name)
@@ -2259,34 +2258,49 @@ Intensities (0-10):
 
         memory_text = ""
         if results:
+            if isinstance(results, dict):
+                raw_results = results.get("results", [])
+                if not isinstance(raw_results, list):
+                    raw_results = []
+            elif isinstance(results, list):
+                raw_results = results
+            else:
+                raw_results = []
+
             # 提取记忆和时间信息，准备排序
             memory_list = []
-            for result in results:
+            for result in raw_results:
                 if not isinstance(result, dict):
                     continue
                 memory_content = result.get("memory", "")
                 # 从metadata获取时间戳
-                timestamp = None
+                timestamp_value = None
                 metadata = result.get("metadata", {})
                 timestamp_str = metadata.get("timestamp") if metadata else None
                 if timestamp_str:
                     try:
                         timestamp_str_parsed = timestamp_str.replace("Z", "+00:00")
-                        timestamp = datetime.fromisoformat(timestamp_str_parsed)
+                        timestamp_value = datetime.fromisoformat(
+                            timestamp_str_parsed
+                        ).timestamp()
                     except (ValueError, TypeError):
                         pass
 
                 memory_list.append(
                     {
                         "content": memory_content,
-                        "timestamp": timestamp,
+                        "timestamp_value": timestamp_value,
                         "timestamp_str": timestamp_str or "Unknown",
                     }
                 )
 
             # 按时间从晚到早排序（timestamp为None的排在最后）
             memory_list.sort(
-                key=lambda x: x["timestamp"] if x["timestamp"] else datetime.min,
+                key=lambda x: (
+                    x["timestamp_value"]
+                    if x["timestamp_value"] is not None
+                    else float("-inf")
+                ),
                 reverse=True,
             )
 
@@ -2544,11 +2558,16 @@ Your response:"""
     async def close(self):
         """关闭 Agent，释放资源。
 
-        关闭前先刷写认知缓冲，保存意图历史到文件，再重置 mem0 内存。
+        关闭前先刷写认知缓冲，保存意图历史到文件，并尝试关闭 mem0 资源。
+        不主动清空长期记忆，避免跨步/跨会话记忆被意外删除。
         """
         await self._flush_cognition_memory_to_memory()
         self._save_intention_history()
-        await self._retry_async_operation("reset memory", self._memory.reset)
+
+        memory_close = getattr(self._memory, "close", None)
+        if callable(memory_close):
+            await self._retry_async_operation("close memory", memory_close)
+
         self._logger.info(f"PersonAgent({self.id}) closed")
 
     def _save_intention_history(self) -> None:

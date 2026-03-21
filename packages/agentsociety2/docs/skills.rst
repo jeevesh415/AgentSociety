@@ -16,238 +16,157 @@ AgentSociety 2 包含一组 LLM 原生的研究技能，用于自动化科学研
 * **数据分析**: 分析实验数据并生成报告
 * **智能体处理**: 智能体选择、生成和过滤
 
-可用技能
-------------
+Claude Code Skills
+--------------------
+
+研究工作流主要通过 Claude Code Skills 提供，这些技能位于工作区的 ``.claude/skills/`` 目录：
+
+* **agentsociety-literature-search** - 文献检索
+* **agentsociety-hypothesis** - 假设管理（add, get, list, delete）
+* **agentsociety-experiment-config** - 实验配置生成与验证
+* **agentsociety-run-experiment** - 实验执行与监控
+* **agentsociety-analysis** - 数据分析
+* **agentsociety-synthesize** - 结果综合
+* **agentsociety-generate-paper** - 论文生成
+* **agentsociety-quick-web-search** - 快速网络搜索
+* **agentsociety-web-research** - 深度网络研究
+
+Python API
+--------------------
+
+研究技能也可以通过 Python API 直接调用。
 
 文献技能 (literature)
 ~~~~~~~~~~~~~~~~~~~~~~~
 
-学术文献的搜索、管理和分析。
-
 .. code-block:: python
 
-   from agentsociety2.skills.literature import search_papers, summarize_paper
+   from agentsociety2.skills.literature import search_literature_and_save, load_literature_index
 
-   # 搜索论文
-   papers = await search_papers(
+   # 搜索并保存文献
+   await search_literature_and_save(
+       workspace_path=Path("./workspace"),
        query="agent-based modeling social networks",
-       max_results=10
+       top_k=10
    )
 
-   # 总结论文
-   summary = await summarize_paper(paper_id="12345")
-
-实验技能 (experiment)
-~~~~~~~~~~~~~~~~~~~~~~~
-
-实验配置的创建和管理。
-
-.. code-block:: python
-
-   from agentsociety2.skills.experiment import create_experiment, validate_config
-
-   # 创建实验配置
-   config = await create_experiment(
-       hypothesis="Social influence affects decision making",
-       num_agents=50,
-       num_steps=100
-   )
-
-   # 验证配置
-   is_valid = await validate_config(config)
+   # 加载文献索引
+   index = load_literature_index(workspace_path=Path("./workspace"))
 
 假设技能 (hypothesis)
 ~~~~~~~~~~~~~~~~~~~~~~~
 
-从研究问题生成可测试的假设。
-
 .. code-block:: python
 
-   from agentsociety2.skills.hypothesis import generate_hypotheses
+   from agentsociety2.skills.hypothesis import add_hypothesis, get_hypothesis, list_hypotheses
 
-   # 生成假设
-   hypotheses = await generate_hypotheses(
-       research_question="How does network structure affect information diffusion?"
+   # 添加假设
+   add_hypothesis(
+       workspace_path=Path("./workspace"),
+       hypothesis="网络密度越高，信息传播速度越快"
    )
 
-网络研究技能 (web_research)
-~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+   # 列出假设
+   hypotheses = list_hypotheses(workspace_path=Path("./workspace"))
 
-使用 Miro 进行网络搜索和内容总结。
-
-.. code-block:: python
-
-   from agentsociety2.skills.web_research import search_web, summarize_page
-
-   # 搜索网络
-   results = await search_web("agent-based modeling")
-
-   # 总结网页
-   summary = await summarize_page(url="https://example.com")
-
-论文技能 (paper)
-~~~~~~~~~~~~~~~~~
-
-使用 EasyPaper 生成学术论文。
+实验技能 (experiment)
+~~~~~~~~~~~~~~~~~~~~~~~
 
 .. code-block:: python
 
-   from agentsociety2.skills.paper import generate_paper, format_citations
-
-   # 生成论文
-   paper = await generate_paper(
-       title="Agent-Based Modeling of Social Networks",
-       sections=["abstract", "introduction", "methodology", "results", "conclusion"]
+   from agentsociety2.skills.experiment import (
+       start_experiment, get_experiment_status,
+       get_available_env_modules, get_available_agent_modules
    )
 
-   # 格式化引用
-   formatted = await format_citations(papers)
+   # 获取可用模块
+   env_modules = get_available_env_modules()
+   agent_modules = get_available_agent_modules()
+
+   # 启动实验
+   await start_experiment(
+       workspace_path=Path("./workspace"),
+       hypothesis_id="1",
+       experiment_id="1"
+   )
 
 分析技能 (analysis)
 ~~~~~~~~~~~~~~~~~~~~
 
-分析实验数据并生成报告。
+.. code-block:: python
+
+   from agentsociety2.skills.analysis import run_analysis, Analyzer
+
+   # 使用便捷函数
+   result = await run_analysis(
+       workspace_path=Path("./workspace"),
+       hypothesis_id="1",
+       experiment_id="1"
+   )
+
+   # 使用 Analyzer 类
+   analyzer = Analyzer(workspace_path=Path("./workspace"))
+   await analyzer.analyze(hypothesis_id="1", experiment_id="1")
+
+论文技能 (paper)
+~~~~~~~~~~~~~~~~~
 
 .. code-block:: python
 
-   from agentsociety2.skills.analysis import analyze_data, generate_report
+   from agentsociety2.skills.paper.generator import generate_paper_from_metadata
 
-   # 分析数据
-   insights = await analyze_data(
-       data_file="experiment.db",
-       metrics=["happiness", "cooperation"]
-   )
-
-   # 生成报告
-   report = await generate_report(insights)
-
-智能体技能 (agent)
-~~~~~~~~~~~~~~~~~~
-
-智能体选择、生成和过滤。
-
-.. code-block:: python
-
-   from agentsociety2.skills.agent import select_agents, generate_agent
-
-   # 选择智能体
-   selected = await select_agents(
-       criteria={"personality": "cooperative"},
-       count=10
-   )
-
-   # 生成智能体
-   agent = await generate_agent(
-       profile={"name": "Alice", "age": 28, "occupation": "scientist"}
+   result = await generate_paper_from_metadata(
+       metadata=paper_metadata,
+       output_dir=Path("./output"),
+       figures_source_dir=Path("./figures")
    )
 
 完整工作流示例
 ------------------------
 
-下面是一个使用研究技能的完整工作流：
+下面是一个使用 Claude Code Skills 的典型研究工作流：
 
-.. code-block:: python
-
-   import asyncio
-   from agentsociety2.skills import (
-       literature,
-       hypothesis,
-       experiment,
-       paper
-   )
-
-   async def research_workflow():
-       # 1. 文献检索
-       papers = await literature.search_papers(
-           query="social influence agent-based modeling",
-           max_results=20
-       )
-
-       # 2. 生成假设
-       hypotheses = await hypothesis.generate_hypotheses(
-           research_question="How does network density affect social influence?",
-           context=papers
-       )
-
-       # 3. 设计实验
-       exp_config = await experiment.create_experiment(
-           hypothesis=hypotheses[0],
-           num_agents=100,
-           num_steps=200,
-           variables={"network_density": [0.1, 0.3, 0.5, 0.7, 0.9]}
-       )
-
-       # 4. 运行实验（使用 CLI）
-       # 保存配置后，使用 CLI 运行:
-       # python -m agentsociety2.society.cli --config config.json --steps steps.yaml
-
-       # 5. 分析结果（从 ReplayWriter）
-       # ...
-
-       # 6. 撰写论文
-       draft = await paper.generate_paper(
-           title=f"The Effect of Network Density on Social Influence",
-           experiment_results=results,
-           related_work=papers
-       )
-
-       return draft
-
-   # 运行工作流
-   result = asyncio.run(research_workflow())
+1. **定义研究话题** - 编辑 ``TOPIC.md``
+2. **文献检索** - 使用 ``/agentsociety-literature-search``
+3. **创建假设** - 使用 ``/agentsociety-hypothesis add``
+4. **配置实验** - 使用 ``/agentsociety-experiment-config validate/prepare/run``
+5. **执行实验** - 使用 ``/agentsociety-run-experiment start``
+6. **分析结果** - 使用 ``/agentsociety-analysis``
+7. **生成论文** - 使用 ``/agentsociety-generate-paper``
 
 配置
 ------------------------
 
-研究技能使用相同的 LLM 配置。可以通过以下方式为特定技能配置不同的模型：
+研究技能使用相同的 LLM 配置。可以通过环境变量为特定技能配置不同的模型：
 
 .. code-block:: bash
 
-   # 为代码密集型任务（如实验设计）使用更强的模型
-   export AGENTSOCIETY_CODER_LLM_MODEL="gpt-4o"
+   # 默认 LLM
+   export AGENTSOCIETY_LLM_MODEL="qwen2.5-14b-instruct"
 
-   # 为高频任务（如智能体生成）使用更快的模型
-   export AGENTSOCIETY_NANO_LLM_MODEL="gpt-4o-mini"
+   # 代码生成（实验设计、分析）
+   export AGENTSOCIETY_CODER_LLM_MODEL="qwen2.5-72b-instruct"
 
-最佳实践
-------------------------
+   # 高频操作（智能体生成）
+   export AGENTSOCIETY_NANO_LLM_MODEL="qwen2.5-7b-instruct"
 
-1. **从文献开始**: 在生成假设之前先搜索相关文献
-2. **验证假设**: 确保假设是可测试的和具体的
-3. **迭代实验**: 根据结果调整实验设计
-4. **记录工作流**: 使用 ReplayWriter 记录所有步骤
-5. **版本控制**: 将生成的配置文件保存在版本控制中
+Agent Skills
+--------------------
 
-扩展研究技能
-------------------------
+AgentSociety 2 还支持 Agent Skills，这些是 PersonAgent 的认知能力模块：
 
-创建自定义研究技能：
+* **observation** - 环境感知
+* **needs** - 需求系统
+* **cognition** - 认知与意图
+* **plan** - 规划与执行
+* **memory** - 记忆管理
 
-.. code-block:: python
-
-   from typing import Dict, Any
-   from agentsociety2.config import get_llm_router_and_model
-
-   class MyResearchSkill:
-       """自定义研究技能"""
-
-       def __init__(self):
-           self.router, self.model = get_llm_router_and_model("default")
-
-       async def my_method(self, input_data: Dict[str, Any]) -> str:
-           """执行研究任务"""
-           prompt = f"Analyze this data: {input_data}"
-           response = await self.router.acompletion(
-               model=self.model,
-               messages=[{"role": "user", "content": prompt}]
-           )
-           return response.choices[0].message.content
-
-将自定义技能添加到 ``agentsociety2/skills/`` 目录中。
+详见 :doc:`agent_skills`。
 
 参考
 ------------------------
 
 * :doc:`cli` - 使用 CLI 运行实验
+* :doc:`agent_skills` - Agent Skills 详解
 * :doc:`custom_modules` - 创建自定义模块
 * :doc:`development` - 开发指南
