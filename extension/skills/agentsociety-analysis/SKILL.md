@@ -6,7 +6,7 @@ license: Proprietary. LICENSE.txt has complete terms
 
 # Data Analysis
 
-Analyze experiment simulation data and generate comprehensive reports.
+Analyze a single experiment's simulation data and generate comprehensive reports with visualizations.
 
 ## Quick Start
 
@@ -15,7 +15,7 @@ Analyze experiment simulation data and generate comprehensive reports.
 PYTHON_PATH=$(grep "^PYTHON_PATH=" .env | cut -d'=' -f2)
 PYTHON_PATH=${PYTHON_PATH:-python3}
 
-python scripts/analyze.py --hypothesis-id 1 --experiment-id 1
+$PYTHON_PATH scripts/analyze.py --hypothesis-id 1 --experiment-id 1
 ```
 
 ## Python Environment Requirement
@@ -30,30 +30,89 @@ Use the `PYTHON_PATH` from your `.env` file to ensure the correct Python interpr
 |-----------|------|----------|-------------|
 | --hypothesis-id | string | Yes | Hypothesis ID (e.g., '1', '2') |
 | --experiment-id | string | Yes | Experiment ID (e.g., '1', '2') |
-| --run-id | string | No | Run ID (default: 'run') |
 | --workspace | string | No | Workspace path (default: current directory) |
-| --output-dir | string | No | Output directory path (default: auto-determined) |
 
 ## What It Does
 
-1. Validates experiment data exists
-2. Analyzes agent behaviors, interactions, and patterns
-3. Generates markdown report with visualizations
-4. Creates analysis_summary.json with structured results
+This skill is executed by the unified `AnalysisAgent` sub-agent in `agentsociety2.skills.analysis`, so it can be used both as:
+- a VS Code skill workflow (`extension/skills/agentsociety-analysis`)
+- a programmatic sub-agent pipeline (`Analyzer`/`AnalysisAgent`)
+
+For complex analysis, it runs as a **multi-stage sub-agent workflow** (not a one-shot call):
+- stage 1: context + schema understanding
+- stage 2: data-grounded insight generation
+- stage 3: tool execution (EDA/statistics/visualization)
+- stage 4: **summarize execution results before next iteration**
+- stage 5: report generation (bilingual: `report_zh` + `report_en`, each Markdown + HTML; `report.md`/`report.html` = Chinese copies)
+
+The analysis follows a **data-first** approach:
+
+1. **Load Context** - Read experiment configuration and status
+2. **Understand Data** - Extract database schema, row counts, sample data
+3. **Generate Insights** - Create data-grounded insights (not hypothetical)
+4. **Run Analysis Tools** - Execute statistical tests, visualizations
+5. **Generate Reports** - Produce Markdown and HTML reports
 
 ## Output Files
 
 ```
-hypothesis_{id}/experiment_{id}/data/
-├── analysis_summary.json    # Structured analysis results
-├── report.md                # Detailed analysis report
-└── figures/                 # Generated charts and visualizations
+presentation/hypothesis_{id}/experiment_{id}/
+├── report.md                    # Chinese Markdown (same as report_zh.md)
+├── report.html                  # Chinese HTML (same as report_zh.html)
+├── report_zh.md / report_zh.html   # 简体中文报告
+├── report_en.md / report_en.html   # English report
+├── README.md                    # Output file guide
+├── data/
+│   ├── analysis_summary.json    # Structured analysis results
+│   ├── eda_profile.html         # ydata-profiling output
+│   └── eda_sweetviz.html        # sweetviz output
+├── charts/                      # Generated charts
+└── assets/                      # Report-embedded static resources
 ```
+
+## EDA Tools Used
+
+| Tool | Output | Purpose |
+|------|--------|---------|
+| ydata-profiling | `eda_profile.html` | Comprehensive data profile |
+| Sweetviz | `eda_sweetviz.html` | Correlation & target analysis |
+| Quick stats | Markdown text | pandas.describe() summary |
+
+## Analysis Capabilities
+
+### Statistical Analysis
+- Descriptive statistics (mean, median, std, etc.)
+- Hypothesis testing (t-test, ANOVA, chi-square)
+- Correlation analysis
+- Regression (via statsmodels)
+
+### Visualization
+- Distribution plots (histogram, KDE, violin)
+- Comparison plots (bar, box, swarm)
+- Correlation heatmaps
+- Time series with confidence bands
+- Network graphs (agent interactions)
+
+### Advanced Analysis
+- Social network analysis (networkx)
+- Temporal dynamics and convergence
+- Inequality metrics (Gini coefficient)
+- Text/sentiment analysis
 
 ## Prerequisites
 
 The experiment must have been run with data:
 - `hypothesis_{id}/experiment_{id}/run/sqlite.db` must exist
+- The database should contain simulation results
+
+## Comparison with `agentsociety-synthesize`
+
+| Aspect | agentsociety-analysis | agentsociety-synthesize |
+|--------|---------------------|------------------------|
+| Scope | Single experiment | Multiple experiments/hypotheses |
+| Output | `presentation/hypothesis_X/experiment_Y/` | `synthesis/` |
+| Purpose | Deep dive into one experiment | Cross-experiment comparison |
+| When to use | After each experiment run | After multiple experiments |
 
 ## Documentation Sync
 

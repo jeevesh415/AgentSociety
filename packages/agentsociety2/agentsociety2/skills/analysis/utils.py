@@ -6,6 +6,7 @@
 import re
 import sqlite3
 import xml.etree.ElementTree as ET
+from dataclasses import dataclass
 from pathlib import Path
 from typing import Any, Awaitable, Callable, Dict, List, Optional, TypeVar, Type
 
@@ -45,6 +46,17 @@ class XmlParseError(Exception):
 
 _SKILLS_DIR = Path(__file__).resolve().parent / "skills"
 T = TypeVar("T", bound=BaseModel)
+
+
+@dataclass(frozen=True)
+class AnalysisSkillMeta:
+    """Analysis prompt-skill metadata used for explicit selection."""
+
+    name: str
+    priority: int
+    description: str
+    path: Path
+    required: bool = False  # If True, always loaded regardless of selection
 
 
 def _sanitize_id(raw: str) -> str:
@@ -102,14 +114,117 @@ def presentation_paths(
     )
 
 
-def get_analysis_skills() -> str:
-    """从 skills/ 目录按文件名顺序加载所有 .md 技能文件。"""
+def _parse_skill_frontmatter(path: Path) -> Dict[str, Any]:
+    """Parse YAML-like frontmatter from markdown skill files.
+
+    Supported keys: name, priority, description, required.
+    """
+    if not path.exists():
+        return {}
+    try:
+        content = path.read_text(encoding="utf-8")
+    except Exception:
+        return {}
+
+    lines = content.splitlines()
+    if len(lines) < 3 or lines[0].strip() != "---":
+        return {}
+
+    result: Dict[str, Any] = {}
+    for line in lines[1:]:
+        s = line.strip()
+        if s == "---":
+            break
+        if not s or ":" not in s:
+            continue
+        key, value = s.split(":", 1)
+        k = key.strip()
+        v = value.strip().strip('"').strip("'")
+        if k == "priority":
+            try:
+                result[k] = int(v)
+            except ValueError:
+                continue
+        elif k == "required":
+            result[k] = v.lower() in ("true", "yes", "1")
+        else:
+            result[k] = v
+    return result
+
+
+def list_analysis_skills() -> List[AnalysisSkillMeta]:
+    """Discover analysis prompt-skills and return metadata only.
+
+    This function is metadata-only and does not load full markdown skill bodies.
+    """
+    result: List[AnalysisSkillMeta] = []
+    if not _SKILLS_DIR.exists():
+        return result
+
+    for idx, path in enumerate(sorted(_SKILLS_DIR.glob("*.md"))):
+        meta = _parse_skill_frontmatter(path)
+        name = meta.get("name") or path.stem
+        priority = int(meta.get("priority", idx + 1))
+        description = meta.get("description", "")
+        required = meta.get("required", False)
+        result.append(
+            AnalysisSkillMeta(
+                name=name,
+                priority=priority,
+                description=description,
+                path=path,
+                required=required,
+            )
+        )
+
+    result.sort(key=lambda x: (x.priority, x.name))
+    return result
+
+
+def get_analysis_skills(
+    selected_names: Optional[List[str]] = None,
+    strict_selection: bool = True,
+) -> str:
+    """Load selected analysis prompt-skills.
+
+    strict_selection=True means only explicitly selected skills will be loaded.
+    Required skills are ALWAYS loaded regardless of selection.
+    If no skills are selected and no required skills exist, returns empty string.
+    """
+    metas = list_analysis_skills()
+    if not metas:
+        return ""
+
+    # Always include required skills
+    required_skills = [m for m in metas if m.required]
+    selected_set = set(selected_names or [])
+
+    if strict_selection:
+        # In strict mode: load required + explicitly selected
+        targets = required_skills + [m for m in metas if m.name in selected_set and not m.required]
+    else:
+        # In non-strict mode: load all if no selection, or required + selected
+        if not selected_set:
+            targets = metas
+        else:
+            targets = required_skills + [m for m in metas if m.name in selected_set and not m.required]
+
+    # Remove duplicates while preserving order
+    seen = set()
+    unique_targets: List[AnalysisSkillMeta] = []
+    for m in targets:
+        if m.name not in seen:
+            seen.add(m.name)
+            unique_targets.append(m)
+
+    # Sort by priority
+    unique_targets.sort(key=lambda x: (x.priority, x.name))
+
     parts: List[str] = []
-    if _SKILLS_DIR.exists():
-        for p in sorted(_SKILLS_DIR.glob("*.md")):
-            txt = p.read_text(encoding="utf-8").strip()
-            if txt:
-                parts.append(txt)
+    for m in unique_targets:
+        txt = m.path.read_text(encoding="utf-8").strip()
+        if txt:
+            parts.append(txt)
     return "\n\n---\n\n".join(parts).strip()
 
 
@@ -226,17 +341,30 @@ def parse_llm_json_response(content: str) -> Dict[str, Any]:
     return data if isinstance(data, dict) else {}
 
 
+def _report_cdata(root, tag: str) -> str:
+    el = root.find(f".//{tag}")
+    if el is None:
+        el = root.find(tag)
+    if el is None:
+        return ""
+    return "".join(el.itertext()).strip()
+
+
 def parse_llm_report_response(content: str) -> Dict[str, str]:
     """
     解析报告类 LLM 输出，仅支持 XML 格式。
-    格式：<report><markdown><![CDATA[...]]></markdown><html><![CDATA[...]]></html></report>
-    CDATA 便于嵌入 HTML，无需转义。
-    解析失败（含 xenon 修复后仍失败）则抛出 XmlParseError，由调用方触发 LLM 重试。
+    主格式（双语）：
+    <report>
+      <markdown_zh><![CDATA[...]]></markdown_zh>
+      <html_zh><![CDATA[...]]></html_zh>
+      <markdown_en><![CDATA[...]]></markdown_en>
+      <html_en><![CDATA[...]]></html_en>
+    </report>
+    兼容旧版单语：<markdown> + <html>（会复制到中英四段，质量降级）。
     """
     raw = (content or "").strip()
     if not raw:
         raise XmlParseError("Empty report content", raw_content=content)
-    # 从代码块提取 XML（若 LLM 包在 ```xml 中）
     xml_str = raw
     if "```" in raw:
         for part in raw.split("```"):
@@ -245,18 +373,42 @@ def parse_llm_report_response(content: str) -> Dict[str, str]:
                 xml_str = s
                 break
     root = _parse_xml_to_root(xml_str)
-    md_el = root.find(".//markdown")
-    if md_el is None:
-        md_el = root.find("markdown")
-    html_el = root.find(".//html")
-    if html_el is None:
-        html_el = root.find("html")
-    md = "".join((md_el.itertext() if md_el is not None else []))
-    html = "".join((html_el.itertext() if html_el is not None else []))
-    return {"markdown": md.strip(), "html": html.strip()}
+
+    md_zh = _report_cdata(root, "markdown_zh")
+    html_zh = _report_cdata(root, "html_zh")
+    md_en = _report_cdata(root, "markdown_en")
+    html_en = _report_cdata(root, "html_en")
+
+    md_legacy = _report_cdata(root, "markdown")
+    html_legacy = _report_cdata(root, "html")
+
+    if not (md_zh or html_zh or md_en or html_en) and (md_legacy or html_legacy):
+        md_zh = md_en = md_legacy
+        html_zh = html_en = html_legacy
+
+    if not (md_zh and html_zh and md_en and html_en):
+        raise XmlParseError(
+            "Report XML must include non-empty markdown_zh, html_zh, markdown_en, html_en "
+            "(or legacy markdown+html pair for degraded fill).",
+            raw_content=content,
+        )
+
+    return {
+        "markdown_zh": md_zh,
+        "html_zh": html_zh,
+        "markdown_en": md_en,
+        "html_en": html_en,
+        "markdown": md_zh,
+        "html": html_zh,
+    }
 
 
 # ---------- 先读结构再处理：DB schema 与实验文件 ----------
+
+
+def _quote_identifier(name: str) -> str:
+    """Safely quote SQLite identifiers (table/column names)."""
+    return '"' + str(name).replace('"', '""') + '"'
 
 
 def extract_database_schema(db_path: Path) -> Dict[str, Any]:
@@ -271,7 +423,7 @@ def extract_database_schema(db_path: Path) -> Dict[str, Any]:
     tables = cursor.fetchall()
     schema = {}
     for (table_name,) in tables:
-        cursor.execute(f"PRAGMA table_info({table_name})")
+        cursor.execute(f"PRAGMA table_info({_quote_identifier(table_name)})")
         columns = cursor.fetchall()
         schema[table_name] = [
             {
@@ -307,7 +459,7 @@ def format_database_schema_markdown(
         cursor = conn.cursor()
         lines.append("### Table Row Counts")
         for table_name in schema:
-            cursor.execute(f"SELECT COUNT(*) FROM {table_name}")
+            cursor.execute(f"SELECT COUNT(*) FROM {_quote_identifier(table_name)}")
             count = cursor.fetchone()[0]
             lines.append(f"- `{table_name}`: {count} rows")
         conn.close()

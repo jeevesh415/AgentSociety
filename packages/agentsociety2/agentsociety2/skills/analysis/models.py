@@ -16,7 +16,7 @@ DIR_ARTIFACTS = "artifacts"  # run/artifacts: 实验执行产物
 DIR_PRESENTATION = "presentation"
 DIR_SYNTHESIS = "synthesis"
 DIR_DATA = "data"  # presentation 下 data: 分析子智能体写入的分析数据
-DIR_CHARTS = "charts"  # presentation 下 charts: DataExplorer 写图目录
+DIR_CHARTS = "charts"  # presentation 下 charts: AnalysisAgent 写图目录
 DIR_REPORT_ASSETS = "assets"  # presentation 下 assets: 报告嵌入资源（复制自 charts + run/artifacts），包括图表、报告、分析数据等
 FILE_SQLITE = "sqlite.db"
 FILE_PID = "pid.json"
@@ -65,7 +65,7 @@ class PresentationPaths(BaseModel):
     - output_dir/
       - report.md, report.html, README.md
       - data/analysis_summary.json
-      - charts/  （DataExplorer 写图目录，再被复制到 assets）
+    - charts/  （AnalysisAgent 写图目录，再被复制到 assets）
       - assets/  （报告引用的图片，DIR_REPORT_ASSETS）
     """
 
@@ -73,7 +73,7 @@ class PresentationPaths(BaseModel):
         ..., description="presentation/hypothesis_<id>/experiment_<id>"
     )
     charts_dir: Path = Field(
-        ..., description="Charts output directory (DataExplorer writes here)"
+        ..., description="Charts output directory (AnalysisAgent writes here)"
     )
     report_assets_dir: Path = Field(
         ..., description="Report assets directory (assets/, referenced by report)"
@@ -167,10 +167,22 @@ class ReportContent(BaseModel):
         default="markdown", description="Preferred format: markdown, html, or both"
     )
     full_content_markdown: Optional[str] = Field(
-        default=None, description="Complete markdown report content"
+        default=None, description="默认中文 Markdown（与 markdown_zh 对齐）"
     )
     full_content_html: Optional[str] = Field(
-        default=None, description="Complete HTML report content"
+        default=None, description="默认中文 HTML（与 html_zh 对齐）"
+    )
+    full_content_markdown_zh: Optional[str] = Field(
+        default=None, description="简体中文 Markdown"
+    )
+    full_content_html_zh: Optional[str] = Field(
+        default=None, description="简体中文 HTML"
+    )
+    full_content_markdown_en: Optional[str] = Field(
+        default=None, description="English Markdown"
+    )
+    full_content_html_en: Optional[str] = Field(
+        default=None, description="English HTML"
     )
 
     model_config = ConfigDict(arbitrary_types_allowed=True)
@@ -266,6 +278,26 @@ class AnalysisConfig(BaseModel):
         default="coder",
         description="LLM profile for code generation",
     )
+    analysis_skill_names: List[str] = Field(
+        default_factory=lambda: [
+            "xml_contract",  # Required skill, always loaded
+            "subagent_workflow",
+            "visualization_reliability",
+            "core_skills",
+            "advanced_analysis",
+        ],
+        description=(
+            "Explicitly selected analysis prompt-skill names. "
+            "With strict mode enabled, only these skills are injected into prompts. "
+            "Required skills (like xml_contract) are always loaded regardless of selection."
+        ),
+    )
+    analysis_skill_strict_selection: bool = Field(
+        default=True,
+        description=(
+            "If true, do not auto-load all analysis skills; only load selected names."
+        ),
+    )
 
     @field_validator("workspace_path")
     @classmethod
@@ -340,7 +372,19 @@ class ExperimentSynthesis(BaseModel):
         None, description="Synthesis report Markdown file path"
     )
     synthesis_report_html_path: Optional[str] = Field(
-        None, description="Synthesis report HTML file path"
+        None, description="Synthesis report HTML file path (Chinese)"
+    )
+    synthesis_report_zh_md_path: Optional[str] = Field(
+        None, description="Synthesis Markdown (Chinese), explicit _zh filename"
+    )
+    synthesis_report_zh_html_path: Optional[str] = Field(
+        None, description="Synthesis HTML (Chinese), explicit _zh filename"
+    )
+    synthesis_report_en_md_path: Optional[str] = Field(
+        None, description="Synthesis Markdown (English)"
+    )
+    synthesis_report_en_html_path: Optional[str] = Field(
+        None, description="Synthesis HTML (English)"
     )
 
     model_config = ConfigDict(arbitrary_types_allowed=True)

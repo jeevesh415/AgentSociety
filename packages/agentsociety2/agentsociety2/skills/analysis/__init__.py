@@ -1,9 +1,8 @@
 """数据分析子智能体模块。
 
-本模块提供实验结果分析和报告生成的完整工具链，包含两个核心子智能体：
+本模块提供实验结果分析和报告生成的完整工具链，核心子智能体为：
 
-- :class:`InsightAgent` — 洞察智能体，生成 insights、findings、conclusions 和 recommendations
-- :class:`DataExplorer` — 数据探索智能体，决定分析策略、选表选工具、生成图表
+- :class:`AnalysisAgent` — 统一分析智能体，负责洞察、策略、工具执行与可视化
 
 核心功能：
 
@@ -28,7 +27,7 @@ Example::
     )
 
     # 使用 Analyzer 类
-    analyzer = Analyzer(workspace_path=Path("./workspace"))
+    analyzer = Analyzer(AnalysisConfig(workspace_path="./workspace"))
     await analyzer.analyze(hypothesis_id="1", experiment_id="1")
 """
 
@@ -63,15 +62,17 @@ from .models import (
     FILE_SYNTHESIS_REPORT_ZH_SUFFIX,
     FILE_SYNTHESIS_REPORT_EN_SUFFIX,
 )
-from .agents import InsightAgent, DataExplorer
+from .agents import AnalysisAgent
 from .tool_executor import AnalysisRunner
 from .service import Analyzer, run_analysis, Synthesizer, run_synthesis
 from .report_generator import Reporter
 from .utils import (
+    AnalysisSkillMeta,
     XmlParseError,
     parse_llm_xml_response,
     parse_llm_xml_to_model,
     parse_llm_report_response,
+    list_analysis_skills,
     get_analysis_skills,
     experiment_paths,
     presentation_paths,
@@ -79,7 +80,14 @@ from .utils import (
     format_database_schema_markdown,
     collect_experiment_files,
 )
-from .eda import generate_eda_profile, generate_sweetviz_profile, generate_quick_stats
+from .eda import (
+    generate_eda_profile,
+    generate_sweetviz_profile,
+    generate_quick_stats,
+    generate_missingno_visualization,
+    generate_multitable_summary,
+    generate_full_eda_report,
+)
 
 __all__ = [
     # Models
@@ -118,9 +126,9 @@ __all__ = [
     "run_analysis",
     "Synthesizer",
     "run_synthesis",
-    # 子智能体组件
-    "InsightAgent",
-    "DataExplorer",
+    # 统一分析智能体
+    "AnalysisAgent",
+    # 其他组件
     "AnalysisRunner",
     "Reporter",
     # Paths & schema (utils)
@@ -131,11 +139,16 @@ __all__ = [
     "collect_experiment_files",
     # Utils
     "XmlParseError",
+    "AnalysisSkillMeta",
     "parse_llm_xml_response",
     "parse_llm_xml_to_model",
     "parse_llm_report_response",
+    "list_analysis_skills",
     "get_analysis_skills",
     "generate_eda_profile",
     "generate_sweetviz_profile",
     "generate_quick_stats",
+    "generate_missingno_visualization",
+    "generate_multitable_summary",
+    "generate_full_eda_report",
 ]

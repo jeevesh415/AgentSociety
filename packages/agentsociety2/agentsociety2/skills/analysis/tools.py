@@ -38,7 +38,15 @@ class GlobTool:
             pattern = arguments.get("pattern", "")
             path_arg = arguments.get("path", ".")
 
-            search_dir = self.workspace_path / path_arg
+            search_dir = (self.workspace_path / path_arg).resolve()
+            try:
+                search_dir.relative_to(self.workspace_path)
+            except ValueError:
+                return ToolResult(
+                    success=False,
+                    content="Path is outside workspace",
+                    error="path_outside_workspace",
+                )
             if not search_dir.exists():
                 return ToolResult(
                     success=False,
@@ -349,6 +357,14 @@ class RunShellCommandTool:
             exec_dir = self.workspace_path
             if directory:
                 exec_dir = (self.workspace_path / directory).resolve()
+            try:
+                exec_dir.relative_to(self.workspace_path)
+            except ValueError:
+                return ToolResult(
+                    success=False,
+                    content="Directory is outside workspace",
+                    error="directory_outside_workspace",
+                )
 
             if not exec_dir.exists():
                 return ToolResult(
