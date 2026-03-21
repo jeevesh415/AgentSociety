@@ -1,7 +1,4 @@
-"""Local tool implementations for analysis module
-
-Simplified versions of tools previously in backend/tools.
-"""
+"""Local tool implementations for analysis module."""
 
 from __future__ import annotations
 

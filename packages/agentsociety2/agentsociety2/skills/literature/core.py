@@ -1,7 +1,6 @@
 """Literature search core module
 
 Core functions for searching academic literature using an external API.
-Refactored from designer/literature_search.py to remove environment variable dependencies.
 """
 
 from __future__ import annotations

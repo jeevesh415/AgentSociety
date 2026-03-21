@@ -140,17 +140,17 @@ synthesis/
 
 ### 工具入口（主 Agent 调用）
 
-通过 `agentsociety2.backend.tools` 暴露：
+通过 Claude Code skills 暴露：
 
-| 工具 | 作用 | 底层 |
+| Skill | 作用 | 底层 |
 |------|------|------|
-| `analyze` | 单实验分析 | `Analyzer.analyze()` |
-| `synthesize` | 跨实验综合 | `Synthesizer.synthesize()` |
+| `agentsociety-analysis` | 单实验分析 | `Analyzer.analyze()` |
+| `agentsociety-synthesize` | 跨实验综合 | `Synthesizer.synthesize()` |
 
 ### Python API
 
 ```python
-from agentsociety2.backend.analysis import (
+from agentsociety2.skills.analysis import (
     Analyzer,
     Synthesizer,
     run_analysis,
@@ -187,7 +187,7 @@ from agentsociety2.backend.analysis import (
 
 ```python
 import asyncio
-from agentsociety2.backend.analysis import Analyzer, AnalysisConfig
+from agentsociety2.skills.analysis import Analyzer, AnalysisConfig
 
 async def main():
     config = AnalysisConfig(workspace_path="./workspace")
