@@ -43,7 +43,7 @@ For complex analysis, it runs as a **multi-stage sub-agent workflow** (not a one
 - stage 2: data-grounded insight generation
 - stage 3: tool execution (EDA/statistics/visualization)
 - stage 4: **summarize execution results before next iteration**
-- stage 5: report generation (bilingual: `report_zh` + `report_en`, each Markdown + HTML; `report.md`/`report.html` = Chinese copies)
+- stage 5: report generation (bilingual: `report_zh` + `report_en`, each Markdown + HTML)
 
 The analysis follows a **data-first** approach:
 
@@ -57,8 +57,6 @@ The analysis follows a **data-first** approach:
 
 ```
 presentation/hypothesis_{id}/experiment_{id}/
-├── report.md                    # Chinese Markdown (same as report_zh.md)
-├── report.html                  # Chinese HTML (same as report_zh.html)
 ├── report_zh.md / report_zh.html   # 简体中文报告
 ├── report_en.md / report_en.html   # English report
 ├── README.md                    # Output file guide

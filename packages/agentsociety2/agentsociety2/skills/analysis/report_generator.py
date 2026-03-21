@@ -303,14 +303,10 @@ class Reporter:
                     eda_profile_path,
                     eda_sweetviz_path,
                 )
-                shutil.copy2(md_zh_path, output_dir / FILE_REPORT_MD)
-                shutil.copy2(html_zh_path, output_dir / FILE_REPORT_HTML)
                 files["markdown_zh"] = str(md_zh_path)
                 files["html_zh"] = str(html_zh_path)
                 files["markdown_en"] = str(md_en_path)
                 files["html_en"] = str(html_en_path)
-                files["markdown"] = str(output_dir / FILE_REPORT_MD)
-                files["html"] = str(output_dir / FILE_REPORT_HTML)
                 await progress("Checking report quality...")
                 judgment = await self._judge_report_generation(
                     content,
@@ -326,12 +322,18 @@ class Reporter:
                     files = await self._save_supporting_files(
                         context, analysis_result, output_dir
                     )
-                    md_fallback = output_dir / FILE_REPORT_MD
-                    html_fallback = output_dir / FILE_REPORT_HTML
-                    if md_fallback.exists():
-                        files["markdown"] = str(md_fallback)
-                    if html_fallback.exists():
-                        files["html"] = str(html_fallback)
+                    md_zh_fallback = output_dir / FILE_REPORT_ZH_MD
+                    html_zh_fallback = output_dir / FILE_REPORT_ZH_HTML
+                    md_en_fallback = output_dir / FILE_REPORT_EN_MD
+                    html_en_fallback = output_dir / FILE_REPORT_EN_HTML
+                    if md_zh_fallback.exists():
+                        files["markdown_zh"] = str(md_zh_fallback)
+                    if html_zh_fallback.exists():
+                        files["html_zh"] = str(html_zh_fallback)
+                    if md_en_fallback.exists():
+                        files["markdown_en"] = str(md_en_fallback)
+                    if html_en_fallback.exists():
+                        files["html_en"] = str(html_en_fallback)
                     return (files, False)
                 last_retry_instruction = (
                     f"XML parse failed: {e}. Return valid XML only."
@@ -349,12 +351,18 @@ class Reporter:
                     files = await self._save_supporting_files(
                         context, analysis_result, output_dir
                     )
-                    md_fallback = output_dir / FILE_REPORT_MD
-                    html_fallback = output_dir / FILE_REPORT_HTML
-                    if md_fallback.exists():
-                        files["markdown"] = str(md_fallback)
-                    if html_fallback.exists():
-                        files["html"] = str(html_fallback)
+                    md_zh_fallback = output_dir / FILE_REPORT_ZH_MD
+                    html_zh_fallback = output_dir / FILE_REPORT_ZH_HTML
+                    md_en_fallback = output_dir / FILE_REPORT_EN_MD
+                    html_en_fallback = output_dir / FILE_REPORT_EN_HTML
+                    if md_zh_fallback.exists():
+                        files["markdown_zh"] = str(md_zh_fallback)
+                    if html_zh_fallback.exists():
+                        files["html_zh"] = str(html_zh_fallback)
+                    if md_en_fallback.exists():
+                        files["markdown_en"] = str(md_en_fallback)
+                    if html_en_fallback.exists():
+                        files["html_en"] = str(html_en_fallback)
                     return (files, False)
                 last_retry_instruction = judgment.retry_instruction
                 retry_count += 1
@@ -597,8 +605,8 @@ Based on the above content, generate **two full-language versions** of the same 
     def _parse_content(self, content: str, context: ExperimentContext) -> ReportContent:
         """解析 LLM 返回的 XML，获取中英 Markdown/HTML。"""
         data = parse_llm_report_response(content)
-        md_zh = (data.get("markdown_zh") or data.get("markdown") or "").strip()
-        html_zh = (data.get("html_zh") or data.get("html") or "").strip()
+        md_zh = (data.get("markdown_zh") or "").strip()
+        html_zh = (data.get("html_zh") or "").strip()
         md_en = (data.get("markdown_en") or "").strip()
         html_en = (data.get("html_en") or "").strip()
         title = f"Analysis: {context.design.hypothesis}"
@@ -894,7 +902,6 @@ Evaluate:
 
 ## Files
 
-- `report.md` / `report.html` - 中文主副本（与 `report_zh.*` 内容一致）
 - `report_zh.md` / `report_zh.html` - 简体中文报告（Markdown + HTML，含嵌入 EDA）
 - `report_en.md` / `report_en.html` - English report (Markdown + HTML)
 - `data/analysis_summary.json` - Analysis summary

@@ -22,8 +22,8 @@ FILE_SQLITE = "sqlite.db"
 FILE_PID = "pid.json"
 FILE_HYPOTHESIS_MD = "HYPOTHESIS.md"
 FILE_EXPERIMENT_MD = "EXPERIMENT.md"
-FILE_REPORT_MD = "report.md"
-FILE_REPORT_HTML = "report.html"
+FILE_REPORT_MD = "report_zh.md"
+FILE_REPORT_HTML = "report_zh.html"
 FILE_ANALYSIS_SUMMARY_JSON = "analysis_summary.json"
 FILE_README_MD = "README.md"
 FILE_SYNTHESIS_REPORT_PREFIX = "synthesis_report_"
@@ -63,7 +63,7 @@ class PresentationPaths(BaseModel):
 
     生成产物布局：
     - output_dir/
-      - report.md, report.html, README.md
+      - report_zh.md, report_zh.html, report_en.md, report_en.html, README.md
       - data/analysis_summary.json
     - charts/  （AnalysisAgent 写图目录，再被复制到 assets）
       - assets/  （报告引用的图片，DIR_REPORT_ASSETS）

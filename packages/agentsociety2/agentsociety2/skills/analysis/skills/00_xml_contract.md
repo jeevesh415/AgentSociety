@@ -12,6 +12,5 @@ required: true
 - If the prompt asks for `<report>`, include **bilingual** outputs (four CDATA blocks):
   - `<markdown_zh>`, `<html_zh>` (简体中文)
   - `<markdown_en>`, `<html_en>` (English)
-- Legacy single-locale `<markdown>` + `<html>` is accepted only as a degraded fallback (same content copied to both languages).
 - If one part is hard to produce, still return non-empty placeholders in all four tags.
 - Keep tags stable and parsable; avoid changing tag names.

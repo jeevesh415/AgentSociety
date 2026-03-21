@@ -2,7 +2,6 @@
 
 import json
 import re
-import shutil
 import sqlite3
 from datetime import datetime
 from pathlib import Path
@@ -787,8 +786,8 @@ Return only XML in this format:
             for r in summary.experiment_results or []:
                 if r.get("success") and r.get("generated_files"):
                     gf = r.get("generated_files") or {}
-                    md_p = gf.get("markdown")
-                    html_p = gf.get("html")
+                    md_p = gf.get("markdown_zh")
+                    html_p = gf.get("html_zh")
                     if md_p or html_p:
                         paths = [p for p in (md_p, html_p) if p]
                         lines.append(
@@ -798,8 +797,7 @@ Return only XML in this format:
             lines.append("")
         lines.append("## Individual Reports (for reference & citation)")
         lines.append(
-            "The above lists paths to each experiment's reports (report.md / report.html are Chinese primary copies; "
-            "report_zh.* / report_en.* are explicit bilingual outputs when present). "
+            "The above lists paths to each experiment's bilingual reports (report_zh.* and report_en.*). "
             "Reference and cite them in your synthesis in both languages where appropriate."
         )
         return "\n".join(lines)
@@ -869,10 +867,10 @@ Return only XML in this format:
                 if r.get("success") and r.get("generated_files"):
                     gf = r.get("generated_files") or {}
                     if (
-                        gf.get("markdown")
-                        or gf.get("html")
-                        or gf.get("markdown_zh")
+                        gf.get("markdown_zh")
                         or gf.get("html_zh")
+                        or gf.get("markdown_en")
+                        or gf.get("html_en")
                     ):
                         return True
         return False
@@ -935,8 +933,6 @@ Check: (1) All four parts substantive? (2) ZH is 简体中文, EN is English? (3
         report_html_zh = output_dir / f"{pfx}{FILE_SYNTHESIS_REPORT_ZH_SUFFIX}.html"
         report_md_en = output_dir / f"{pfx}{FILE_SYNTHESIS_REPORT_EN_SUFFIX}.md"
         report_html_en = output_dir / f"{pfx}{FILE_SYNTHESIS_REPORT_EN_SUFFIX}.html"
-        report_md = output_dir / f"{pfx}.md"
-        report_html = output_dir / f"{pfx}.html"
 
         chart_paths = self._generate_synthesis_charts(synthesis, output_dir)
         chart_block = ""
@@ -989,7 +985,7 @@ Use CDATA. Each HTML: complete document with professional styling."""
             except XmlParseError as e:
                 if attempt >= max_retries - 1:
                     self.logger.warning("Synthesis report XML parse failed: %s", e)
-                    return report_md
+                    return report_md_zh
                 last_feedback = str(e)
                 continue
 
@@ -1038,10 +1034,6 @@ Use CDATA. Each HTML: complete document with professional styling."""
                         self._embed_synthesis_charts_in_html(
                             report_html_en, output_dir, chart_paths
                         )
-                    if report_md_zh.exists():
-                        shutil.copy2(report_md_zh, report_md)
-                    if report_html_zh.exists():
-                        shutil.copy2(report_html_zh, report_html)
                     synthesis.synthesis_report_zh_md_path = (
                         str(report_md_zh) if report_md_zh.exists() else None
                     )
@@ -1054,13 +1046,9 @@ Use CDATA. Each HTML: complete document with professional styling."""
                     synthesis.synthesis_report_en_html_path = (
                         str(report_html_en) if report_html_en.exists() else None
                     )
-                    synthesis.synthesis_report_path = (
-                        str(report_md) if report_md.exists() else None
-                    )
-                    synthesis.synthesis_report_html_path = (
-                        str(report_html) if report_html.exists() else None
-                    )
-                    return report_md
+                    synthesis.synthesis_report_path = synthesis.synthesis_report_zh_md_path
+                    synthesis.synthesis_report_html_path = synthesis.synthesis_report_zh_html_path
+                    return report_md_zh
                 continue
 
             report_md_zh.write_text(md_zh, encoding="utf-8")
@@ -1079,32 +1067,29 @@ Use CDATA. Each HTML: complete document with professional styling."""
             self._embed_synthesis_charts_in_html(
                 report_html_en, output_dir, chart_paths
             )
-            shutil.copy2(report_md_zh, report_md)
-            shutil.copy2(report_html_zh, report_html)
-
             synthesis.synthesis_report_zh_md_path = str(report_md_zh)
             synthesis.synthesis_report_zh_html_path = str(report_html_zh)
             synthesis.synthesis_report_en_md_path = str(report_md_en)
             synthesis.synthesis_report_en_html_path = str(report_html_en)
-            synthesis.synthesis_report_path = str(report_md)
-            synthesis.synthesis_report_html_path = str(report_html)
+            synthesis.synthesis_report_path = str(report_md_zh)
+            synthesis.synthesis_report_html_path = str(report_html_zh)
 
             judgment = await self._judge_synthesis_report(
                 md_zh, html_zh, md_en, html_en, len(chart_paths), synthesis
             )
             if judgment.success:
-                self.logger.info("Saved bilingual synthesis report: %s", report_md)
-                return report_md
+                self.logger.info("Saved bilingual synthesis report: %s", report_md_zh)
+                return report_md_zh
             if attempt >= max_retries - 1:
                 self.logger.warning(
                     "Synthesis report judgment failed after %d attempts; keeping last output.",
                     max_retries,
                 )
-                return report_md
+                return report_md_zh
             last_feedback = f"{judgment.reason}. {judgment.retry_instruction}"
             self.logger.info("Synthesis report judgment: %s, retrying", judgment.reason)
 
-        return report_md
+        return report_md_zh
 
     async def synthesize(
         self,

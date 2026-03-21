@@ -73,14 +73,12 @@ $PYTHON_PATH scripts/synthesize.py --hypothesis-ids 1 --experiment-ids 1 2
 1. **Per-Experiment Analysis**: Analyzes each experiment in scope
 2. **Hypothesis Summaries**: Aggregates results per hypothesis
 3. **Cross-Hypothesis Synthesis**: Compares and synthesizes across hypotheses
-4. **Report Generation**: Creates bilingual synthesis reports (`_zh` + `_en`, each `.md` + `.html`; primary `synthesis_report_{ts}.md/.html` are Chinese copies)
+4. **Report Generation**: Creates bilingual synthesis reports (`_zh` + `_en`, each `.md` + `.html`)
 
 ## Output Files
 
 ```
 synthesis/
-├── synthesis_report_{timestamp}.md       # Chinese MD (copy of _zh)
-├── synthesis_report_{timestamp}.html    # Chinese HTML (copy of _zh)
 ├── synthesis_report_{timestamp}_zh.md / _zh.html
 ├── synthesis_report_{timestamp}_en.md / _en.html
 └── assets/

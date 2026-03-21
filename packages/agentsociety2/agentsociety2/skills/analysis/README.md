@@ -137,8 +137,6 @@ analysis/
 presentation/
 └── hypothesis_{id}/
     └── experiment_{id}/
-        ├── report.md              # 中文 Markdown（与 report_zh.md 一致，兼容旧路径）
-        ├── report.html            # 中文 HTML（与 report_zh.html 一致）
         ├── report_zh.md / report_zh.html   # 简体中文报告
         ├── report_en.md / report_en.html   # English report
         ├── README.md              # 本目录文件说明
@@ -156,7 +154,6 @@ presentation/
 
 | 文件/目录 | 说明 |
 |-----------|------|
-| `report.md` / `report.html` | 中文主副本（与 `report_zh.*` 同步） |
 | `report_zh.md` / `report_zh.html` | 简体中文完整报告 |
 | `report_en.md` / `report_en.html` | English full report |
 | `data/analysis_summary.json` | 结构化分析结果，含 `insights`、`findings`、`conclusions`、`recommendations` |
@@ -171,8 +168,6 @@ presentation/
 
 ```
 synthesis/
-├── synthesis_report_{ts}.md              # 中文 Markdown（与 _zh 同步）
-├── synthesis_report_{ts}.html          # 中文 HTML（与 _zh 同步）
 ├── synthesis_report_{ts}_zh.md         # 简体中文综合报告
 ├── synthesis_report_{ts}_zh.html
 ├── synthesis_report_{ts}_en.md         # English synthesis
@@ -183,7 +178,7 @@ synthesis/
 
 | 文件 | 说明 |
 |------|------|
-| `synthesis_report_*_zh.*` / `synthesis_report_*.{md,html}` | 中文综合报告（主路径为中文副本） |
+| `synthesis_report_*_zh.*` | 简体中文综合报告 |
 | `synthesis_report_*_en.*` | English synthesis |
 | `assets/synthesis_comparison.png` | 各假设完成度与成功实验数柱状图 |
 

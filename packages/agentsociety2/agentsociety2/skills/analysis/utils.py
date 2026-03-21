@@ -360,7 +360,7 @@ def parse_llm_report_response(content: str) -> Dict[str, str]:
       <markdown_en><![CDATA[...]]></markdown_en>
       <html_en><![CDATA[...]]></html_en>
     </report>
-    兼容旧版单语：<markdown> + <html>（会复制到中英四段，质量降级）。
+    仅接受双语四段输出，不做旧版单语兼容。
     """
     raw = (content or "").strip()
     if not raw:
@@ -379,17 +379,9 @@ def parse_llm_report_response(content: str) -> Dict[str, str]:
     md_en = _report_cdata(root, "markdown_en")
     html_en = _report_cdata(root, "html_en")
 
-    md_legacy = _report_cdata(root, "markdown")
-    html_legacy = _report_cdata(root, "html")
-
-    if not (md_zh or html_zh or md_en or html_en) and (md_legacy or html_legacy):
-        md_zh = md_en = md_legacy
-        html_zh = html_en = html_legacy
-
     if not (md_zh and html_zh and md_en and html_en):
         raise XmlParseError(
-            "Report XML must include non-empty markdown_zh, html_zh, markdown_en, html_en "
-            "(or legacy markdown+html pair for degraded fill).",
+            "Report XML must include non-empty markdown_zh, html_zh, markdown_en, html_en.",
             raw_content=content,
         )
 
@@ -398,8 +390,6 @@ def parse_llm_report_response(content: str) -> Dict[str, str]:
         "html_zh": html_zh,
         "markdown_en": md_en,
         "html_en": html_en,
-        "markdown": md_zh,
-        "html": html_zh,
     }
 
 
