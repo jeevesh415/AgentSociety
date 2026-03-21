@@ -173,7 +173,7 @@ Agents are autonomous entities that interact with environments through LLM-power
 
 #### Agent Skills
 
-PersonAgent follows a **progressive disclosure** model. Skills are self-contained directories under `agent/skills/`:
+PersonAgent follows a **metadata-first, selected-only** model. Skills are self-contained directories under `agent/skills/`:
 
 ```
 agent/skills/
@@ -188,9 +188,9 @@ Each skill has:
 - `SKILL.md` — YAML frontmatter (name, description, priority, requires/provides) + behavior docs
 - `scripts/<name>.py` — exports `async def run(agent, ctx)`
 
-Skills follow metadata-first progressive selection:
+Skills follow metadata-first selection:
 - selection stage reads compact metadata (name/description/priority/requires/provides)
-- execution stage loads and runs only LLM-selected skills
+- execution stage loads and runs only LLM-selected skills (unselected skills do not run)
 
 Custom skills can be placed in `workspace/custom/skills/` and hot-loaded at runtime via the API or VSCode extension.
 

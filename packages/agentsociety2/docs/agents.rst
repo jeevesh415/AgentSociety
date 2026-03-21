@@ -28,26 +28,25 @@ PersonAgent
 内置 Skills
 ^^^^^^^^^^^
 
-每个 simulation tick，PersonAgent 执行三层 skill pipeline：
+每个 simulation tick，PersonAgent 都会执行同一套“先选后跑”的流程：
 
 .. list-table::
-   :widths: 20 20 40
-   :header-rows: 1
+     :widths: 28 72
+     :header-rows: 1
 
-   * - Layer
-     - Skill
-     - 功能
-   * - Always-on
-     - observation
-     - 环境感知（每步必执行）
-   * - Dynamic
-     - needs, cognition, plan
-     - 需求调整、情感/意图、规划执行
-   * - Finalize
-     - memory
-     - 记忆 flush 到长期存储
+     * - 阶段
+         - 说明
+     * - 选择阶段
+         - 主 LLM 只读取技能元数据（name/description/priority/requires/provides），决定本步 ``selected_skills``。
+     * - 执行阶段
+         - 仅加载并执行 ``selected_skills``，按 priority 排序；未选中的技能不加载、不执行。
+     * - 依赖修正
+         - 若所选技能缺少依赖，系统先让 LLM 修正一次；若仍不合法，裁剪不满足依赖的技能。
+     * - 记忆收尾
+         - ``memory`` 技能被选中时会 flush 认知缓冲；未选中时缓冲保留到后续 step，``close()`` 时兜底 flush。
 
-LLM 会根据当前情境自主选择激活哪些 dynamic skill。
+常见内置技能包括 ``observation``、``needs``、``cognition``、``plan``、``memory``。
+它们都不再属于固定“必须执行层”，而是由 LLM 按上下文按需选择。
 
 详细说明请参见 :doc:`agent_skills`。
 
