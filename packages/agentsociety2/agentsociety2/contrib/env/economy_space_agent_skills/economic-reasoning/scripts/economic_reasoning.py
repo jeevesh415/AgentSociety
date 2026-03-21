@@ -24,6 +24,6 @@ async def run(agent: Any, ctx: dict[str, Any]) -> None:
 
     agent._add_cognition_memory(
         f"Economic context: {financial_info}",
-        type="economic_analysis",
+        memory_type="economic_analysis",
     )
     ctx["step_log"].append("EconomicReasoning: analyzed financial state")

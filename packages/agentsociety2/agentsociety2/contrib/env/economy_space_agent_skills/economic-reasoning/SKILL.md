@@ -2,7 +2,11 @@
 name: economic-reasoning
 description: Economic decision-making for agents in EconomySpace. Activate when the agent observes currency, prices, income, tax, or trading opportunities to make informed financial decisions.
 priority: 45
-auto_load: dynamic
+requires:
+  - observation
+provides:
+  - economic_analysis
+  - financial_reasoning
 ---
 
 # Economic Reasoning
