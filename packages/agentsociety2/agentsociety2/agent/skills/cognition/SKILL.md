@@ -1,6 +1,7 @@
 ---
 name: cognition
 description: Update emotions, generate thoughts, and form intentions (TPB). Activate when the agent needs to reflect, decide what to do next, or process emotional events.
+trigger: always
 priority: 40
 requires:
   - observation

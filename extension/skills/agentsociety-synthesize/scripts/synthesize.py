@@ -117,8 +117,10 @@ Examples:
 
     print(f"\nHypotheses analyzed: {len(result.hypothesis_summaries)}")
     for summary in result.hypothesis_summaries:
-        print(f"  - Hypothesis {summary.hypothesis_id}: {summary.experiment_count} experiments, "
-              f"{summary.successful_experiments} successful")
+        print(
+            f"  - Hypothesis {summary.hypothesis_id}: {summary.experiment_count} experiments, "
+            f"{summary.successful_experiments} successful"
+        )
 
     return 0
 

@@ -1,6 +1,7 @@
 ---
 name: observation
 description: Environment perception — the agent's eyes and ears.
+trigger: always
 priority: 0
 provides:
   - observation

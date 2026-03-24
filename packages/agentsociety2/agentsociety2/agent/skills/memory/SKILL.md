@@ -1,6 +1,7 @@
 ---
 name: memory
 description: Persist cognition memory to long-term storage and optionally query current intention.
+trigger: on_demand
 priority: 90
 requires:
   - observation

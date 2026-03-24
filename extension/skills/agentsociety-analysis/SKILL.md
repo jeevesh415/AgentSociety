@@ -43,7 +43,7 @@ For complex analysis, it runs as a **multi-stage sub-agent workflow** (not a one
 - stage 2: data-grounded insight generation
 - stage 3: tool execution (EDA/statistics/visualization)
 - stage 4: **summarize execution results before next iteration**
-- stage 5: report generation (bilingual: `report_zh` + `report_en`, each Markdown + HTML)
+- stage 5: report generation (Markdown + HTML)
 
 The analysis follows a **data-first** approach:
 
@@ -57,13 +57,15 @@ The analysis follows a **data-first** approach:
 
 ```
 presentation/hypothesis_{id}/experiment_{id}/
-├── report_zh.md / report_zh.html   # 简体中文报告
-├── report_en.md / report_en.html   # English report
+├── report.md                    # Markdown report
+├── report.html                  # HTML report (complete document)
 ├── README.md                    # Output file guide
 ├── data/
 │   ├── analysis_summary.json    # Structured analysis results
 │   ├── eda_profile.html         # ydata-profiling output
-│   └── eda_sweetviz.html        # sweetviz output
+│   ├── eda_sweetviz.html        # sweetviz output
+│   ├── eda_missingno.png        # Missing value visualization
+│   └── eda_table_summary.png    # Multi-table summary
 ├── charts/                      # Generated charts
 └── assets/                      # Report-embedded static resources
 ```
@@ -74,6 +76,7 @@ presentation/hypothesis_{id}/experiment_{id}/
 |------|--------|---------|
 | ydata-profiling | `eda_profile.html` | Comprehensive data profile |
 | Sweetviz | `eda_sweetviz.html` | Correlation & target analysis |
+| missingno | `eda_missingno.png` | Missing value patterns |
 | Quick stats | Markdown text | pandas.describe() summary |
 
 ## Analysis Capabilities

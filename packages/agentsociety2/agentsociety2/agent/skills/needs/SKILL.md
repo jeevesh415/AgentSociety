@@ -1,6 +1,8 @@
 ---
 name: needs
 description: Adjust physiological and social need satisfaction levels (satiety, energy, safety, social). Activate when the agent's physical or social state may have changed.
+trigger: always
+script: scripts/needs.py
 priority: 30
 requires:
   - observation

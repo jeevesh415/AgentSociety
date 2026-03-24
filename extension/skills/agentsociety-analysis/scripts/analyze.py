@@ -33,11 +33,13 @@ def main():
     from agentsociety2.skills.analysis import run_analysis
 
     try:
-        result = asyncio.run(run_analysis(
-            workspace_path=str(workspace_path),
-            hypothesis_id=args.hypothesis_id,
-            experiment_id=args.experiment_id,
-        ))
+        result = asyncio.run(
+            run_analysis(
+                workspace_path=str(workspace_path),
+                hypothesis_id=args.hypothesis_id,
+                experiment_id=args.experiment_id,
+            )
+        )
     except Exception as e:
         print(f"Error: {e}")
         return 1

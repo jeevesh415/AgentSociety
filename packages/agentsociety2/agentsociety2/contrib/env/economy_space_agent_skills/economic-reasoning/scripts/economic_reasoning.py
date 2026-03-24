@@ -1,29 +1,59 @@
-"""economic-reasoning skill — EconomySpace 环境下的经济决策辅助"""
+"""economic-reasoning skill (subprocess mode)."""
 
 from __future__ import annotations
-from typing import Any
+
+import argparse
+import json
+from pathlib import Path
 
 
-async def run(agent: Any, ctx: dict[str, Any]) -> None:
-    observation = agent._observation or ""
+ECONOMIC_KEYWORDS = (
+    "currency",
+    "price",
+    "income",
+    "tax",
+    "product",
+    "job",
+    "wage",
+    "economy",
+    "market",
+    "cost",
+    "buy",
+    "sell",
+)
+
+
+def main() -> int:
+    parser = argparse.ArgumentParser()
+    parser.add_argument("--args-json", default="{}")
+    ns = parser.parse_args()
+    args = json.loads(ns.args_json or "{}")
+
+    observation = str(args.get("observation", ""))
+    financial_info = args.get("financial_info", "")
     obs_lower = observation.lower()
+    has_economic_context = any(kw in obs_lower for kw in ECONOMIC_KEYWORDS)
 
-    has_economic_context = any(
-        kw in obs_lower
-        for kw in ("currency", "price", "income", "tax", "product", "job", "wage", "economy")
-    )
-    if not has_economic_context:
-        return
+    result = {
+        "ok": True,
+        "has_economic_context": has_economic_context,
+        "summary": "",
+        "financial_info": financial_info,
+    }
 
-    # 查询 agent 的经济状态
-    _, financial_info = await agent.ask_env(
-        {"id": agent._id},
-        f"get_person(agent_id={agent._id})",
-        readonly=True,
-    )
+    if has_economic_context:
+        result["summary"] = "EconomicReasoning: analyzed financial state"
+    else:
+        result["summary"] = "EconomicReasoning: no economic context"
 
-    agent._add_cognition_memory(
-        f"Economic context: {financial_info}",
-        memory_type="economic_analysis",
+    Path("economic_reasoning.json").write_text(
+        json.dumps(result, ensure_ascii=False, indent=2),
+        encoding="utf-8",
     )
-    ctx["step_log"].append("EconomicReasoning: analyzed financial state")
+    Path("economic_reasoning.txt").write_text(result["summary"], encoding="utf-8")
+    print(json.dumps(result, ensure_ascii=False))
+    return 0
+
+
+if __name__ == "__main__":
+    raise SystemExit(main())

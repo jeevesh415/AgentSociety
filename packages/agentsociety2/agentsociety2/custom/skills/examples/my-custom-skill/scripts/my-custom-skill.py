@@ -1,20 +1,62 @@
-"""
-Example custom agent skill.
+"""Example custom skill script (subprocess mode).
 
-每个 skill 的入口脚本需要导出一个 async def run(agent, ctx) 函数。
-agent 是 PersonAgent 实例，ctx 是 step 上下文 dict。
+This script demonstrates Pattern B: deterministic computation via subprocess.
+It receives args via --args-json, does computation, and outputs JSON to stdout.
+
+Usage:
+    python my-custom-skill.py --args-json '{"tick": 1, "profile": {...}}'
+
+Environment variables available:
+    SKILL_NAME     - Name of this skill
+    SKILL_DIR      - Path to the skill directory (where SKILL.md lives)
+    AGENT_WORK_DIR - Path to the agent's workspace directory (cwd)
 """
 
 from __future__ import annotations
-from typing import Any
+
+import argparse
+import json
+from pathlib import Path
 
 
-async def run(agent: Any, ctx: dict[str, Any]) -> None:
-    step_log: list[str] = ctx["step_log"]
+def main() -> int:
+    parser = argparse.ArgumentParser()
+    parser.add_argument("--args-json", default="{}")
+    ns = parser.parse_args()
+    args = json.loads(ns.args_json or "{}")
 
-    # 示例：读取当前 observation
-    observation = getattr(agent, "_observation", None)
-    if observation:
-        step_log.append("MyCustomSkill: processed observation")
+    cwd = Path.cwd()  # This is AGENT_WORK_DIR
+
+    # Example: read existing state
+    state_path = cwd / "custom_state.json"
+    if state_path.exists():
+        state = json.loads(state_path.read_text(encoding="utf-8"))
     else:
-        step_log.append("MyCustomSkill: no observation available")
+        state = {"count": 0}
+
+    # Example: do some computation
+    state["count"] += 1
+    state["last_tick"] = args.get("tick")
+
+    # Example: write state back
+    state_path.write_text(
+        json.dumps(state, ensure_ascii=False, indent=2),
+        encoding="utf-8",
+    )
+
+    # Output result as JSON to stdout (this is what the agent sees)
+    print(
+        json.dumps(
+            {
+                "ok": True,
+                "message": f"Custom skill ran successfully (count={state['count']})",
+                "state": state,
+            },
+            ensure_ascii=False,
+        )
+    )
+    return 0
+
+
+if __name__ == "__main__":
+    raise SystemExit(main())

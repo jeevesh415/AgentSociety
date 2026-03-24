@@ -1,6 +1,7 @@
 ---
 name: plan
 description: Generate multi-step plans from intentions and execute them via ReAct loop (reason → act → observe). Activate when the agent has an intention or active plan to carry out.
+trigger: on_demand
 priority: 50
 requires:
   - observation

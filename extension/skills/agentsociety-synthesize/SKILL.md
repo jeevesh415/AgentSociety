@@ -6,7 +6,7 @@ license: Proprietary. LICENSE.txt has complete terms
 
 # Synthesize
 
-Synthesize experiment results across multiple hypotheses and experiments into **bilingual** (简体中文 + English) research summaries, each in **Markdown and HTML**.
+Synthesize experiment results across multiple hypotheses and experiments into bilingual (Chinese/English) research summaries.
 
 ## Quick Start
 
@@ -53,7 +53,7 @@ $PYTHON_PATH scripts/synthesize.py
 This will:
 1. Discover all `hypothesis_*` directories
 2. For each hypothesis, discover all `experiment_*` directories
-3. Run analysis on each discovered experiment
+3. Run analysis on each experiment (if not already analyzed)
 4. Generate cross-hypothesis synthesis report
 
 ### 2. Targeted Mode
@@ -70,17 +70,17 @@ $PYTHON_PATH scripts/synthesize.py --hypothesis-ids 1 --experiment-ids 1 2
 
 ## What It Does
 
-1. **Per-Experiment Analysis**: Analyzes each experiment in scope
+1. **Per-Experiment Analysis**: Analyzes each experiment (reuses existing analysis if available)
 2. **Hypothesis Summaries**: Aggregates results per hypothesis
 3. **Cross-Hypothesis Synthesis**: Compares and synthesizes across hypotheses
-4. **Report Generation**: Creates bilingual synthesis reports (`_zh` + `_en`, each `.md` + `.html`)
+4. **Report Generation**: Creates bilingual reports (Chinese and English)
 
 ## Output Files
 
 ```
 synthesis/
-├── synthesis_report_{timestamp}_zh.md / _zh.html
-├── synthesis_report_{timestamp}_en.md / _en.html
+├── synthesis_report_{timestamp}.md      # Markdown synthesis report
+├── synthesis_report_{timestamp}.html    # HTML synthesis report
 └── assets/
     └── synthesis_comparison.png         # Comparison chart
 ```
