@@ -4,7 +4,7 @@ from datetime import datetime
 from typing import List, Dict, Any, Optional, Set
 from collections import defaultdict
 
-from .models import Post, User
+from .models import Post
 
 
 def _get_pretrained_algorithm(algorithm_name: str, model_path: Optional[str]):

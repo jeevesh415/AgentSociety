@@ -8,6 +8,7 @@ from pydantic import BaseModel, Field, field_validator
 __all__ = [
     "EnvModuleConfig",
     "AgentConfig",
+    "CodeGenRouterConfig",
     "InitConfig",
     "RunStep",
     "AskStep",
@@ -40,11 +41,21 @@ class AgentConfig(BaseModel):
         return v
 
 
+class CodeGenRouterConfig(BaseModel):
+    """CodeGenRouter 配置模型"""
+
+    final_summary_enabled: bool = Field(True, description="是否启用 ask 最终 summary")
+
+
 class InitConfig(BaseModel):
     """初始化配置文件模型"""
-    
+
     env_modules: List[EnvModuleConfig] = Field(..., min_length=1, description="环境模块列表")
     agents: List[AgentConfig] = Field(..., min_length=1, description="Agent列表")
+    codegen_router: CodeGenRouterConfig = Field(
+        default_factory=CodeGenRouterConfig,
+        description="CodeGenRouter 配置",
+    )
 
 
 class RunStep(BaseModel):

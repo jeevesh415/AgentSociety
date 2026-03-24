@@ -1,287 +1,266 @@
 """
 自定义模块扫描服务
 
-扫描 custom/ 目录，发现用户自定义的 Agent 和环境模块。
+扫描 custom/ 目录，发现用户自定义的 Agent 和环境模块，并输出结构化诊断。
 """
 
-from pathlib import Path
-from typing import List, Dict, Any
+from __future__ import annotations
+
 import importlib.util
-import sys
 import inspect
+import sys
+from pathlib import Path
+from typing import Any
+
+from agentsociety2.backend.services.custom.compatibility import (
+    build_env_scan_diagnostic,
+    build_import_error_diagnostic,
+)
+from agentsociety2.backend.services.custom.models import (
+    CompatibilityIssue,
+    ScanDiagnostic,
+)
 
 
 class CustomModuleScanner:
     """自定义模块扫描服务"""
 
     def __init__(self, workspace_path: str):
-        """
-        初始化扫描器
-
-        Args:
-            workspace_path: 工作区路径
-        """
         self.workspace_path = Path(workspace_path).resolve()
         self.custom_dir = self.workspace_path / "custom"
 
-    def scan_all(self) -> Dict[str, Any]:
-        """
-        扫描所有自定义模块
+    def scan_all(self) -> dict[str, Any]:
+        """扫描所有自定义模块。"""
 
-        Returns:
-            包含 agents, envs, errors 的字典
-        """
-        result = {"agents": [], "envs": [], "errors": []}
+        result: dict[str, Any] = {
+            "agents": [],
+            "envs": [],
+            "errors": [],
+            "agent_diagnostics": [],
+            "env_diagnostics": [],
+        }
 
         if not self.custom_dir.exists():
             result["errors"].append(f"custom/ 目录不存在: {self.custom_dir}")
             return result
 
-        # 扫描 Agent（跳过 examples 子目录）
         agents_dir = self.custom_dir / "agents"
         if agents_dir.exists():
-            result["agents"] = self._scan_agents(agents_dir, skip_examples=True)
+            agent_result = self._scan_agents(agents_dir, skip_examples=True)
+            result["agents"] = agent_result["modules"]
+            result["agent_diagnostics"] = agent_result["diagnostics"]
+            result["errors"].extend(agent_result["errors"])
         else:
-            result["errors"].append(f"custom/agents/ 目录不存在")
+            result["errors"].append("custom/agents/ 目录不存在")
 
-        # 扫描环境模块（跳过 examples 子目录）
         envs_dir = self.custom_dir / "envs"
         if envs_dir.exists():
-            result["envs"] = self._scan_envs(envs_dir, skip_examples=True)
+            env_result = self._scan_envs(envs_dir, skip_examples=True)
+            result["envs"] = env_result["modules"]
+            result["env_diagnostics"] = env_result["diagnostics"]
+            result["errors"].extend(env_result["errors"])
         else:
-            result["errors"].append(f"custom/envs/ 目录不存在")
+            result["errors"].append("custom/envs/ 目录不存在")
 
         return result
 
     def _scan_agents(
         self, agents_dir: Path, skip_examples: bool = True
-    ) -> List[Dict[str, Any]]:
-        """
-        扫描 Agent 目录
+    ) -> dict[str, Any]:
+        """扫描 Agent 目录。"""
 
-        Args:
-            agents_dir: Agent 目录路径
-            skip_examples: 是否跳过 examples 子目录
-
-        Returns:
-            发现的 Agent 列表
-        """
-        agents = []
+        agents: list[dict[str, Any]] = []
+        diagnostics: list[dict[str, Any]] = []
+        errors: list[str] = []
 
         for py_file in agents_dir.rglob("*.py"):
-            # 跳过 __init__.py
             if py_file.name.startswith("__"):
                 continue
-
-            # 跳过 examples 目录
             if skip_examples and "examples" in py_file.parts:
                 continue
 
+            module_path = str(py_file.relative_to(self.workspace_path))
             try:
-                agent_classes = self._extract_agent_classes(py_file)
-                for cls in agent_classes:
-                    agents.append(
-                        {
-                            "type": cls.__name__,
-                            "class_name": cls.__name__,
-                            "module_path": str(
-                                py_file.relative_to(self.workspace_path)
-                            ),
-                            "file_path": str(py_file),
-                            "description": self._get_safe_description(cls),
-                        }
-                    )
-            except Exception as e:
-                # 记录错误但继续扫描
-                pass
+                module_name = f"custom_module_{id(py_file)}"
+                module = self._load_module(py_file, module_name)
+                from agentsociety2.agent.base import AgentBase
 
-        return agents
+                found = False
+                for _, obj in inspect.getmembers(module, inspect.isclass):
+                    if (
+                        issubclass(obj, AgentBase)
+                        and obj is not AgentBase
+                        and obj.__module__ == module_name
+                    ):
+                        found = True
+                        accepted = self._validate_agent_class(obj)
+                        issue_list: list[CompatibilityIssue] = []
+                        if not accepted:
+                            issue_list.append(
+                                CompatibilityIssue(
+                                    code="missing_required_methods",
+                                    check="required_methods",
+                                    message=f"{obj.__name__} 缺少 ask/step/dump/load 中的必需方法",
+                                )
+                            )
+                        diagnostics.append(
+                            ScanDiagnostic(
+                                module_kind="agent",
+                                module_path=module_path,
+                                file_path=str(py_file),
+                                class_name=obj.__name__,
+                                accepted=accepted,
+                                issues=issue_list,
+                                metadata={
+                                    "type": obj.__name__,
+                                    "class_name": obj.__name__,
+                                },
+                            ).model_dump(mode="json")
+                        )
+                        if accepted:
+                            agents.append(
+                                {
+                                    "type": obj.__name__,
+                                    "class_name": obj.__name__,
+                                    "module_path": module_path,
+                                    "file_path": str(py_file),
+                                    "description": self._get_safe_description(obj),
+                                }
+                            )
+                if not found:
+                    diagnostics.append(
+                        ScanDiagnostic(
+                            module_kind="agent",
+                            module_path=module_path,
+                            file_path=str(py_file),
+                            class_name=None,
+                            accepted=False,
+                            issues=[
+                                CompatibilityIssue(
+                                    code="no_agent_class",
+                                    check="class_discovery",
+                                    message=f"{py_file.name} 中未发现 AgentBase 子类",
+                                )
+                            ],
+                            metadata={},
+                        ).model_dump(mode="json")
+                    )
+                self._cleanup_module(module_name)
+            except Exception as exc:
+                self._cleanup_module(module_name)
+                errors.append(f"Agent scan failed for {module_path}: {exc}")
+                diagnostics.append(
+                    build_import_error_diagnostic(
+                        module_kind="agent",
+                        file_path=py_file,
+                        module_path=module_path,
+                        error=exc,
+                    ).model_dump(mode="json")
+                )
+
+        return {"modules": agents, "diagnostics": diagnostics, "errors": errors}
 
     def _scan_envs(
         self, envs_dir: Path, skip_examples: bool = True
-    ) -> List[Dict[str, Any]]:
-        """
-        扫描环境模块目录
+    ) -> dict[str, Any]:
+        """扫描环境模块目录。"""
 
-        Args:
-            envs_dir: 环境模块目录路径
-            skip_examples: 是否跳过 examples 子目录
-
-        Returns:
-            发现的环境模块列表
-        """
-        envs = []
+        envs: list[dict[str, Any]] = []
+        diagnostics: list[dict[str, Any]] = []
+        errors: list[str] = []
 
         for py_file in envs_dir.rglob("*.py"):
-            # 跳过 __init__.py
             if py_file.name.startswith("__"):
                 continue
-
-            # 跳过 examples 目录
             if skip_examples and "examples" in py_file.parts:
                 continue
 
+            module_path = str(py_file.relative_to(self.workspace_path))
             try:
-                env_classes = self._extract_env_classes(py_file)
-                for cls in env_classes:
-                    envs.append(
-                        {
-                            "type": cls.__name__,
-                            "class_name": cls.__name__,
-                            "module_path": str(
-                                py_file.relative_to(self.workspace_path)
-                            ),
-                            "file_path": str(py_file),
-                            "description": self._get_safe_description(cls),
-                        }
+                module_name = f"custom_module_{id(py_file)}"
+                module = self._load_module(py_file, module_name)
+                from agentsociety2.env.base import EnvBase
+
+                found = False
+                for _, obj in inspect.getmembers(module, inspect.isclass):
+                    if (
+                        issubclass(obj, EnvBase)
+                        and obj is not EnvBase
+                        and obj.__module__ == module_name
+                    ):
+                        found = True
+                        diagnostic = build_env_scan_diagnostic(
+                            workspace_path=self.workspace_path,
+                            module_path=module_path,
+                            file_path=py_file,
+                            cls=obj,
+                        )
+                        diagnostics.append(diagnostic.model_dump(mode="json"))
+                        if diagnostic.accepted:
+                            envs.append(
+                                {
+                                    "type": obj.__name__,
+                                    "class_name": obj.__name__,
+                                    "module_path": module_path,
+                                    "file_path": str(py_file),
+                                    "description": self._get_safe_description(obj),
+                                }
+                            )
+                if not found:
+                    diagnostics.append(
+                        ScanDiagnostic(
+                            module_kind="env_module",
+                            module_path=module_path,
+                            file_path=str(py_file),
+                            class_name=None,
+                            accepted=False,
+                            issues=[
+                                CompatibilityIssue(
+                                    code="no_env_class",
+                                    check="class_discovery",
+                                    message=f"{py_file.name} 中未发现 EnvBase 子类",
+                                )
+                            ],
+                            metadata={},
+                        ).model_dump(mode="json")
                     )
-            except Exception as e:
-                pass
+                self._cleanup_module(module_name)
+            except Exception as exc:
+                self._cleanup_module(module_name)
+                errors.append(f"Env scan failed for {module_path}: {exc}")
+                diagnostics.append(
+                    build_import_error_diagnostic(
+                        module_kind="env_module",
+                        file_path=py_file,
+                        module_path=module_path,
+                        error=exc,
+                    ).model_dump(mode="json")
+                )
 
-        return envs
+        return {"modules": envs, "diagnostics": diagnostics, "errors": errors}
 
-    def _extract_agent_classes(self, file_path: Path) -> List:
-        """
-        从文件中提取 Agent 类
+    def _load_module(self, file_path: Path, module_name: str):
+        """Load a Python file into a temporary module."""
 
-        Args:
-            file_path: Python 文件路径
-
-        Returns:
-            Agent 类列表
-        """
-        # 动态导入模块
-        spec = importlib.util.spec_from_file_location(
-            f"custom_module_{id(file_path)}", file_path
-        )
+        spec = importlib.util.spec_from_file_location(module_name, file_path)
         if spec is None or spec.loader is None:
-            return []
-
+            raise ImportError(f"无法为 {file_path} 创建模块 spec")
         module = importlib.util.module_from_spec(spec)
-
-        # 设置模块名称以避免冲突
-        module_name = f"custom_module_{id(file_path)}"
         sys.modules[module_name] = module
+        spec.loader.exec_module(module)
+        return module
 
-        try:
-            spec.loader.exec_module(module)
-        except Exception as e:
-            # 导入失败，返回空列表
+    def _cleanup_module(self, module_name: str) -> None:
+        """Remove a temporary module from sys.modules."""
+
+        if module_name in sys.modules:
             del sys.modules[module_name]
-            return []
 
-        try:
-            from agentsociety2.agent.base import AgentBase
-
-            agents = []
-            for name, obj in inspect.getmembers(module, inspect.isclass):
-                # 检查是否是 AgentBase 的子类，且不是 AgentBase 本身
-                if (
-                    inspect.isclass(obj)
-                    and issubclass(obj, AgentBase)
-                    and obj is not AgentBase
-                    and obj.__module__ == module_name
-                ):
-                    if self._validate_agent_class(obj):
-                        agents.append(obj)
-
-            return agents
-        finally:
-            # 清理模块
-            if module_name in sys.modules:
-                del sys.modules[module_name]
-
-    def _extract_env_classes(self, file_path: Path) -> List:
-        """
-        从文件中提取环境模块类
-
-        Args:
-            file_path: Python 文件路径
-
-        Returns:
-            环境模块类列表
-        """
-        # 动态导入模块
-        spec = importlib.util.spec_from_file_location(
-            f"custom_module_{id(file_path)}", file_path
-        )
-        if spec is None or spec.loader is None:
-            return []
-
-        module = importlib.util.module_from_spec(spec)
-        module_name = f"custom_module_{id(file_path)}"
-        sys.modules[module_name] = module
-
-        try:
-            spec.loader.exec_module(module)
-        except Exception:
-            del sys.modules[module_name]
-            return []
-
-        try:
-            from agentsociety2.env.base import EnvBase
-
-            envs = []
-            for name, obj in inspect.getmembers(module, inspect.isclass):
-                if (
-                    inspect.isclass(obj)
-                    and issubclass(obj, EnvBase)
-                    and obj is not EnvBase
-                    and obj.__module__ == module_name
-                ):
-                    if self._validate_env_class(obj):
-                        envs.append(obj)
-
-            return envs
-        finally:
-            if module_name in sys.modules:
-                del sys.modules[module_name]
-
-    def _validate_agent_class(self, cls) -> bool:
-        """
-        验证 Agent 类是否实现必需方法
-
-        Args:
-            cls: 要验证的类
-
-        Returns:
-            是否有效
-        """
+    def _validate_agent_class(self, cls: type[Any]) -> bool:
         required_methods = ["ask", "step", "dump", "load"]
-        for method in required_methods:
-            if not hasattr(cls, method):
-                return False
-        return True
+        return all(hasattr(cls, method) for method in required_methods)
 
-    def _validate_env_class(self, cls) -> bool:
-        """
-        验证环境模块类是否有效
-
-        Args:
-            cls: 要验证的类
-
-        Returns:
-            是否有效
-        """
-        required_methods = ["step"]
-        for method in required_methods:
-            if not hasattr(cls, method):
-                return False
-        # 检查是否有工具方法
-        if not hasattr(cls, "_registered_tools"):
-            return False
-        return len(cls._registered_tools) > 0
-
-    def _get_safe_description(self, cls) -> str:
-        """
-        安全地获取类的描述
-
-        Args:
-            cls: 类对象
-
-        Returns:
-            描述字符串
-        """
+    def _get_safe_description(self, cls: type[Any]) -> str:
         try:
             if hasattr(cls, "mcp_description"):
                 return cls.mcp_description()

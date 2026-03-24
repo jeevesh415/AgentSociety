@@ -4,17 +4,15 @@
 
 import * as React from 'react';
 import { useTranslation } from 'react-i18next';
-import { Tabs, Flex, Typography, Avatar, Select, Table, Pagination, Button, Spin, Modal, Divider, List } from 'antd';
-import { SmileOutlined, GlobalOutlined, UserOutlined, DatabaseOutlined, ReloadOutlined, TableOutlined, MessageOutlined, TeamOutlined, CloseOutlined, FileTextOutlined } from '@ant-design/icons';
+import { Tabs, Flex, Avatar, Select, Table, Pagination, Button, Spin, Modal, Divider, List } from 'antd';
+import { SmileOutlined, UserOutlined, DatabaseOutlined, ReloadOutlined, TableOutlined, MessageOutlined, CloseOutlined, FileTextOutlined } from '@ant-design/icons';
 import { useReplay } from '../store';
 import {
   DialogType,
   AgentDialog,
   SocialPost,
   SocialComment,
-  SocialDirectMessage,
-  SocialGroupMessage,
-  SocialNetwork,
+  SocialEvent,
   SocialUser,
 } from '../types';
 import dayjs from 'dayjs';
@@ -166,8 +164,7 @@ export const AgentRightPanel: React.FC = () => {
     experimentInfo,
     socialProfile,
     socialPosts,
-    socialDirectMessages,
-    socialGroupMessages,
+    socialEvents,
     allPosts,
     postCommentsMap,
   } = state;
@@ -196,7 +193,7 @@ export const AgentRightPanel: React.FC = () => {
         children: <DialogsTab dialogs={selectedAgentDialogs} type={DialogType.THOUGHT} agentProfile={profile} agentProfiles={agentProfiles} emptyHint={t('replay.right.noReflection')} />,
       },
       ...(hasSocial ? [{
-        key: 'chat',
+        key: 'social',
         label: t('replay.right.chat'),
         icon: <MessageOutlined />,
         children: (
@@ -205,8 +202,7 @@ export const AgentRightPanel: React.FC = () => {
             agentProfiles={agentProfiles}
             profile={socialProfile}
             posts={socialPosts}
-            directMessages={socialDirectMessages}
-            groupMessages={socialGroupMessages}
+            events={socialEvents}
           />
         ),
       }] : []),
@@ -324,7 +320,7 @@ const PostsTab: React.FC<{
   };
 
   const comments = detailPost ? (postCommentsMap[detailPost.post_id] ?? []) : [];
-  const authorName = detailPost ? (agentProfiles.get(detailPost.author_id ?? 0)?.name ?? t('replay.right.userId', { id: detailPost.author_id })) : '';
+  const authorName = detailPost ? (agentProfiles.get(detailPost.author_id)?.name ?? t('replay.right.userId', { id: detailPost.author_id })) : '';
 
   return (
     <Flex vertical style={{ width: '100%', height: '100%', minHeight: 0 }}>
@@ -336,7 +332,7 @@ const PostsTab: React.FC<{
             size="small"
             dataSource={sortedPosts}
             renderItem={(post) => {
-              const name = agentProfiles.get(post.author_id ?? 0)?.name ?? t('replay.right.userId', { id: post.author_id });
+              const name = agentProfiles.get(post.author_id)?.name ?? t('replay.right.userId', { id: post.author_id });
               const preview = (post.content || '').slice(0, 40);
               return (
                 <List.Item
@@ -409,88 +405,45 @@ const PostsTab: React.FC<{
   );
 };
 
-type DmConversation = { peerId: number; peerName: string; messages: SocialDirectMessage[] };
-type GroupConversation = { groupId: number; groupName: string; messages: SocialGroupMessage[] };
-
 const SocialTab: React.FC<{
   agentId: number | null;
   agentProfiles: Map<number, { id: number; name: string }>;
   profile: SocialUser | null;
   posts: SocialPost[];
-  directMessages: SocialDirectMessage[];
-  groupMessages: SocialGroupMessage[];
-}> = ({ agentId, agentProfiles, profile, posts, directMessages, groupMessages }) => {
+  events: SocialEvent[];
+}> = ({ agentId, agentProfiles, profile, posts, events }) => {
   const { t } = useTranslation();
-  const [chatModalOpen, setChatModalOpen] = React.useState(false);
-  const [chatModalTitle, setChatModalTitle] = React.useState('');
-  const [chatModalDm, setChatModalDm] = React.useState<SocialDirectMessage[] | null>(null);
-  const [chatModalGroup, setChatModalGroup] = React.useState<SocialGroupMessage[] | null>(null);
-
-  const dmConversations = React.useMemo((): DmConversation[] => {
-    if (agentId == null || directMessages.length === 0) return [];
-    const byPeer = new Map<number, SocialDirectMessage[]>();
-    for (const m of directMessages) {
-      const peer = m.from_user_id === agentId ? m.to_user_id : m.from_user_id;
-      if (!byPeer.has(peer)) byPeer.set(peer, []);
-      byPeer.get(peer)!.push(m);
-    }
-    return Array.from(byPeer.entries()).map(([peerId, messages]) => {
-      const sorted = [...messages].sort((a, b) =>
-        dayjs(a.created_at || 0).valueOf() - dayjs(b.created_at || 0).valueOf()
-      );
-      const peerName = agentProfiles.get(peerId)?.name ?? t('replay.right.userId', { id: peerId });
-      return { peerId, peerName, messages: sorted };
-    }).sort((a, b) => {
-      const at = a.messages[a.messages.length - 1]?.created_at;
-      const bt = b.messages[b.messages.length - 1]?.created_at;
-      return dayjs(bt || 0).valueOf() - dayjs(at || 0).valueOf();
-    });
-  }, [agentId, directMessages, agentProfiles]);
-
-  const groupConversations = React.useMemo((): GroupConversation[] => {
-    if (groupMessages.length === 0) return [];
-    const byGroup = new Map<number, SocialGroupMessage[]>();
-    for (const m of groupMessages) {
-      if (!byGroup.has(m.group_id)) byGroup.set(m.group_id, []);
-      byGroup.get(m.group_id)!.push(m);
-    }
-    return Array.from(byGroup.entries()).map(([groupId, messages]) => {
-      const sorted = [...messages].sort((a, b) =>
-        dayjs(a.created_at || 0).valueOf() - dayjs(b.created_at || 0).valueOf()
-      );
-      const groupName = messages[0]?.group_name ?? `群组 ${groupId}`;
-      return { groupId, groupName, messages: sorted };
-    }).sort((a, b) => {
-      const at = a.messages[a.messages.length - 1]?.created_at;
-      const bt = b.messages[b.messages.length - 1]?.created_at;
-      return dayjs(bt || 0).valueOf() - dayjs(at || 0).valueOf();
-    });
-  }, [groupMessages]);
-
-  const openDmModal = (conv: DmConversation) => {
-    setChatModalTitle(t('replay.right.conversationWith', { name: conv.peerName }));
-    setChatModalDm(conv.messages);
-    setChatModalGroup(null);
-    setChatModalOpen(true);
-  };
-  const openGroupModal = (conv: GroupConversation) => {
-    setChatModalTitle(conv.groupName);
-    setChatModalDm(null);
-    setChatModalGroup(conv.messages);
-    setChatModalOpen(true);
-  };
-
-  const chatMessages = chatModalDm ?? chatModalGroup ?? [];
-  const isDm = chatModalDm != null;
-  const currentAgentId = agentId ?? -1;
+  const sortedEvents = React.useMemo(
+    () =>
+      [...events].sort((a, b) => {
+        const at = dayjs(a.t || 0).valueOf();
+        const bt = dayjs(b.t || 0).valueOf();
+        if (at !== bt) return bt - at;
+        if (a.step !== b.step) return b.step - a.step;
+        return b.event_id - a.event_id;
+      }),
+    [events]
+  );
+  const sortedPosts = React.useMemo(
+    () =>
+      [...posts].sort((a, b) => {
+        const at = dayjs(a.created_at || 0).valueOf();
+        const bt = dayjs(b.created_at || 0).valueOf();
+        if (at !== bt) return bt - at;
+        if ((a.step ?? 0) !== (b.step ?? 0)) return (b.step ?? 0) - (a.step ?? 0);
+        return b.post_id - a.post_id;
+      }),
+    [posts]
+  );
 
   return (
     <Flex vertical style={{ width: '100%', height: '100%', minHeight: 0 }}>
-      {/* 社交档案 折叠在顶部一行 */}
       {profile && (
         <Flex wrap justify="flex-start" align="center" style={{ width: '100%', marginBottom: 8, gap: 8 }}>
           <span style={labelStyle}>{t('replay.right.username')}</span>
           <span style={valueStyle}>{profile.username}</span>
+          <span style={labelStyle}>Posts</span>
+          <span style={valueStyle}>{profile.posts_count}</span>
           <span style={labelStyle}>{t('replay.right.following')}</span>
           <span style={valueStyle}>{profile.following_count}</span>
           <span style={labelStyle}>{t('replay.right.followers')}</span>
@@ -503,38 +456,34 @@ const SocialTab: React.FC<{
         style={{ flex: 1, minHeight: 0, overflow: 'hidden' }}
         items={[
           {
-            key: 'dm',
+            key: 'events',
             label: (
               <span>
-                <MessageOutlined /> 私聊 {dmConversations.length > 0 && `(${dmConversations.length})`}
+                <MessageOutlined /> Activity {sortedEvents.length > 0 && `(${sortedEvents.length})`}
               </span>
             ),
             children: (
               <div style={{ height: '100%', overflow: 'auto' }}>
-                {dmConversations.length === 0 ? (
-                  <div className="left-info-empty" style={{ padding: 16, color: '#909399', textAlign: 'center' }}>暂无私信</div>
+                {sortedEvents.length === 0 ? (
+                  <div className="left-info-empty" style={{ padding: 16, color: '#909399', textAlign: 'center' }}>暂无社交事件</div>
                 ) : (
                   <List
                     size="small"
-                    dataSource={dmConversations}
-                    renderItem={(conv) => {
-                      const last = conv.messages[conv.messages.length - 1];
-                      const preview = last?.content?.slice(0, 20) ?? '';
+                    dataSource={sortedEvents}
+                    renderItem={(event) => {
+                      const secondary = [
+                        `Step ${event.step}`,
+                        event.t ? dayjs(event.t).format('MM-DD HH:mm:ss') : null,
+                        event.action,
+                      ].filter(Boolean).join(' · ');
                       return (
                         <List.Item
-                          style={{ cursor: 'pointer', borderRadius: 8, padding: '8px 12px' }}
-                          onClick={() => openDmModal(conv)}
-                          onMouseEnter={(e) => { e.currentTarget.style.background = 'rgba(0,0,0,0.04)'; }}
-                          onMouseLeave={(e) => { e.currentTarget.style.background = ''; }}
+                          style={{ borderRadius: 8, padding: '8px 12px', alignItems: 'flex-start' }}
                         >
                           <List.Item.Meta
                             avatar={<Avatar size="small" icon={<UserOutlined />} style={{ background: '#e5e5e5' }} />}
-                            title={t('replay.right.conversationWith', { name: conv.peerName })}
-                            description={
-                              last?.created_at
-                                ? `${dayjs(last.created_at).format('MM-DD HH:mm')} · ${preview}${(last.content?.length ?? 0) > 20 ? '…' : ''}`
-                                : t('replay.right.messagesCount', { count: conv.messages.length })
-                            }
+                            title={<span>{event.summary}</span>}
+                            description={secondary}
                           />
                         </List.Item>
                       );
@@ -545,37 +494,36 @@ const SocialTab: React.FC<{
             ),
           },
           {
-            key: 'group',
+            key: 'posts',
             label: (
               <span>
-                <TeamOutlined /> 群聊 {groupConversations.length > 0 && `(${groupConversations.length})`}
+                <FileTextOutlined /> My Posts {sortedPosts.length > 0 && `(${sortedPosts.length})`}
               </span>
             ),
             children: (
               <div style={{ height: '100%', overflow: 'auto' }}>
-                {groupConversations.length === 0 ? (
-                  <div className="left-info-empty" style={{ padding: 16, color: '#909399', textAlign: 'center' }}>暂无群聊</div>
+                {sortedPosts.length === 0 ? (
+                  <div className="left-info-empty" style={{ padding: 16, color: '#909399', textAlign: 'center' }}>暂无帖子</div>
                 ) : (
                   <List
                     size="small"
-                    dataSource={groupConversations}
-                    renderItem={(conv) => {
-                      const last = conv.messages[conv.messages.length - 1];
-                      const preview = last?.content?.slice(0, 20) ?? '';
+                    dataSource={sortedPosts}
+                    renderItem={(post) => {
+                      const authorName =
+                        agentProfiles.get(post.author_id)?.name
+                        ?? t('replay.right.userId', { id: post.author_id });
+                      const preview = (post.content || '').slice(0, 40);
                       return (
                         <List.Item
-                          style={{ cursor: 'pointer', borderRadius: 8, padding: '8px 12px' }}
-                          onClick={() => openGroupModal(conv)}
-                          onMouseEnter={(e) => { e.currentTarget.style.background = 'rgba(0,0,0,0.04)'; }}
-                          onMouseLeave={(e) => { e.currentTarget.style.background = ''; }}
+                          style={{ borderRadius: 8, padding: '8px 12px', alignItems: 'flex-start' }}
                         >
                           <List.Item.Meta
-                            avatar={<Avatar size="small" icon={<TeamOutlined />} style={{ background: '#e5e5e5' }} />}
-                            title={conv.groupName}
+                            avatar={<Avatar size="small" icon={<UserOutlined />} style={{ background: '#e5e5e5' }} />}
+                            title={<span>{authorName} · Step {post.step ?? '—'}</span>}
                             description={
-                              last?.created_at
-                                ? `${dayjs(last.created_at).format('MM-DD HH:mm')} · ${preview}${(last.content?.length ?? 0) > 20 ? '…' : ''}`
-                                : t('replay.right.messagesCount', { count: conv.messages.length })
+                              post.created_at
+                                ? `${dayjs(post.created_at).format('MM-DD HH:mm')} · ${preview}${(post.content?.length ?? 0) > 40 ? '…' : ''}`
+                                : preview || '—'
                             }
                           />
                         </List.Item>
@@ -588,67 +536,6 @@ const SocialTab: React.FC<{
           },
         ]}
       />
-
-      {/* 消息悬浮窗：点击会话后展示具体聊天内容（QQ/微信风格） */}
-      <Modal
-        title={chatModalTitle}
-        open={chatModalOpen}
-        onCancel={() => setChatModalOpen(false)}
-        footer={null}
-        width={440}
-        bodyStyle={{ maxHeight: 520, overflowY: 'auto', padding: 16 }}
-        closeIcon={<CloseOutlined />}
-        styles={{ body: { paddingTop: 12 } }}
-      >
-        <div style={{ display: 'flex', flexDirection: 'column', gap: 16 }}>
-          {chatMessages.map((msg: SocialDirectMessage | SocialGroupMessage) => {
-            const isSelf = msg.from_user_id === currentAgentId;
-            const senderName = agentProfiles.get(msg.from_user_id)?.name ?? t('replay.right.userId', { id: msg.from_user_id });
-            const msgKey = 'message_id' in msg ? msg.message_id : (msg as SocialGroupMessage).message_id;
-            const bubble = (
-              <div
-                style={{
-                  maxWidth: '78%',
-                  padding: '10px 14px',
-                  borderRadius: 8,
-                  borderTopRightRadius: isSelf ? 2 : 8,
-                  borderTopLeftRadius: isSelf ? 8 : 2,
-                  background: isSelf ? '#95EC69' : '#fff',
-                  color: isSelf ? '#000' : '#333',
-                  boxShadow: '0 1px 2px rgba(0,0,0,0.06)',
-                }}
-              >
-                {!isDm && (
-                  <div style={{ fontSize: 12, color: '#576b95', marginBottom: 4, fontWeight: 500 }}>{senderName}</div>
-                )}
-                <div style={{ lineHeight: 1.5, wordBreak: 'break-word', fontSize: 14 }}>{msg.content}</div>
-                <div style={{ fontSize: 11, color: 'rgba(0,0,0,0.45)', marginTop: 6, textAlign: 'right' }}>
-                  {msg.created_at ? dayjs(msg.created_at).format('HH:mm') : '—'}
-                </div>
-              </div>
-            );
-            return (
-              <div
-                key={msgKey}
-                style={{
-                  display: 'flex',
-                  alignItems: 'flex-end',
-                  justifyContent: isSelf ? 'flex-end' : 'flex-start',
-                  gap: 8,
-                }}
-              >
-                {!isSelf && (
-                  <Avatar size={36} icon={<UserOutlined />} style={{ flexShrink: 0, background: '#e5e5e5' }} />
-                )}
-                {bubble}
-                {isSelf && (
-                  <Avatar size={36} icon={<UserOutlined />} style={{ flexShrink: 0, background: '#95EC69', color: '#333' }} />
-                )}
-              </div>
-            );
-          })}
-        </div>
-      </Modal>
     </Flex>
   );
 };

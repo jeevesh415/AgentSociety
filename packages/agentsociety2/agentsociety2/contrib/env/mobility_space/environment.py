@@ -4,7 +4,7 @@ import asyncio
 import os
 from datetime import datetime
 from subprocess import Popen
-from typing import Any, List, Literal, Optional, Tuple, Union
+from typing import Any, ClassVar, List, Literal, Optional, Tuple, Union
 
 import aiohttp
 import shapely
@@ -19,8 +19,7 @@ from agentsociety2.env import (
     tool,
 )
 from agentsociety2.logger import get_logger
-
-from .replay_tables import AGENT_POSITION_SCHEMA
+from agentsociety2.storage import ColumnDef
 from pycityproto.city.geo.v2 import geo_pb2 as geo_pb2
 from pycityproto.city.map.v2 import map_pb2 as map_pb2
 from pycityproto.city.trip.v2.trip_pb2 import TripMode
@@ -148,6 +147,12 @@ class MobilitySpace(EnvBase):
     """
     The environment, including map data, simulator clients, and environment variables.
     """
+
+    # 声明式状态持久化
+    _agent_state_columns: ClassVar[list[ColumnDef]] = [
+        ColumnDef("lng", "REAL"),
+        ColumnDef("lat", "REAL"),
+    ]
 
     TRIPMODE2STR = {
         TripMode.TRIP_MODE_WALK_ONLY: "walking",
@@ -452,10 +457,6 @@ class MobilitySpace(EnvBase):
             )
         get_logger().info(f"Routing server is ready on {self._server_addr}")
 
-        if self._replay_writer is not None:
-            await self._replay_writer.register_table(AGENT_POSITION_SCHEMA)
-            get_logger().info("Registered agent_position table for MobilitySpace")
-
     async def get_agent_position(self, agent_id: int) -> Tuple[Optional[float], Optional[float]]:
         """Get the position of an agent.
 
@@ -470,27 +471,6 @@ class MobilitySpace(EnvBase):
         person = self._persons[agent_id]
         lng, lat = person.position.lnglat
         return lng, lat
-
-    async def _write_position(
-        self, agent_id: int, step: int, t: datetime, lng: float, lat: float
-    ) -> None:
-        """Write agent position to the agent_position table.
-
-        Args:
-            agent_id: The agent ID.
-            step: The simulation step number.
-            t: The simulation datetime.
-            lng: Longitude coordinate.
-            lat: Latitude coordinate.
-        """
-        if self._replay_writer is not None:
-            await self._replay_writer.write("agent_position", {
-                "id": agent_id,
-                "step": step,
-                "t": t,
-                "lng": lng,
-                "lat": lat,
-            })
 
 
     @property
@@ -875,7 +855,9 @@ class MobilitySpace(EnvBase):
             
             # Write position to replay database
             lng, lat = person.position.lnglat
-            await self._write_position(person.id, self._step_counter, t, lng, lat)
+            await self._write_agent_state(
+                agent_id=person.id, step=self._step_counter, t=t, lng=lng, lat=lat,
+            )
 
         self.t = t
         self._step_counter += 1
@@ -904,6 +886,7 @@ class MobilitySpace(EnvBase):
             "home_dir": self._home_dir,
             "poi_search_limit": self._poi_search_limit,
             "persons": persons_data,
+            "step_counter": self._step_counter,
         }
 
     def _load_state(self, state: dict):
@@ -915,6 +898,8 @@ class MobilitySpace(EnvBase):
         """
         # Restore configuration parameters
         self._poi_search_limit = state.get("poi_search_limit", 10)
+        if "step_counter" in state:
+            self._step_counter = state["step_counter"]
 
         # Restore persons
         persons_data = state.get("persons", {})

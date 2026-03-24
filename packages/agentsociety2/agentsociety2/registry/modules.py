@@ -9,7 +9,9 @@ from __future__ import annotations
 from pathlib import Path
 from typing import Dict, List, Tuple, Type, Optional, Any
 import importlib
+import importlib.util
 import pkgutil
+import sys
 
 from agentsociety2.agent.base import AgentBase
 from agentsociety2.env.base import EnvBase
@@ -18,6 +20,82 @@ from agentsociety2.logger import get_logger
 from agentsociety2.registry.base import ModuleRegistry, get_registry
 
 logger = get_logger()
+
+
+def _load_custom_class(
+    *,
+    file_path: str,
+    class_name: str,
+    module_prefix: str,
+) -> type[Any]:
+    """Load a custom class from a workspace file."""
+
+    spec = importlib.util.spec_from_file_location(
+        f"{module_prefix}_{class_name}",
+        file_path,
+    )
+    if spec is None or spec.loader is None:
+        raise ImportError(f"Failed to create spec for {file_path}")
+    module = importlib.util.module_from_spec(spec)
+    module_name = f"{module_prefix}_{class_name}"
+    sys.modules[module_name] = module
+    spec.loader.exec_module(module)
+    return getattr(module, class_name)
+
+
+def register_scanned_custom_modules(
+    scan_result: Dict[str, Any],
+    registry: Optional[ModuleRegistry] = None,
+) -> Dict[str, Any]:
+    """Register modules already discovered by the scanner."""
+
+    if registry is None:
+        registry = get_registry()
+
+    registration_errors: list[str] = list(scan_result.get("registration_errors", []))
+
+    for env_info in scan_result.get("envs", []):
+        try:
+            env_class = _load_custom_class(
+                file_path=env_info["file_path"],
+                class_name=env_info["class_name"],
+                module_prefix="custom_env",
+            )
+            env_class._is_custom = True
+            registry.register_env_module(
+                env_info["class_name"],
+                env_class,
+                is_custom=True,
+            )
+        except Exception as exc:
+            registration_errors.append(
+                f"Env module {env_info.get('class_name')}: {exc}"
+            )
+            logger.warning(
+                f"Failed to register custom env module {env_info.get('class_name')}: {exc}"
+            )
+
+    for agent_info in scan_result.get("agents", []):
+        try:
+            agent_class = _load_custom_class(
+                file_path=agent_info["file_path"],
+                class_name=agent_info["class_name"],
+                module_prefix="custom_agent",
+            )
+            agent_class._is_custom = True
+            registry.register_agent_module(
+                agent_info["class_name"],
+                agent_class,
+                is_custom=True,
+            )
+        except Exception as exc:
+            registration_errors.append(f"Agent {agent_info.get('class_name')}: {exc}")
+            logger.warning(
+                f"Failed to register custom agent {agent_info.get('class_name')}: {exc}"
+            )
+
+    scan_result["registration_errors"] = registration_errors
+    return scan_result
 
 
 def _discover_contrib_env_modules() -> Dict[str, Type[EnvBase]]:
@@ -216,53 +294,7 @@ def scan_and_register_custom_modules(
 
     scanner = CustomModuleScanner(str(workspace_path))
     scan_result = scanner.scan_all()
-
-    # Register custom environment modules
-    for env_info in scan_result.get("envs", []):
-        # Import the class
-        try:
-            spec = __import__("importlib.util").util.spec_from_file_location(
-                f"custom_env_{env_info['type']}", env_info["file_path"]
-            )
-            if spec and spec.loader:
-                module = __import__("importlib.util").util.module_from_spec(spec)
-                import sys
-                sys.modules[f"custom_env_{env_info['type']}"] = module
-                spec.loader.exec_module(module)
-
-                # Get the class
-                env_class = getattr(module, env_info["class_name"])
-                env_class._is_custom = True  # Mark as custom
-
-                # Use class name directly as the key
-                module_type = env_info["class_name"]
-
-                registry.register_env_module(module_type, env_class, is_custom=True)
-        except Exception as e:
-            logger.warning(f"Failed to register custom env module {env_info.get('type')}: {e}")
-
-    # Register custom agents
-    for agent_info in scan_result.get("agents", []):
-        try:
-            spec = __import__("importlib.util").util.spec_from_file_location(
-                f"custom_agent_{agent_info['type']}", agent_info["file_path"]
-            )
-            if spec and spec.loader:
-                module = __import__("importlib.util").util.module_from_spec(spec)
-                import sys
-                sys.modules[f"custom_agent_{agent_info['type']}"] = module
-                spec.loader.exec_module(module)
-
-                # Get the class
-                agent_class = getattr(module, agent_info["class_name"])
-                agent_class._is_custom = True  # Mark as custom
-
-                # Use class name directly as the key
-                agent_type = agent_info["class_name"]
-
-                registry.register_agent_module(agent_type, agent_class, is_custom=True)
-        except Exception as e:
-            logger.warning(f"Failed to register custom agent {agent_info.get('type')}: {e}")
+    scan_result = register_scanned_custom_modules(scan_result, registry)
 
     logger.info(
         f"Registered {len(scan_result.get('envs', []))} custom env modules and "

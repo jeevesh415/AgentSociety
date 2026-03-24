@@ -161,9 +161,6 @@ class MyCustomModule(EnvBase):
         self._param1 = value
         return f"State set to {value}"
 
-    def observe(self) -> str:
-        """Return overall module state."""
-        return f"MyCustomModule: {self._param1}"
 ```
 
 ### Discovery Criteria
@@ -319,7 +316,7 @@ Modules are validated for:
 
 1. **Base class**: Must inherit from `EnvBase`
 2. **Tools**: Must have at least one `@tool` decorated method
-3. **Observe method**: Should implement `observe()` method
+3. **Observation capability**: Expose observation through readonly `kind="observe"` tools when needed
 4. **Type hints**: Tool parameters should have type hints
 5. **Docstrings**: Tools should have descriptive docstrings
 

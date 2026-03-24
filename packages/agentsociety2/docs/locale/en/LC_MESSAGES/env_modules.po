@@ -47,22 +47,6 @@ msgid "创建自定义环境模块时，必须实现："
 msgstr "When creating a custom environment module, you must implement:"
 
 #: ../../env_modules.rst:19
-msgid "**def observe(self) -> str**"
-msgstr "**def observe(self) -> str**"
-
-#: ../../env_modules.rst:21
-msgid "返回模块当前状态的字符串描述。 这用于为智能体生成世界描述。"
-msgstr "Return a string description of the current state of the module. This is used to generate the world description for agents."
-
-#: ../../env_modules.rst:24
-msgid "返回:"
-msgstr "Returns:"
-
-#: ../../env_modules.rst:25
-msgid "描述模块当前状态的字符串"
-msgstr "A string describing the module's current state"
-
-#: ../../env_modules.rst:27
 msgid "**async def step(self, tick: int, t: datetime) -> None**"
 msgstr "**async def step(self, tick: int, t: datetime) -> None**"
 

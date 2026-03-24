@@ -84,12 +84,8 @@ const ReplayAppInner: React.FC<ReplayAppProps> = ({ vscode }) => {
           actions.setSocialPosts(message.data);
           break;
 
-        case 'socialDirectMessages':
-          actions.setSocialDirectMessages(message.data);
-          break;
-
-        case 'socialGroupMessages':
-          actions.setSocialGroupMessages(message.data);
+        case 'socialEvents':
+          actions.setSocialEvents(message.data);
           break;
 
         case 'socialActivity':
@@ -140,7 +136,7 @@ const ReplayAppInner: React.FC<ReplayAppProps> = ({ vscode }) => {
     return () => window.removeEventListener('message', handleMessage);
   }, [vscode, actions]);
 
-  // Fetch agent statuses and (if social) social activity + selected agent's DMs/group messages when step changes
+  // Fetch agent statuses and social replay slices when step changes.
   React.useEffect(() => {
     if (initialized && timeline.length > 0 && currentStep < timeline.length) {
       const stepNumber = timeline[currentStep].step;
@@ -149,14 +145,13 @@ const ReplayAppInner: React.FC<ReplayAppProps> = ({ vscode }) => {
         vscode.postMessage({ command: 'fetchSocialActivity', step: stepNumber });
         vscode.postMessage({ command: 'fetchAllPosts', step: stepNumber });
         if (selectedAgentId != null) {
-          vscode.postMessage({ command: 'fetchSocialDirectMessages', agentId: selectedAgentId, step: stepNumber });
-          vscode.postMessage({ command: 'fetchSocialGroupMessages', agentId: selectedAgentId, step: stepNumber });
+          vscode.postMessage({ command: 'fetchSocialEvents', agentId: selectedAgentId, step: stepNumber });
         }
       }
     }
   }, [currentStep, initialized, timeline, vscode, state.experimentInfo?.has_social, selectedAgentId]);
 
-  // Fetch agent dialogs, status history, trajectory (and optional social data) when selected agent changes; social DMs/group messages use current step
+  // Fetch agent dialogs, status history, trajectory, and optional social replay data when selected agent changes.
   React.useEffect(() => {
     if (initialized && selectedAgentId !== null) {
       vscode.postMessage({ command: 'fetchAgentDialogs', agentId: selectedAgentId });
@@ -166,8 +161,7 @@ const ReplayAppInner: React.FC<ReplayAppProps> = ({ vscode }) => {
         const stepNumber = timeline.length > 0 && currentStep < timeline.length ? timeline[currentStep].step : undefined;
         vscode.postMessage({ command: 'fetchSocialProfile', agentId: selectedAgentId });
         vscode.postMessage({ command: 'fetchSocialPosts', agentId: selectedAgentId });
-        vscode.postMessage({ command: 'fetchSocialDirectMessages', agentId: selectedAgentId, step: stepNumber });
-        vscode.postMessage({ command: 'fetchSocialGroupMessages', agentId: selectedAgentId, step: stepNumber });
+        vscode.postMessage({ command: 'fetchSocialEvents', agentId: selectedAgentId, step: stepNumber });
       }
     }
   }, [selectedAgentId, initialized, state.experimentInfo?.has_social, vscode, timeline, currentStep]);

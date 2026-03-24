@@ -125,12 +125,8 @@ export class ReplayWebviewProvider {
         await this.fetchSocialPosts(message.agentId);
         break;
 
-      case 'fetchSocialDirectMessages':
-        await this.fetchSocialDirectMessages(message.agentId, message.step);
-        break;
-
-      case 'fetchSocialGroupMessages':
-        await this.fetchSocialGroupMessages(message.agentId, message.step);
+      case 'fetchSocialEvents':
+        await this.fetchSocialEvents(message.agentId, message.step);
         break;
 
       case 'fetchSocialNetwork':
@@ -342,11 +338,11 @@ export class ReplayWebviewProvider {
   }
 
   /**
-   * Fetch social media direct messages (optionally up to a given step for timeline)
+   * Fetch social media events (optionally up to a given step for timeline)
    */
-  private async fetchSocialDirectMessages(agentId: number, step?: number): Promise<void> {
+  private async fetchSocialEvents(agentId: number, step?: number): Promise<void> {
     try {
-      let url = `${this.backendUrl}/api/v1/replay/${this.hypothesisId}/${this.experimentId}/social/users/${agentId}/direct_messages?workspace_path=${encodeURIComponent(this.workspacePath)}`;
+      let url = `${this.backendUrl}/api/v1/replay/${this.hypothesisId}/${this.experimentId}/social/users/${agentId}/events?workspace_path=${encodeURIComponent(this.workspacePath)}`;
       if (step !== undefined && step !== null) {
         url += `&max_step=${step}`;
       }
@@ -357,36 +353,14 @@ export class ReplayWebviewProvider {
       }
 
       const data = await response.json();
-      this.postMessage({ type: 'socialDirectMessages', data });
+      this.postMessage({ type: 'socialEvents', data });
     } catch (error) {
-      this.handleFetchError('social direct messages', error);
+      this.handleFetchError('social events', error);
     }
   }
 
   /**
-   * Fetch social media group messages (optionally up to a given step for timeline)
-   */
-  private async fetchSocialGroupMessages(agentId: number, step?: number): Promise<void> {
-    try {
-      let url = `${this.backendUrl}/api/v1/replay/${this.hypothesisId}/${this.experimentId}/social/users/${agentId}/group_messages?workspace_path=${encodeURIComponent(this.workspacePath)}`;
-      if (step !== undefined && step !== null) {
-        url += `&max_step=${step}`;
-      }
-      const response = await fetch(url);
-
-      if (!response.ok) {
-        throw new Error(`HTTP ${response.status}: ${response.statusText}`);
-      }
-
-      const data = await response.json();
-      this.postMessage({ type: 'socialGroupMessages', data });
-    } catch (error) {
-      this.handleFetchError('social group messages', error);
-    }
-  }
-
-  /**
-   * Fetch per-step social activity (who received/sent DMs, sent group messages)
+   * Fetch per-step social activity derived from replay events
    */
   private async fetchSocialActivity(step: number): Promise<void> {
     try {
@@ -400,9 +374,7 @@ export class ReplayWebviewProvider {
       const raw = await response.json();
       const data = {
         step: raw.step,
-        receivedDmAgentIds: raw.received_dm_agent_ids ?? [],
-        sentDmAgentIds: raw.sent_dm_agent_ids ?? [],
-        sentGroupMessageAgentIds: raw.sent_group_message_agent_ids ?? [],
+        highlightedAgentIds: raw.highlighted_agent_ids ?? [],
       };
       this.postMessage({ type: 'socialActivity', data });
     } catch (error) {
