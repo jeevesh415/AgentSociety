@@ -8,8 +8,8 @@ from __future__ import annotations
 
 from typing import Dict, List, Tuple, Type, Optional, Any
 from pathlib import Path
-from importlib import import_module
 import inspect
+import os
 
 from agentsociety2.agent.base import AgentBase
 from agentsociety2.env.base import EnvBase
@@ -67,16 +67,18 @@ class ModuleRegistry:
         """Ensure custom modules are loaded (lazy loading trigger)"""
         if not self._lazy_enabled:
             return
-        if not self._workspace_path:
+        if self._custom_loaded:
+            return
+
+        workspace_path = self._resolve_workspace_path()
+        if workspace_path is None:
             # No workspace set, nothing to load
             self._custom_loaded = True
-            return
-        if self._custom_loaded:
             return
 
         from agentsociety2.registry.modules import scan_and_register_custom_modules
 
-        scan_and_register_custom_modules(self._workspace_path, self)
+        scan_and_register_custom_modules(workspace_path, self)
         self._custom_loaded = True
 
     def _ensure_loaded(self) -> None:
@@ -139,7 +141,7 @@ class ModuleRegistry:
         Returns:
             The environment module class, or None if not found
         """
-        self._ensure_builtin_loaded()
+        self._ensure_loaded()
         return self._env_modules.get(module_type)
 
     def get_agent_module(self, agent_type: str) -> Optional[Type[AgentBase]]:
@@ -151,7 +153,7 @@ class ModuleRegistry:
         Returns:
             The agent class, or None if not found
         """
-        self._ensure_builtin_loaded()
+        self._ensure_loaded()
         return self._agent_modules.get(agent_type)
 
     def list_env_modules(self) -> List[Tuple[str, Type[EnvBase]]]:
@@ -182,6 +184,28 @@ class ModuleRegistry:
         # Reset custom loaded flag so modules will be discovered on next access
         self._custom_loaded = False
         logger.debug(f"Registry workspace set to: {self._workspace_path}")
+
+    def _resolve_workspace_path(self) -> Optional[Path]:
+        """Resolve workspace path for custom module discovery."""
+
+        if self._workspace_path is not None:
+            return self._workspace_path
+
+        env_workspace = os.getenv("WORKSPACE_PATH")
+        if env_workspace:
+            self._workspace_path = Path(env_workspace).resolve()
+            logger.debug(f"Registry workspace inferred from WORKSPACE_PATH: {self._workspace_path}")
+            return self._workspace_path
+
+        cwd = Path.cwd().resolve()
+        candidates = [cwd, *cwd.parents]
+        for candidate in candidates:
+            if (candidate / "custom" / "envs").exists() or (candidate / "custom" / "agents").exists():
+                self._workspace_path = candidate
+                logger.debug(f"Registry workspace inferred from cwd: {self._workspace_path}")
+                return self._workspace_path
+
+        return None
 
     def load_builtin_modules(self) -> None:
         """Eagerly load built-in modules"""

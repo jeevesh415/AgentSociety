@@ -344,7 +344,7 @@ class MyCustomEnv(EnvBase):
         self.config_param = config_param
 
     @tool(readonly=True, kind="observe")
-    def observe(self) -> str:
+    def get_state(self, agent_id: int) -> str:
         """返回环境状态"""
         return f"Current state: {self.config_param}"
 ```

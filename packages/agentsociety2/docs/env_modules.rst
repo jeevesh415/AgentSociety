@@ -16,15 +16,7 @@
 
 创建自定义环境模块时，必须实现：
 
-1. **def observe(self) -> str**
-
-   返回模块当前状态的字符串描述。
-   这用于为智能体生成世界描述。
-
-   返回:
-       描述模块当前状态的字符串
-
-2. **async def step(self, tick: int, t: datetime) -> None**
+1. **async def step(self, tick: int, t: datetime) -> None**
 
    执行一个模拟步骤。在 AgentSociety 模拟期间自动调用。
    使用此方法更新时间相关的状态。
@@ -33,7 +25,7 @@
        tick: 此步骤的持续时间（秒）
        t: 此步骤后的当前模拟日期时间
 
-3. **使用 @tool 装饰的工具**
+2. **使用 @tool 装饰的工具**
 
    使用 ``@tool`` 装饰器将方法公开为智能体的可调用函数。
 
@@ -45,10 +37,6 @@
           def __init__(self):
               super().__init__()
               # Your initialization
-
-          def observe(self) -> str:
-              """Return the current state of the module."""
-              return "Current state description"
 
           @tool(readonly=True, kind="observe")
           def get_value(self, agent_id: int) -> str:
@@ -149,14 +137,6 @@
            self._weather = weather
            self._temperature = temperature
            return f"Weather changed to {weather} at {temperature}°C."
-
-       def observe(self) -> str:
-           """Return the overall state of the environment."""
-           return (
-               f"Environment State:\n"
-               f"- Weather: {self._weather}\n"
-               f"- Temperature: {self._temperature}°C"
-           )
 
        async def step(self, tick: int, t: datetime) -> None:
            """Update environment state for one simulation step."""

@@ -15,6 +15,7 @@ from agentsociety2.registry.modules import (
     get_agent_module_class,
     list_all_modules,
     reload_modules,
+    register_scanned_custom_modules,
     scan_and_register_custom_modules,
     discover_and_register_builtin_modules,
 )
@@ -36,6 +37,7 @@ __all__ = [
     "get_agent_module_class",
     "list_all_modules",
     "reload_modules",
+    "register_scanned_custom_modules",
     "scan_and_register_custom_modules",
     "discover_and_register_builtin_modules",
     # Models

@@ -1,12 +1,14 @@
+import asyncio
 import json
 from datetime import datetime, timedelta
-from typing import List
+from typing import ClassVar, List
 
 from agentsociety2.env import (
     EnvBase,
     tool,
 )
 from agentsociety2.logger import get_logger
+from agentsociety2.storage import ColumnDef
 from pydantic import BaseModel, Field
 
 
@@ -87,6 +89,16 @@ class SetPersonIncomeResponse(BaseModel):
 
 
 class EconomySpace(EnvBase):
+    # 声明式状态持久化
+    _agent_state_columns: ClassVar[list[ColumnDef]] = [
+        ColumnDef("currency", "REAL"),
+        ColumnDef("income", "REAL"),
+        ColumnDef("consumption", "REAL"),
+    ]
+    _env_state_columns: ClassVar[list[ColumnDef]] = [
+        ColumnDef("bank_interest_rate", "REAL"),
+    ]
+
     def __init__(self, persons: List[EconomyPerson] | List[dict]):
         """
         Initialize the Economy Space environment.
@@ -119,6 +131,8 @@ class EconomySpace(EnvBase):
             TaxBracket(cutoff=518400 / 365, rate=0.37),
         ]
         """GOVERNMENT: The tax brackets of the government"""
+        self._lock = asyncio.Lock()
+        self._step_counter: int = 0
 
     @classmethod
     def mcp_description(cls) -> str:
@@ -167,7 +181,7 @@ class EconomySpace(EnvBase):
 Your task is to use the available economy functions to manage persons, their finances, and economic attributes based on the context provided."""
 
     @tool(readonly=True, kind="observe")
-    def get_person(self, id: int) -> EconomyPerson:
+    async def get_person(self, id: int) -> EconomyPerson:
         """
         Get the person by id.
 
@@ -177,12 +191,13 @@ Your task is to use the available economy functions to manage persons, their fin
         Returns:
             The person by id
         """
-        if id not in self._persons:
-            raise ValueError(f"Person {id} not found")
-        return self._persons[id]
+        async with self._lock:
+            if id not in self._persons:
+                raise ValueError(f"Person {id} not found")
+            return self._persons[id]
 
     @tool(readonly=True)
-    def get_person_currency(self, id: int) -> GetPersonCurrencyResponse:
+    async def get_person_currency(self, id: int) -> GetPersonCurrencyResponse:
         """
         Get the currency of a person.
 
@@ -192,13 +207,14 @@ Your task is to use the available economy functions to manage persons, their fin
         Returns:
             The context containing the currency of the person
         """
-        if id not in self._persons:
-            return GetPersonCurrencyResponse(currency=0.0)
-        person = self._persons[id]
-        return GetPersonCurrencyResponse(currency=person.currency)
+        async with self._lock:
+            if id not in self._persons:
+                return GetPersonCurrencyResponse(currency=0.0)
+            person = self._persons[id]
+            return GetPersonCurrencyResponse(currency=person.currency)
 
     @tool(readonly=False)
-    def add_person_currency(self, id: int, delta: float) -> AddPersonCurrencyResponse:
+    async def add_person_currency(self, id: int, delta: float) -> AddPersonCurrencyResponse:
         """
         Add the currency of a person.
 
@@ -209,21 +225,22 @@ Your task is to use the available economy functions to manage persons, their fin
         Returns:
             The context of the person
         """
-        if id not in self._persons:
+        async with self._lock:
+            if id not in self._persons:
+                return AddPersonCurrencyResponse(
+                    old_currency=0.0, new_currency=0.0, delta=delta
+                )
+            person = self._persons[id]
+            old_currency = person.currency
+            person.currency += delta
             return AddPersonCurrencyResponse(
-                old_currency=0.0, new_currency=0.0, delta=delta
+                old_currency=old_currency,
+                new_currency=person.currency,
+                delta=delta,
             )
-        person = self._persons[id]
-        old_currency = person.currency
-        person.currency += delta
-        return AddPersonCurrencyResponse(
-            old_currency=old_currency,
-            new_currency=person.currency,
-            delta=delta,
-        )
 
     @tool(readonly=True)
-    def get_person_skill(self, id: int) -> GetPersonSkillResponse:
+    async def get_person_skill(self, id: int) -> GetPersonSkillResponse:
         """
         Get the skill of a person.
 
@@ -233,13 +250,14 @@ Your task is to use the available economy functions to manage persons, their fin
         Returns:
             The context containing the skill of the person
         """
-        if id not in self._persons:
-            return GetPersonSkillResponse(skill="")
-        person = self._persons[id]
-        return GetPersonSkillResponse(skill=person.skill)
+        async with self._lock:
+            if id not in self._persons:
+                return GetPersonSkillResponse(skill="")
+            person = self._persons[id]
+            return GetPersonSkillResponse(skill=person.skill)
 
     @tool(readonly=True)
-    def get_person_consumption(self, id: int) -> GetPersonConsumptionResponse:
+    async def get_person_consumption(self, id: int) -> GetPersonConsumptionResponse:
         """
         Get the consumption of a person.
 
@@ -249,13 +267,14 @@ Your task is to use the available economy functions to manage persons, their fin
         Returns:
             The context containing the consumption of the person
         """
-        if id not in self._persons:
-            return GetPersonConsumptionResponse(consumption=0.0)
-        person = self._persons[id]
-        return GetPersonConsumptionResponse(consumption=person.consumption)
+        async with self._lock:
+            if id not in self._persons:
+                return GetPersonConsumptionResponse(consumption=0.0)
+            person = self._persons[id]
+            return GetPersonConsumptionResponse(consumption=person.consumption)
 
     @tool(readonly=False)
-    def set_person_consumption(
+    async def set_person_consumption(
         self, id: int, consumption: float
     ) -> SetPersonConsumptionResponse:
         """
@@ -268,20 +287,21 @@ Your task is to use the available economy functions to manage persons, their fin
         Returns:
             The context of the person
         """
-        if id not in self._persons:
+        async with self._lock:
+            if id not in self._persons:
+                return SetPersonConsumptionResponse(
+                    old_consumption=0.0, new_consumption=consumption
+                )
+            person = self._persons[id]
+            old_consumption = person.consumption
+            person.consumption = consumption
             return SetPersonConsumptionResponse(
-                old_consumption=0.0, new_consumption=consumption
+                old_consumption=old_consumption,
+                new_consumption=person.consumption,
             )
-        person = self._persons[id]
-        old_consumption = person.consumption
-        person.consumption = consumption
-        return SetPersonConsumptionResponse(
-            old_consumption=old_consumption,
-            new_consumption=person.consumption,
-        )
 
     @tool(readonly=True)
-    def get_person_income(self, id: int) -> GetPersonIncomeResponse:
+    async def get_person_income(self, id: int) -> GetPersonIncomeResponse:
         """
         Get the income of a person.
 
@@ -291,13 +311,14 @@ Your task is to use the available economy functions to manage persons, their fin
         Returns:
             The context containing the income of the person
         """
-        if id not in self._persons:
-            return GetPersonIncomeResponse(income=0.0)
-        person = self._persons[id]
-        return GetPersonIncomeResponse(income=person.income)
+        async with self._lock:
+            if id not in self._persons:
+                return GetPersonIncomeResponse(income=0.0)
+            person = self._persons[id]
+            return GetPersonIncomeResponse(income=person.income)
 
     @tool(readonly=False)
-    def set_person_income(self, id: int, income: float) -> SetPersonIncomeResponse:
+    async def set_person_income(self, id: int, income: float) -> SetPersonIncomeResponse:
         """
         Set the income of a person.
 
@@ -308,15 +329,16 @@ Your task is to use the available economy functions to manage persons, their fin
         Returns:
             The context of the person
         """
-        if id not in self._persons:
-            return SetPersonIncomeResponse(old_income=0.0, new_income=income)
-        person = self._persons[id]
-        old_income = person.income
-        person.income = income
-        return SetPersonIncomeResponse(
-            old_income=old_income,
-            new_income=person.income,
-        )
+        async with self._lock:
+            if id not in self._persons:
+                return SetPersonIncomeResponse(old_income=0.0, new_income=income)
+            person = self._persons[id]
+            old_income = person.income
+            person.income = income
+            return SetPersonIncomeResponse(
+                old_income=old_income,
+                new_income=person.income,
+            )
 
     async def init(self, start_datetime: datetime):
         """
@@ -356,4 +378,48 @@ Your task is to use the available economy functions to manage persons, their fin
                     get_logger().debug(
                         f"Person {person.id}'s currency: {old_currency} -> {person.currency} after one day."
                     )
-        self.current_datetime = t
+        self.t = t
+
+        # 持久化 agent 状态
+        for person in self._persons.values():
+            await self._write_agent_state(
+                agent_id=person.id, step=self._step_counter, t=t,
+                currency=person.currency, income=person.income,
+                consumption=person.consumption,
+            )
+        # 持久化环境全局状态
+        await self._write_env_state(
+            step=self._step_counter, t=t,
+            bank_interest_rate=self._bank_interest_rate,
+        )
+        self._step_counter += 1
+
+    def _dump_state(self) -> dict:
+        return {
+            "persons": {str(pid): p.model_dump() for pid, p in self._persons.items()},
+            "bank_interest_rate": self._bank_interest_rate,
+            "last_run_datetime": self._last_run_datetime.isoformat(),
+            "gov_tax_brackets": [
+                {"cutoff": b.cutoff, "rate": b.rate} for b in self._gov_tax_brackets
+            ],
+            "step_counter": self._step_counter,
+        }
+
+    def _load_state(self, state: dict):
+        if "persons" in state:
+            self._persons = {
+                int(k): EconomyPerson.model_validate(v)
+                for k, v in state["persons"].items()
+            }
+        if "bank_interest_rate" in state:
+            self._bank_interest_rate = state["bank_interest_rate"]
+        if "last_run_datetime" in state:
+            self._last_run_datetime = datetime.fromisoformat(
+                state["last_run_datetime"]
+            )
+        if "gov_tax_brackets" in state:
+            self._gov_tax_brackets = [
+                TaxBracket(**b) for b in state["gov_tax_brackets"]
+            ]
+        if "step_counter" in state:
+            self._step_counter = state["step_counter"]

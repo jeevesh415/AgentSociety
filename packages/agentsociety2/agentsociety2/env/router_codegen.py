@@ -227,6 +227,41 @@ def _get_env_class_type_key(env_modules: list) -> str:
     return json.dumps(sorted(keys), sort_keys=True, ensure_ascii=False)
 
 
+def _strip_code_fence(text: str) -> str:
+    stripped = text.strip()
+    if stripped.startswith("```") and stripped.endswith("```"):
+        lines = stripped.splitlines()
+        if len(lines) >= 2:
+            stripped = "\n".join(lines[1:-1]).strip()
+    return stripped
+
+
+def _compact_results_text(results: Dict[str, Any]) -> str:
+    try:
+        return json.dumps(results, ensure_ascii=False, separators=(",", ":"), default=str)
+    except TypeError:
+        return str(results)
+
+
+def _build_deterministic_final_answer(router: "CodeGenRouter", success_data: Dict[str, Any]) -> str:
+    time_tag = f"[{router.t.strftime('%A')}, {router.t.strftime('%Y-%m-%d %H:%M:%S')}]"
+    status = success_data.get("status", "unknown")
+    results = success_data.get("results", {})
+    reason = results.get("reason") or success_data.get("error")
+    process_text = _strip_code_fence(success_data.get("process_text", ""))
+
+    if status in {"fail", "error"} and reason:
+        body = str(reason).strip()
+    elif process_text and process_text != "无输出":
+        body = process_text
+    elif reason:
+        body = str(reason).strip()
+    else:
+        body = _compact_results_text(results)
+
+    return f"{time_tag} {body}" if body else time_tag
+
+
 class TemplateCacheDB:
     """
     持久化模板缓存，支持跨运行共用。
@@ -889,11 +924,17 @@ class SummaryStage:
             context.early_return = ({}, "Failed to generate and execute code after all retries.")
             return context
         sd = context.success_data
-        final_answer, determined_status = await router.generate_final_answer(
-            sd["ctx"], sd["instruction"], sd["results"],
-            sd["process_text"], sd["status"], sd["error"]
-        )
         context.results = sd["results"]
+
+        if router._final_summary_enabled:
+            final_answer, determined_status = await router.generate_final_answer(
+                sd["ctx"], sd["instruction"], sd["results"],
+                sd["process_text"], sd["status"], sd["error"]
+            )
+        else:
+            final_answer = _build_deterministic_final_answer(router, sd)
+            determined_status = sd["status"]
+
         context.results["status"] = determined_status
         context.final_answer = final_answer
         if determined_status == "unknown":
@@ -1016,6 +1057,7 @@ class CodeGenRouter(RouterBase):
         max_llm_call_retry: int = 10,
         log_path: str = "logs/instruction_log.pkl",
         replay_writer: Optional["ReplayWriter"] = None,
+        final_summary_enabled: bool = True,
         # Template cache configuration
         template_cache_enabled: bool = True,  # 是否启用模板缓存
         template_cache_similarity_threshold: float = 0.85,  # 缓存相似度阈值
@@ -1084,6 +1126,7 @@ class CodeGenRouter(RouterBase):
         self._instruction_log_lock: asyncio.Lock = asyncio.Lock()
 
         # ==================== Template缓存相关 ====================
+        self._final_summary_enabled = final_summary_enabled
         self._template_cache_enabled = template_cache_enabled
         self._template_cache_similarity_threshold = template_cache_similarity_threshold
         self._template_cache_max_size = template_cache_max_size

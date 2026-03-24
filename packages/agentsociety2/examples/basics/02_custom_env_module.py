@@ -47,15 +47,6 @@ class WeatherEnvironment(EnvBase):
         """Get the current average temperature."""
         return f"The current temperature is {self._temperature}°C."
 
-    def observe(self) -> str:
-        """Return the overall state of the environment."""
-        return (
-            f"Environment State:\n"
-            f"- Weather: {self._weather}\n"
-            f"- Temperature: {self._temperature}°C\n"
-            f"- Known locations: {list(set(self._agent_locations.values()))}"
-        )
-
 
 async def main():
     # Create environment module

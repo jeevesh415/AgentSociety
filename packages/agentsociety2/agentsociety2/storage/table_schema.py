@@ -3,11 +3,10 @@
 Environment modules (e.g. social_media, mobility_space) define their own replay tables
 using TableSchema and ColumnDef. They call ReplayWriter.register_table(schema) to
 create the table and ReplayWriter.write(table_name, row) to persist data. The replay
-API reads these tables using query-only SQLAlchemy Table definitions provided by each
-module in its replay_tables.py (e.g. contrib/env/social_media/replay_tables.py,
-contrib/env/mobility_space/replay_tables.py). Framework tables (agent_profile,
-agent_status, agent_dialog) are defined in models.py (SQLModel) and created by
-ReplayWriter.init(); they are not registered via TableSchema.
+API discovers these tables at query time via SQLAlchemy table reflection — no
+module-specific schema definitions are needed on the query side. Framework tables
+(agent_profile, agent_status, agent_dialog) are defined in models.py (SQLModel) and
+created by ReplayWriter.init(); they are not registered via TableSchema.
 """
 
 from dataclasses import dataclass, field

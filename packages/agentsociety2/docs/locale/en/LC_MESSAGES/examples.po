@@ -91,8 +91,8 @@ msgid "使用 @tool 装饰器定义自定义环境"
 msgstr "Using @tool decorator to define custom environment"
 
 #: ../../examples.rst:61
-msgid "实现 observe()、step() 和工具方法"
-msgstr "Implementing observe(), step() and tool methods"
+msgid "实现 step() 和工具方法，并按需提供 ``kind=\"observe\"`` 的只读工具"
+msgstr "Implement step() and tool methods, and provide readonly ``kind=\"observe\"`` tools when needed"
 
 #: ../../examples.rst:62
 msgid "向 CodeGenRouter 注册模块"

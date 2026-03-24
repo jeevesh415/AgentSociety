@@ -13,34 +13,23 @@ API端点：
 - GET /api/v1/replay/{hypothesis_id}/{experiment_id}/tables/* - 数据库表查询
 """
 
+from collections import defaultdict
 from datetime import datetime
 from pathlib import Path
 from typing import Any, Dict, List, Optional
 
-import aiosqlite
-import json
 from fastapi import APIRouter, HTTPException, Query
 from pydantic import BaseModel
-from sqlalchemy.exc import OperationalError
+from sqlalchemy import MetaData, Table, inspect as sa_inspect
 from sqlalchemy.ext.asyncio import AsyncSession, create_async_engine
 from sqlalchemy.orm import sessionmaker
-from sqlmodel import select, desc, func, col, SQLModel, text
+from sqlmodel import select, desc, func, text
 
 from ...storage.models import (
     AgentProfile,
     AgentStatus,
     AgentDialog,
 )
-from ...contrib.env.social_media.replay_tables import (
-    social_user_table,
-    social_post_table,
-    social_comment_table,
-    social_follow_table,
-    social_dm_table,
-    social_group_table,
-    social_group_message_table,
-)
-from ...contrib.env.mobility_space.replay_tables import agent_position_table
 
 router = APIRouter(prefix="/replay", tags=["replay"])
 
@@ -149,41 +138,37 @@ class SocialComment(BaseModel):
     post_id: int
     author_id: int
     content: str
-    parent_comment_id: Optional[int] = None
     created_at: Optional[datetime] = None
     likes_count: Optional[int] = 0
 
 
-class SocialDirectMessage(BaseModel):
-    message_id: int
+class SocialEvent(BaseModel):
+    event_id: int
     step: int
-    from_user_id: int
-    to_user_id: int
-    content: str
-    created_at: Optional[datetime] = None
-    read: Optional[int] = 0
-
-
-class SocialGroupMessage(BaseModel):
-    message_id: int
-    step: int
-    group_id: int
-    from_user_id: int
-    content: str
-    created_at: Optional[datetime] = None
-    group_name: Optional[str] = None
+    t: Optional[datetime] = None
+    sender_id: int
+    sender_name: str
+    action: str
+    content: Optional[str] = None
+    receiver_id: Optional[int] = None
+    receiver_name: Optional[str] = None
+    target_id: Optional[int] = None
+    target_author_id: Optional[int] = None
+    target_author_name: Optional[str] = None
+    summary: str
 
 
 class SocialActivityResponse(BaseModel):
-    """Per-step social activity: which agents received/sent DMs or sent group messages."""
+    """Per-step social activity derived from social_media_event."""
 
     step: int
-    received_dm_agent_ids: List[int]
-    sent_dm_agent_ids: List[int]
-    sent_group_message_agent_ids: List[int]
+    highlighted_agent_ids: List[int]
 
 
 # =============== Helper Functions ===============
+
+SOCIAL_POST_ACTIONS = {"post", "repost"}
+SOCIAL_TARGETED_ACTIONS = {"follow", "unfollow", "like", "unlike", "comment", "repost"}
 
 
 def get_db_path(workspace_path: str, hypothesis_id: str, experiment_id: str) -> Path:
@@ -210,6 +195,20 @@ async def get_db_session(db_path: Path):
         yield session
 
     await engine.dispose()
+
+
+async def _reflect_table(
+    session: AsyncSession, table_name: str
+) -> Optional[Table]:
+    """从 SQLite 数据库反射表结构，表不存在时返回 None。"""
+
+    def _do(sync_session):
+        conn = sync_session.connection()
+        if table_name not in sa_inspect(conn).get_table_names():
+            return None
+        return Table(table_name, MetaData(), autoload_with=conn)
+
+    return await session.run_sync(_do)
 
 
 # =============== API Endpoints ===============
@@ -244,7 +243,9 @@ async def get_experiment_info(
             return inspect(sync_sess.connection()).get_table_names()
 
         tables = await session.run_sync(_get_tables)
-        has_social = "social_user" in tables
+        has_social = (
+            "social_media_event" in tables or "social_media_agent_state" in tables
+        )
 
         return ExperimentInfo(
             hypothesis_id=hypothesis_id,
@@ -319,15 +320,16 @@ async def get_agents_status_at_step(
             if step is None:
                 return []
 
-        # Left join with agent_position (table exists only when MobilitySpace is loaded)
-        try:
+        # 反射 mobility_agent_state 表（仅当 MobilitySpace 写入了数据时存在）
+        mob = await _reflect_table(session, "mobility_agent_state")
+        if mob is not None:
             statement = (
-                select(AgentStatus, agent_position_table)
+                select(AgentStatus, mob)
                 .select_from(AgentStatus)
                 .outerjoin(
-                    agent_position_table,
-                    (AgentStatus.id == agent_position_table.c.id)
-                    & (AgentStatus.step == agent_position_table.c.step),
+                    mob,
+                    (AgentStatus.id == mob.c.agent_id)
+                    & (AgentStatus.step == mob.c.step),
                 )
                 .where(AgentStatus.step == step)
             )
@@ -338,7 +340,6 @@ async def get_agents_status_at_step(
                 pos = row[1]
                 if pos is None:
                     return None, None
-                # Row may be flat: (AgentStatus, pos_id, pos_step, pos_t, lng, lat, ...) so row[1] is int
                 if isinstance(pos, (int, float)) or not hasattr(pos, "_mapping"):
                     if len(row) > 5:
                         return row[4], row[5]
@@ -361,8 +362,7 @@ async def get_agents_status_at_step(
                 for row in rows
                 for lng, lat in (_lng_lat_from_row(row),)
             ]
-        except OperationalError:
-            # agent_position table not present (MobilitySpace not loaded)
+        else:
             result = await session.execute(
                 select(AgentStatus).where(AgentStatus.step == step)
             )
@@ -395,14 +395,15 @@ async def get_agent_status_history(
     db_path = get_db_path(workspace_path, hypothesis_id, experiment_id)
 
     async for session in get_db_session(db_path):
-        try:
+        mob = await _reflect_table(session, "mobility_agent_state")
+        if mob is not None:
             statement = (
-                select(AgentStatus, agent_position_table)
+                select(AgentStatus, mob)
                 .select_from(AgentStatus)
                 .outerjoin(
-                    agent_position_table,
-                    (AgentStatus.id == agent_position_table.c.id)
-                    & (AgentStatus.step == agent_position_table.c.step),
+                    mob,
+                    (AgentStatus.id == mob.c.agent_id)
+                    & (AgentStatus.step == mob.c.step),
                 )
                 .where(AgentStatus.id == agent_id)
                 .order_by(AgentStatus.step)
@@ -436,7 +437,7 @@ async def get_agent_status_history(
                 for row in rows
                 for lng, lat in (_lng_lat_from_row(row),)
             ]
-        except OperationalError:
+        else:
             result = await session.execute(
                 select(AgentStatus)
                 .where(AgentStatus.id == agent_id)
@@ -473,30 +474,29 @@ async def get_agent_trajectory(
     db_path = get_db_path(workspace_path, hypothesis_id, experiment_id)
 
     async for session in get_db_session(db_path):
-        try:
-            query = select(agent_position_table).where(
-                agent_position_table.c.id == agent_id
-            )
-            if start_step is not None:
-                query = query.where(agent_position_table.c.step >= start_step)
-            if end_step is not None:
-                query = query.where(agent_position_table.c.step <= end_step)
-            query = query.order_by(agent_position_table.c.step)
-            result = await session.execute(query)
-            rows = result.all()
-            return [
-                {
-                    "step": row.step,
-                    "t": row.t.isoformat()
-                    if hasattr(row.t, "isoformat")
-                    else str(row.t),
-                    "lng": row.lng,
-                    "lat": row.lat,
-                }
-                for row in rows
-            ]
-        except OperationalError:
+        mob = await _reflect_table(session, "mobility_agent_state")
+        if mob is None:
             return []
+
+        query = select(mob).where(mob.c.agent_id == agent_id)
+        if start_step is not None:
+            query = query.where(mob.c.step >= start_step)
+        if end_step is not None:
+            query = query.where(mob.c.step <= end_step)
+        query = query.order_by(mob.c.step)
+        result = await session.execute(query)
+        rows = result.all()
+        return [
+            {
+                "step": row.step,
+                "t": row.t.isoformat()
+                if hasattr(row.t, "isoformat")
+                else str(row.t),
+                "lng": row.lng,
+                "lat": row.lat,
+            }
+            for row in rows
+        ]
 
 
 @router.get(
@@ -574,21 +574,45 @@ async def get_social_user(
     user_id: int,
     workspace_path: str = Query(..., description="Workspace root path"),
 ) -> SocialUser:
-    """Get social media profile for a user (table owned by social_media module)."""
+    """Get social media profile for a user derived from replay snapshots."""
     db_path = get_db_path(workspace_path, hypothesis_id, experiment_id)
 
     async for session in get_db_session(db_path):
-        try:
-            query = select(social_user_table).where(
-                social_user_table.c.user_id == user_id
+        profile = await session.get(AgentProfile, user_id)
+        social_state = await _reflect_table(session, "social_media_agent_state")
+        state: dict[str, Any] = {}
+        if social_state is not None:
+            result = await session.execute(
+                select(social_state)
+                .where(social_state.c.agent_id == user_id)
+                .order_by(desc(social_state.c.step))
+                .limit(1)
             )
-            result = await session.execute(query)
-            row = result.one_or_none()
-        except OperationalError:
+            row = result.first()
+            if row is not None:
+                state = dict(row._mapping)
+        if profile is None and not state:
             raise HTTPException(status_code=404, detail="Social user not found")
-        if not row:
-            raise HTTPException(status_code=404, detail="Social user not found")
-        return SocialUser(**_row_to_dict(row))
+
+        bio = None
+        if profile is not None and isinstance(profile.profile, dict):
+            for key in ("bio", "background_story", "description"):
+                value = profile.profile.get(key)
+                if isinstance(value, str) and value.strip():
+                    bio = value
+                    break
+
+        return SocialUser(
+            user_id=user_id,
+            username=(profile.name if profile is not None and profile.name else None)
+            or f"User {user_id}",
+            bio=bio,
+            created_at=None,
+            followers_count=int(state.get("followers_count") or 0),
+            following_count=int(state.get("following_count") or 0),
+            posts_count=int(state.get("posts_count") or 0),
+            profile=profile.profile if profile is not None else None,
+        )
 
 
 @router.get(
@@ -605,22 +629,89 @@ async def get_social_posts(
     ),
     limit: int = Query(200, ge=1, le=500),
 ) -> List[SocialPost]:
-    """Get posts from a social media user (table owned by social_media module)."""
+    """Get posts from a social media user derived from social_media_event."""
     db_path = get_db_path(workspace_path, hypothesis_id, experiment_id)
 
     async for session in get_db_session(db_path):
-        try:
-            query = select(social_post_table).where(
-                social_post_table.c.author_id == user_id
-            )
-            if max_step is not None:
-                query = query.where(social_post_table.c.step <= max_step)
-            query = query.order_by(desc(social_post_table.c.created_at)).limit(limit)
-            result = await session.execute(query)
-            rows = result.all()
-            return [SocialPost(**_row_to_dict(r)) for r in rows]
-        except OperationalError:
+        social_event = await _reflect_table(session, "social_media_event")
+        if social_event is None:
             return []
+
+        query = select(social_event)
+        if max_step is not None:
+            query = query.where(social_event.c.step <= max_step)
+        query = query.order_by(social_event.c.step, social_event.c.id)
+        result = await session.execute(query)
+        events = [dict(row._mapping) for row in result.all()]
+
+        latest_like_actions: dict[tuple[int, int], str] = {}
+        comments_count: defaultdict[int, int] = defaultdict(int)
+        reposts_count: defaultdict[int, int] = defaultdict(int)
+        posts: list[SocialPost] = []
+
+        for event in events:
+            action = str(event.get("action") or "")
+            target_id = event.get("target_id")
+            if target_id is not None:
+                target_post_id = int(target_id)
+                if action in {"like", "unlike"}:
+                    latest_like_actions[
+                        (int(event["sender_id"]), target_post_id)
+                    ] = action
+                elif action == "comment":
+                    comments_count[target_post_id] += 1
+                elif action == "repost":
+                    reposts_count[target_post_id] += 1
+
+            if int(event["sender_id"]) != user_id or action not in SOCIAL_POST_ACTIONS:
+                continue
+
+            if action == "post" and target_id is not None:
+                post_id_value = int(target_id)
+                post_type = "original"
+                parent_id = None
+            else:
+                post_id_value = int(event["id"])
+                post_type = "repost"
+                parent_id = int(target_id) if target_id is not None else None
+
+            posts.append(
+                SocialPost(
+                    post_id=post_id_value,
+                    step=int(event["step"]),
+                    author_id=int(event["sender_id"]),
+                    content=str(event.get("content") or ""),
+                    post_type=post_type,
+                    parent_id=parent_id,
+                    created_at=event.get("t"),
+                    likes_count=0,
+                    reposts_count=0,
+                    comments_count=0,
+                    view_count=0,
+                    tags=[],
+                    topic_category=None,
+                )
+            )
+
+        likes_count: defaultdict[int, int] = defaultdict(int)
+        for (_, post_id_value), action in latest_like_actions.items():
+            if action == "like":
+                likes_count[post_id_value] += 1
+
+        for post in posts:
+            post.likes_count = likes_count.get(post.post_id, 0)
+            post.comments_count = comments_count.get(post.post_id, 0)
+            post.reposts_count = reposts_count.get(post.post_id, 0)
+
+        posts.sort(
+            key=lambda post: (
+                post.step,
+                post.created_at or datetime.min,
+                post.post_id,
+            ),
+            reverse=True,
+        )
+        return posts[:limit]
 
 
 @router.get(
@@ -636,22 +727,89 @@ async def get_all_social_posts(
     ),
     limit: int = Query(500, ge=1, le=2000),
 ) -> List[SocialPost]:
-    """Get all posts from all users (table owned by social_media module)."""
+    """Get all posts from all users derived from social_media_event."""
     db_path = get_db_path(workspace_path, hypothesis_id, experiment_id)
 
     async for session in get_db_session(db_path):
-        try:
-            query = select(social_post_table)
-            if max_step is not None:
-                query = query.where(social_post_table.c.step <= max_step)
-            query = query.order_by(
-                desc(social_post_table.c.step), desc(social_post_table.c.created_at)
-            ).limit(limit)
-            result = await session.execute(query)
-            rows = result.all()
-            return [SocialPost(**_row_to_dict(r)) for r in rows]
-        except OperationalError:
+        social_event = await _reflect_table(session, "social_media_event")
+        if social_event is None:
             return []
+
+        query = select(social_event)
+        if max_step is not None:
+            query = query.where(social_event.c.step <= max_step)
+        query = query.order_by(social_event.c.step, social_event.c.id)
+        result = await session.execute(query)
+        events = [dict(row._mapping) for row in result.all()]
+
+        latest_like_actions: dict[tuple[int, int], str] = {}
+        comments_count: defaultdict[int, int] = defaultdict(int)
+        reposts_count: defaultdict[int, int] = defaultdict(int)
+        posts: list[SocialPost] = []
+
+        for event in events:
+            action = str(event.get("action") or "")
+            target_id = event.get("target_id")
+            if target_id is not None:
+                target_post_id = int(target_id)
+                if action in {"like", "unlike"}:
+                    latest_like_actions[
+                        (int(event["sender_id"]), target_post_id)
+                    ] = action
+                elif action == "comment":
+                    comments_count[target_post_id] += 1
+                elif action == "repost":
+                    reposts_count[target_post_id] += 1
+
+            if action not in SOCIAL_POST_ACTIONS:
+                continue
+
+            if action == "post" and target_id is not None:
+                post_id_value = int(target_id)
+                post_type = "original"
+                parent_id = None
+            else:
+                post_id_value = int(event["id"])
+                post_type = "repost"
+                parent_id = int(target_id) if target_id is not None else None
+
+            posts.append(
+                SocialPost(
+                    post_id=post_id_value,
+                    step=int(event["step"]),
+                    author_id=int(event["sender_id"]),
+                    content=str(event.get("content") or ""),
+                    post_type=post_type,
+                    parent_id=parent_id,
+                    created_at=event.get("t"),
+                    likes_count=0,
+                    reposts_count=0,
+                    comments_count=0,
+                    view_count=0,
+                    tags=[],
+                    topic_category=None,
+                )
+            )
+
+        likes_count: defaultdict[int, int] = defaultdict(int)
+        for (_, post_id_value), action in latest_like_actions.items():
+            if action == "like":
+                likes_count[post_id_value] += 1
+
+        for post in posts:
+            post.likes_count = likes_count.get(post.post_id, 0)
+            post.comments_count = comments_count.get(post.post_id, 0)
+            post.reposts_count = reposts_count.get(post.post_id, 0)
+
+        posts.sort(
+            key=lambda post: (
+                post.step,
+                post.created_at or datetime.min,
+                post.post_id,
+            ),
+            reverse=True,
+        )
+        return posts[:limit]
 
 
 @router.get(
@@ -664,99 +822,202 @@ async def get_post_comments(
     post_id: int,
     workspace_path: str = Query(..., description="Workspace root path"),
 ) -> List[SocialComment]:
-    """Get all comments for a post (table owned by social_media module)."""
+    """Get all comments for a post derived from social_media_event."""
     db_path = get_db_path(workspace_path, hypothesis_id, experiment_id)
 
     async for session in get_db_session(db_path):
-        try:
-            query = (
-                select(social_comment_table)
-                .where(social_comment_table.c.post_id == post_id)
-                .order_by(social_comment_table.c.created_at)
-            )
-            result = await session.execute(query)
-            rows = result.all()
-            return [SocialComment(**_row_to_dict(r)) for r in rows]
-        except OperationalError:
+        social_event = await _reflect_table(session, "social_media_event")
+        if social_event is None:
             return []
+
+        result = await session.execute(
+            select(social_event)
+            .where(social_event.c.action == "comment")
+            .where(social_event.c.target_id == post_id)
+            .order_by(social_event.c.step, social_event.c.id)
+        )
+        return [
+            SocialComment(
+                comment_id=int(row.id),
+                step=int(row.step),
+                post_id=int(row.target_id),
+                author_id=int(row.sender_id),
+                content=str(row.content or ""),
+                created_at=row.t,
+                likes_count=0,
+            )
+            for row in result.all()
+        ]
 
 
 @router.get(
-    "/{hypothesis_id}/{experiment_id}/social/users/{user_id}/direct_messages",
-    response_model=List[SocialDirectMessage],
+    "/{hypothesis_id}/{experiment_id}/social/users/{user_id}/events",
+    response_model=List[SocialEvent],
 )
-async def get_social_direct_messages(
+async def get_social_user_events(
     hypothesis_id: str,
     experiment_id: str,
     user_id: int,
     workspace_path: str = Query(..., description="Workspace root path"),
     max_step: Optional[int] = Query(
-        None, description="Only messages with step <= max_step (timeline step)"
+        None, description="Only events with step <= max_step (timeline step)"
     ),
-    limit: int = Query(500, ge=1, le=2000),
-) -> List[SocialDirectMessage]:
-    """Get direct messages for a user (table owned by social_media module)."""
+    limit: int = Query(200, ge=1, le=1000),
+) -> List[SocialEvent]:
+    """Get a user's social activity stream derived from social_media_event."""
     db_path = get_db_path(workspace_path, hypothesis_id, experiment_id)
 
     async for session in get_db_session(db_path):
-        try:
-            query = select(social_dm_table).where(
-                (social_dm_table.c.from_user_id == user_id)
-                | (social_dm_table.c.to_user_id == user_id)
-            )
-            if max_step is not None:
-                query = query.where(social_dm_table.c.step <= max_step)
-            query = query.order_by(desc(social_dm_table.c.created_at)).limit(limit)
-            result = await session.execute(query)
-            rows = result.all()
-            return [SocialDirectMessage(**_row_to_dict(r)) for r in rows]
-        except OperationalError:
+        social_event = await _reflect_table(session, "social_media_event")
+        if social_event is None:
             return []
 
+        profile_result = await session.execute(select(AgentProfile))
+        profiles = {
+            profile.id: profile for profile in profile_result.scalars().all()
+        }
 
-@router.get(
-    "/{hypothesis_id}/{experiment_id}/social/users/{user_id}/group_messages",
-    response_model=List[SocialGroupMessage],
-)
-async def get_social_group_messages(
-    hypothesis_id: str,
-    experiment_id: str,
-    user_id: int,
-    workspace_path: str = Query(..., description="Workspace root path"),
-    max_step: Optional[int] = Query(
-        None, description="Only messages with step <= max_step (timeline step)"
-    ),
-    limit: int = Query(500, ge=1, le=2000),
-) -> List[SocialGroupMessage]:
-    """Get group messages for a user (tables owned by social_media module)."""
-    db_path = get_db_path(workspace_path, hypothesis_id, experiment_id)
+        query = select(social_event)
+        if max_step is not None:
+            query = query.where(social_event.c.step <= max_step)
+        query = query.order_by(social_event.c.step, social_event.c.id)
+        result = await session.execute(query)
+        events = [dict(row._mapping) for row in result.all()]
 
-    async for session in get_db_session(db_path):
-        try:
-            stmt = (
-                select(social_group_message_table, social_group_table.c.group_name)
-                .select_from(social_group_message_table)
-                .outerjoin(
-                    social_group_table,
-                    social_group_message_table.c.group_id
-                    == social_group_table.c.group_id,
+        post_author_map: dict[int, int] = {}
+        for event in events:
+            action = str(event.get("action") or "")
+            if action == "post" and event.get("target_id") is not None:
+                post_author_map[int(event["target_id"])] = int(event["sender_id"])
+            elif action == "repost":
+                post_author_map[int(event["id"])] = int(event["sender_id"])
+
+        related_events = []
+        for event in events:
+            sender_id = int(event["sender_id"])
+            receiver_id = (
+                int(event["receiver_id"])
+                if event.get("receiver_id") is not None
+                else None
+            )
+            target_id = (
+                int(event["target_id"]) if event.get("target_id") is not None else None
+            )
+            target_author_id = (
+                post_author_map.get(target_id) if target_id is not None else None
+            )
+            if user_id in {sender_id, receiver_id, target_author_id}:
+                related_events.append(event)
+
+        related_events.sort(
+            key=lambda event: (
+                int(event["step"]),
+                event.get("t") or datetime.min,
+                int(event["id"]),
+            ),
+            reverse=True,
+        )
+        response: list[SocialEvent] = []
+        for event in related_events[:limit]:
+            sender_id = int(event["sender_id"])
+            receiver_id = (
+                int(event["receiver_id"])
+                if event.get("receiver_id") is not None
+                else None
+            )
+            target_id = (
+                int(event["target_id"]) if event.get("target_id") is not None else None
+            )
+            target_author_id = (
+                post_author_map.get(target_id) if target_id is not None else None
+            )
+            sender_profile = profiles.get(sender_id)
+            receiver_profile = (
+                profiles.get(receiver_id) if receiver_id is not None else None
+            )
+            target_author_profile = (
+                profiles.get(target_author_id)
+                if target_author_id is not None
+                else None
+            )
+            sender_name = (
+                sender_profile.name if sender_profile is not None and sender_profile.name else None
+            ) or f"User {sender_id}"
+            receiver_name = None
+            if receiver_id is not None:
+                receiver_name = (
+                    receiver_profile.name
+                    if receiver_profile is not None and receiver_profile.name
+                    else f"User {receiver_id}"
                 )
-                .where(social_group_message_table.c.from_user_id == user_id)
-            )
-            if max_step is not None:
-                stmt = stmt.where(social_group_message_table.c.step <= max_step)
-            stmt = stmt.order_by(desc(social_group_message_table.c.created_at)).limit(
-                limit
-            )
-            result = await session.execute(stmt)
-            rows = result.all()
-        except OperationalError:
-            return []
+            target_author_name = None
+            if target_author_id is not None:
+                target_author_name = (
+                    target_author_profile.name
+                    if target_author_profile is not None and target_author_profile.name
+                    else f"User {target_author_id}"
+                )
 
-        response = []
-        for row in rows:
-            d = _row_to_dict(row)
-            response.append(SocialGroupMessage(**d))
+            action = str(event["action"])
+            content = str(event.get("content") or "").strip() or None
+
+            if sender_id == user_id:
+                summary_map = {
+                    "post": "Published a post",
+                    "repost": f"Reposted post #{target_id}",
+                    "comment": f"Commented on post #{target_id}",
+                    "like": f"Liked post #{target_id}",
+                    "unlike": f"Removed like from post #{target_id}",
+                    "follow": f"Followed {receiver_name}",
+                    "unfollow": f"Unfollowed {receiver_name}",
+                }
+                summary = summary_map.get(action, f"Performed {action}")
+            elif receiver_id == user_id:
+                summary_map = {
+                    "follow": f"{sender_name} followed you",
+                    "unfollow": f"{sender_name} unfollowed you",
+                }
+                summary = summary_map.get(action, f"{sender_name} triggered {action}")
+            elif target_author_id == user_id:
+                summary_map = {
+                    "like": f"{sender_name} liked your post #{target_id}",
+                    "unlike": f"{sender_name} removed like from your post #{target_id}",
+                    "comment": f"{sender_name} commented on your post #{target_id}",
+                    "repost": f"{sender_name} reposted your post #{target_id}",
+                }
+                summary = summary_map.get(action, f"{sender_name} acted on your post")
+            else:
+                summary_map = {
+                    "post": f"{sender_name} published a post",
+                    "repost": f"{sender_name} reposted post #{target_id}",
+                    "comment": f"{sender_name} commented on post #{target_id}",
+                    "like": f"{sender_name} liked post #{target_id}",
+                    "unlike": f"{sender_name} removed like from post #{target_id}",
+                    "follow": f"{sender_name} followed {receiver_name}",
+                    "unfollow": f"{sender_name} unfollowed {receiver_name}",
+                }
+                summary = summary_map.get(action, f"{sender_name} performed {action}")
+
+            if content:
+                summary = f"{summary}: {content}"
+
+            response.append(
+                SocialEvent(
+                    event_id=int(event["id"]),
+                    step=int(event["step"]),
+                    t=event.get("t"),
+                    sender_id=sender_id,
+                    sender_name=sender_name,
+                    action=action,
+                    content=content,
+                    receiver_id=receiver_id,
+                    receiver_name=receiver_name,
+                    target_id=target_id,
+                    target_author_id=target_author_id,
+                    target_author_name=target_author_name,
+                    summary=summary,
+                )
+            )
         return response
 
 
@@ -769,32 +1030,79 @@ async def get_social_network(
     experiment_id: str,
     workspace_path: str = Query(..., description="Workspace root path"),
 ) -> SocialNetwork:
-    """Get social network graph (tables owned by social_media module)."""
+    """Get social network graph derived from follow/unfollow events."""
     db_path = get_db_path(workspace_path, hypothesis_id, experiment_id)
 
     async for session in get_db_session(db_path):
-        try:
-            users_result = await session.execute(
-                select(social_user_table).order_by(social_user_table.c.user_id)
+        profile_result = await session.execute(select(AgentProfile))
+        profiles = {
+            profile.id: profile for profile in profile_result.scalars().all()
+        }
+
+        participant_ids: set[int] = set()
+        social_state = await _reflect_table(session, "social_media_agent_state")
+        if social_state is not None:
+            state_result = await session.execute(
+                select(social_state).order_by(
+                    social_state.c.agent_id, desc(social_state.c.step)
+                )
             )
-            users_rows = users_result.all()
-            follows_result = await session.execute(
-                select(social_follow_table).order_by(social_follow_table.c.id)
+            for row in state_result.all():
+                participant_ids.add(int(row.agent_id))
+
+        social_event = await _reflect_table(session, "social_media_event")
+        if social_event is None:
+            nodes = [
+                SocialNetworkNode(
+                    user_id=user_id,
+                    username=(
+                        profiles[user_id].name
+                        if user_id in profiles and profiles[user_id].name
+                        else f"User {user_id}"
+                    ),
+                )
+                for user_id in sorted(participant_ids)
+            ]
+            return SocialNetwork(nodes=nodes, edges=[])
+
+        result = await session.execute(
+            select(social_event).order_by(social_event.c.step, social_event.c.id)
+        )
+        all_events = [dict(row._mapping) for row in result.all()]
+        latest_actions: Dict[tuple[int, int], str] = {}
+        for event in all_events:
+            sender_id = int(event["sender_id"])
+            receiver_id = (
+                int(event["receiver_id"])
+                if event.get("receiver_id") is not None
+                else None
             )
-            follows_rows = follows_result.all()
-        except OperationalError:
-            return SocialNetwork(nodes=[], edges=[])
+            participant_ids.add(sender_id)
+            if receiver_id is not None:
+                participant_ids.add(receiver_id)
+        for event in all_events:
+            if str(event["action"]) not in {"follow", "unfollow"}:
+                continue
+            sender_id = int(event["sender_id"])
+            receiver_id = (
+                int(event["receiver_id"])
+                if event.get("receiver_id") is not None
+                else None
+            )
+            if receiver_id is not None:
+                latest_actions[(sender_id, receiver_id)] = str(event["action"])
 
         nodes = [
             SocialNetworkNode(
-                user_id=r._mapping["user_id"], username=r._mapping["username"]
+                user_id=user_id,
+                username=(
+                    profiles[user_id].name
+                    if user_id in profiles and profiles[user_id].name
+                    else f"User {user_id}"
+                ),
             )
-            for r in users_rows
+            for user_id in sorted(participant_ids)
         ]
-        latest_actions: Dict[tuple[int, int], str] = {}
-        for r in follows_rows:
-            m = r._mapping
-            latest_actions[(m["follower_id"], m["followee_id"])] = m["action"]
         edges = [
             SocialNetworkEdge(source=follower_id, target=followee_id)
             for (follower_id, followee_id), action in latest_actions.items()
@@ -813,43 +1121,54 @@ async def get_social_activity_at_step(
     step: int = Query(..., ge=0, description="Simulation step to query"),
     workspace_path: str = Query(..., description="Workspace root path"),
 ) -> SocialActivityResponse:
-    """Get which agents had social activity (received/sent DM, sent group message) at a given step."""
+    """Get which agents had social activity at a given step."""
     db_path = get_db_path(workspace_path, hypothesis_id, experiment_id)
 
-    received_dm: List[int] = []
-    sent_dm: List[int] = []
-    sent_group: List[int] = []
-
     async for session in get_db_session(db_path):
-        try:
-            result = await session.execute(
-                select(social_dm_table.c.to_user_id)
-                .where(social_dm_table.c.step == step)
-                .distinct()
-            )
-            received_dm = list({r[0] for r in result.all()})
+        social_event = await _reflect_table(session, "social_media_event")
+        if social_event is None:
+            return SocialActivityResponse(step=step, highlighted_agent_ids=[])
 
-            result = await session.execute(
-                select(social_dm_table.c.from_user_id)
-                .where(social_dm_table.c.step == step)
-                .distinct()
-            )
-            sent_dm = list({r[0] for r in result.all()})
+        result = await session.execute(
+            select(social_event)
+            .where(social_event.c.step <= step)
+            .order_by(social_event.c.step, social_event.c.id)
+        )
+        all_events = [dict(row._mapping) for row in result.all()]
+        step_events = [event for event in all_events if int(event["step"]) == step]
+        post_author_map: dict[int, int] = {}
+        for event in all_events:
+            action = str(event.get("action") or "")
+            if action == "post" and event.get("target_id") is not None:
+                post_author_map[int(event["target_id"])] = int(event["sender_id"])
+            elif action == "repost":
+                post_author_map[int(event["id"])] = int(event["sender_id"])
 
-            result = await session.execute(
-                select(social_group_message_table.c.from_user_id)
-                .where(social_group_message_table.c.step == step)
-                .distinct()
+        highlighted_agent_ids: set[int] = set()
+
+        for event in step_events:
+            action = str(event["action"])
+            receiver_id = (
+                int(event["receiver_id"])
+                if event.get("receiver_id") is not None
+                else None
             )
-            sent_group = list({r[0] for r in result.all()})
-        except OperationalError:
-            pass
+            target_id = (
+                int(event["target_id"]) if event.get("target_id") is not None else None
+            )
+            target_author_id = (
+                post_author_map.get(target_id) if target_id is not None else None
+            )
+
+            if action in SOCIAL_TARGETED_ACTIONS:
+                if receiver_id is not None:
+                    highlighted_agent_ids.add(receiver_id)
+                if target_author_id is not None:
+                    highlighted_agent_ids.add(target_author_id)
 
         return SocialActivityResponse(
             step=step,
-            received_dm_agent_ids=received_dm,
-            sent_dm_agent_ids=sent_dm,
-            sent_group_message_agent_ids=sent_group,
+            highlighted_agent_ids=sorted(highlighted_agent_ids),
         )
 
 
