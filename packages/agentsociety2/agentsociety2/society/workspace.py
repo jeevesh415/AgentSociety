@@ -180,21 +180,38 @@ class MyEnv(EnvBase):
 ### 创建自定义 Agent Skill
 
 1. 在 `skills/` 目录下创建新目录（如 `my-skill/`）
-2. 添加 `SKILL.md`（行为规范）和 `scripts/<skill_name>.py`（运行入口）
-3. 脚本需导出 `async def run(agent, ctx)` 函数
+2. 添加 `SKILL.md`（行为规范，必需）和可选的 `scripts/<skill_name>.py`（subprocess 模式）
 
 ```
 skills/my-skill/
 ├── SKILL.md
 ├── _order.txt          # 可选，定义加载优先级
 └── scripts/
-    └── my-skill.py     # 导出 async def run(agent, ctx)
+    └── my-skill.py     # （可选）subprocess 脚本：--args-json + 写入 AGENT_WORK_DIR
 ```
 
 ```python
 # skills/my-skill/scripts/my-skill.py
-async def run(agent, ctx):
-    ctx["step_log"].append("MySkill: executed")
+from __future__ import annotations
+
+import argparse
+import json
+from pathlib import Path
+
+
+def main() -> int:
+    parser = argparse.ArgumentParser()
+    parser.add_argument("--args-json", default="{}")
+    ns = parser.parse_args()
+    args = json.loads(ns.args_json or "{}")
+    result = {"ok": True, "summary": f"MySkill: executed (tick={args.get('tick')})"}
+    Path("my_skill_result.json").write_text(json.dumps(result, ensure_ascii=False, indent=2), encoding="utf-8")
+    print(json.dumps(result, ensure_ascii=False))
+    return 0
+
+
+if __name__ == "__main__":
+    raise SystemExit(main())
 ```
 
 ### 注册和测试

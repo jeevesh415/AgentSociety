@@ -6,7 +6,9 @@ Backend API 模块
 FastAPI 应用
 ------------
 
-.. autofunction:: agentsociety2.backend.app.create_app
+.. automodule:: agentsociety2.backend.app
+   :members:
+   :undoc-members:
 
 路由模块
 --------

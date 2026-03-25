@@ -9,8 +9,8 @@ required: true
 
 - Return only XML requested by the prompt; do not output JSON.
 - Do not include prose outside XML tags.
-- If the prompt asks for `<report>`, include **bilingual** outputs (four CDATA blocks):
-  - `<markdown_zh>`, `<html_zh>` (简体中文)
-  - `<markdown_en>`, `<html_en>` (English)
-- If one part is hard to produce, still return non-empty placeholders in all four tags.
+- If the prompt asks for `<report>`, always include both:
+  - `<markdown><![CDATA[...]]></markdown>`
+  - `<html><![CDATA[...]]></html>`
+- If one part is hard to produce, still return non-empty placeholders in both tags.
 - Keep tags stable and parsable; avoid changing tag names.

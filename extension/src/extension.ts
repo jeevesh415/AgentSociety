@@ -139,14 +139,6 @@ export function activate(context: vscode.ExtensionContext) {
     }
   );
 
-  // Update skills command - copy latest skills to workspace
-  const updateSkillsCommand = vscode.commands.registerCommand(
-    'aiSocialScientist.updateSkills',
-    async () => {
-      await projectStructureProvider.updateSkills();
-    }
-  );
-
   // Configure environment command - open config page for .env setup
   const configureEnvCommand = vscode.commands.registerCommand(
     'aiSocialScientist.configureEnv',
@@ -652,6 +644,13 @@ export function activate(context: vscode.ExtensionContext) {
     }
   );
 
+  const reloadAgentSkillCommand = vscode.commands.registerCommand(
+    'aiSocialScientist.reloadAgentSkill',
+    async (item: any) => {
+      await projectStructureProvider.reloadAgentSkill(item);
+    }
+  );
+
   // 打开 Skill 文档命令
   const openAgentSkillDocCommand = vscode.commands.registerCommand(
     'aiSocialScientist.openAgentSkillDoc',
@@ -889,7 +888,6 @@ export function activate(context: vscode.ExtensionContext) {
   // Register all commands
   context.subscriptions.push(
     initProjectCommand,
-    updateSkillsCommand,
     configureEnvCommand,
     fixWorkspaceCommand,
     deleteLiteratureCommand,
@@ -910,6 +908,7 @@ export function activate(context: vscode.ExtensionContext) {
     scanAgentSkillsCommand,
     importAgentSkillCommand,
     toggleAgentSkillCommand,
+    reloadAgentSkillCommand,
     openAgentSkillDocCommand,
     removeAgentSkillCommand,
     openSkillFolderCommand,

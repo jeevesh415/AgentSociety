@@ -19,7 +19,9 @@ AgentSociety 2 包含一组 LLM 原生的研究技能，用于自动化科学研
 Claude Code Skills
 --------------------
 
-研究工作流主要通过 Claude Code Skills 提供，这些技能位于工作区的 ``.claude/skills/`` 目录：
+研究工作流主要通过 Claude Code 的“skills-first”方式提供：
+- AgentSociety 内置研究 skills：随 VSCode 插件打包，可在插件树视图中浏览（只读）。
+- Agent(Person) 扩展 skills：由后端 `/api/v1/agent-skills/*` 管理，支持扫描/导入/热重载。
 
 * **agentsociety-literature-search** - 文献检索
 * **agentsociety-hypothesis** - 假设管理（add, get, list, delete）

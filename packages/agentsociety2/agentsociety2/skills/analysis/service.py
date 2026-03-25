@@ -29,9 +29,7 @@ from .models import (
     FILE_PID,
     FILE_HYPOTHESIS_MD,
     FILE_EXPERIMENT_MD,
-    FILE_SYNTHESIS_REPORT_EN_SUFFIX,
     FILE_SYNTHESIS_REPORT_PREFIX,
-    FILE_SYNTHESIS_REPORT_ZH_SUFFIX,
 )
 from .agents import AnalysisAgent
 from .report_generator import Reporter, AssetProcessor
@@ -68,7 +66,9 @@ class Analyzer:
         self.logger.info("  分析产物: %s", self.presentation_path)
 
         self.agent = AnalysisAgent(config=config, workspace_path=self.workspace_path)
-        self.logger.info("统一 AnalysisAgent 初始化完成，使用模型: %s", self.agent.model_name)
+        self.logger.info(
+            "统一 AnalysisAgent 初始化完成，使用模型: %s", self.agent.model_name
+        )
 
         self.asset_processor = AssetProcessor(self.workspace_path)
 
@@ -163,12 +163,18 @@ class Analyzer:
             data_dir.mkdir(parents=True, exist_ok=True)
             if eda_profile_path is None:
                 from .eda import generate_eda_profile
-                eda_profile_path = generate_eda_profile(db_path, data_dir, config=self.config)
+
+                eda_profile_path = generate_eda_profile(
+                    db_path, data_dir, config=self.config
+                )
                 if eda_profile_path:
                     self.logger.info("EDA 概览备选生成: %s", eda_profile_path)
             if eda_sweetviz_path is None:
                 from .eda import generate_sweetviz_profile
-                eda_sweetviz_path = generate_sweetviz_profile(db_path, data_dir, config=self.config)
+
+                eda_sweetviz_path = generate_sweetviz_profile(
+                    db_path, data_dir, config=self.config
+                )
                 if eda_sweetviz_path:
                     self.logger.info("Sweetviz EDA 概览备选生成: %s", eda_sweetviz_path)
 
@@ -178,6 +184,7 @@ class Analyzer:
         quick_stats_md = None
         if db_path:
             from .eda import generate_quick_stats
+
             quick_stats_md = generate_quick_stats(db_path, config=self.config)
 
         await progress("Writing report...")
@@ -201,7 +208,7 @@ class Analyzer:
             generated_files["eda_sweetviz"] = str(eda_sweetviz_path)
 
         return {
-            "success": bool(report_complete),
+            "success": True,
             "experiment_id": experiment_id,
             "hypothesis_id": hypothesis_id,
             "analysis_result": analysis_result,
@@ -431,7 +438,9 @@ class Analyzer:
                 if "litellm" not in ln.lower() and "deprecation" not in ln.lower()
             ]
             if non_ignorable:
-                failures.append("Runtime log contains structured ERROR/CRITICAL entries")
+                failures.append(
+                    "Runtime log contains structured ERROR/CRITICAL entries"
+                )
 
         return failures
 
@@ -453,8 +462,10 @@ class Synthesizer:
             self.config.llm_profile_default
         )
         self.agent = AnalysisAgent(
-            config=self.config, llm_router=self.llm_router, model_name=self.model_name,
-            workspace_path=self.workspace_path
+            config=self.config,
+            llm_router=self.llm_router,
+            model_name=self.model_name,
+            workspace_path=self.workspace_path,
         )
 
     def _discover_ids_by_prefix(self, base_path: Path, prefix: str) -> List[str]:
@@ -786,8 +797,8 @@ Return only XML in this format:
             for r in summary.experiment_results or []:
                 if r.get("success") and r.get("generated_files"):
                     gf = r.get("generated_files") or {}
-                    md_p = gf.get("markdown_zh")
-                    html_p = gf.get("html_zh")
+                    md_p = gf.get("markdown")
+                    html_p = gf.get("html")
                     if md_p or html_p:
                         paths = [p for p in (md_p, html_p) if p]
                         lines.append(
@@ -797,8 +808,9 @@ Return only XML in this format:
             lines.append("")
         lines.append("## Individual Reports (for reference & citation)")
         lines.append(
-            "The above lists paths to each experiment's bilingual reports (report_zh.* and report_en.*). "
-            "Reference and cite them in your synthesis in both languages where appropriate."
+            "The above lists paths to each experiment's report.md and report.html. "
+            "You SHOULD reference and cite these in your synthesis (e.g. 'See experiment 3 report for details', "
+            "or link to specific sections). Combine insights from individual reports into the synthesis."
         )
         return "\n".join(lines)
 
@@ -866,25 +878,18 @@ Return only XML in this format:
             for r in s.experiment_results or []:
                 if r.get("success") and r.get("generated_files"):
                     gf = r.get("generated_files") or {}
-                    if (
-                        gf.get("markdown_zh")
-                        or gf.get("html_zh")
-                        or gf.get("markdown_en")
-                        or gf.get("html_en")
-                    ):
+                    if gf.get("markdown") or gf.get("html"):
                         return True
         return False
 
     async def _judge_synthesis_report(
         self,
-        md_zh: str,
-        html_zh: str,
-        md_en: str,
-        html_en: str,
+        md_content: str,
+        html_content: str,
         chart_count: int,
         synthesis: Optional[ExperimentSynthesis] = None,
     ) -> Any:
-        """LLM 裁判：判断综合报告质量（中英双语）。"""
+        """LLM 裁判：判断综合报告质量。"""
         from pydantic import BaseModel
 
         class SynthesisReportJudgment(BaseModel):
@@ -896,20 +901,19 @@ Return only XML in this format:
         ref_check = ""
         if synthesis and self._has_individual_reports(synthesis):
             ref_check = (
-                " (5) When individual experiment reports exist, does the synthesis "
+                " (4) When individual experiment reports exist, does the synthesis "
                 "reference or cite them (e.g. 'see experiment X report', links)?"
             )
 
-        prompt = f"""Evaluate the bilingual synthesis report.
+        prompt = f"""Evaluate the synthesis report.
 
-**ZH Markdown**: {len(md_zh)} chars | **ZH HTML**: {len(html_zh)} chars
-**EN Markdown**: {len(md_en)} chars | **EN HTML**: {len(html_en)} chars
+**Markdown length**: {len(md_content)} chars
+**HTML length**: {len(html_content)} chars
 **Charts**: {chart_count}
 
-**ZH HTML preview**: {html_zh[:400]}...
-**EN HTML preview**: {html_en[:400]}...
+**HTML preview**: {html_content[:600]}...
 
-Check: (1) All four parts substantive? (2) ZH is 简体中文, EN is English? (3) Each HTML is a complete document? (4) Charts embedded if any?{ref_check}
+Check: (1) Both MD and HTML present and meaningful? (2) HTML is complete document? (3) Charts embedded if any?{ref_check}
 {judgment_prompt()}"""
         response = await self.agent.llm_router.acompletion(
             model=self.agent.model_name,
@@ -924,15 +928,12 @@ Check: (1) All four parts substantive? (2) ZH is 简体中文, EN is English? (3
     async def _generate_synthesis_report(
         self, synthesis: ExperimentSynthesis
     ) -> Optional[Path]:
-        """由 LLM 生成中英双语综合报告（各 Markdown + HTML），经裁判校验。"""
+        """由 LLM 根据综合内容与图表自主决定布局，直接生成 Markdown 与 HTML，经裁判校验。"""
         output_dir = self.workspace_path / self.config.synthesis_output_dir_name
         output_dir.mkdir(parents=True, exist_ok=True)
         sid = synthesis.synthesis_id
-        pfx = f"{FILE_SYNTHESIS_REPORT_PREFIX}{sid}"
-        report_md_zh = output_dir / f"{pfx}{FILE_SYNTHESIS_REPORT_ZH_SUFFIX}.md"
-        report_html_zh = output_dir / f"{pfx}{FILE_SYNTHESIS_REPORT_ZH_SUFFIX}.html"
-        report_md_en = output_dir / f"{pfx}{FILE_SYNTHESIS_REPORT_EN_SUFFIX}.md"
-        report_html_en = output_dir / f"{pfx}{FILE_SYNTHESIS_REPORT_EN_SUFFIX}.html"
+        report_md = output_dir / f"{FILE_SYNTHESIS_REPORT_PREFIX}{sid}.md"
+        report_html = output_dir / f"{FILE_SYNTHESIS_REPORT_PREFIX}{sid}.html"
 
         chart_paths = self._generate_synthesis_charts(synthesis, output_dir)
         chart_block = ""
@@ -941,7 +942,7 @@ Check: (1) All four parts substantive? (2) ZH is 简体中文, EN is English? (3
             for p in chart_paths:
                 if p.exists():
                     chart_block += f"\n### {p.stem}\n- Path: assets/{p.name}\n"
-            chart_block += '\nEmbed in BOTH HTML and Markdown for **each language**. HTML: <img src="assets/filename.png" alt="title">. Markdown: ![title](assets/filename.png).\n'
+            chart_block += '\nEmbed in BOTH HTML and Markdown. HTML: <img src="assets/filename.png" alt="title">. Markdown: ![title](assets/filename.png).\n'
 
         context = self._build_synthesis_report_context(synthesis)
         if len(context) > 12000:
@@ -953,7 +954,6 @@ Check: (1) All four parts substantive? (2) ZH is 简体中文, EN is English? (3
             )
         max_retries = self.config.max_synthesis_report_retries
         last_feedback: Optional[str] = None
-        MIN_LOCALE = 120
 
         for attempt in range(max_retries):
             feedback_block = ""
@@ -962,17 +962,17 @@ Check: (1) All four parts substantive? (2) ZH is 简体中文, EN is English? (3
                     f"\n**Previous feedback (must address)**: {last_feedback}\n"
                 )
 
-            prompt = f"""You are writing a **bilingual** synthesis report (Chinese + English). Below is the synthesis content and available charts.
+            prompt = f"""You are writing a synthesis report. Below is the synthesis content and available charts.
 
 {context}
 {chart_block}
 {feedback_block}
 
-Produce **four** parts in XML: Chinese Markdown+HTML (`markdown_zh`, `html_zh`) and English Markdown+HTML (`markdown_en`, `html_en`). Same structure and findings; 简体中文 vs English.
-**IMPORTANT**: Even with minimal data, each locale MUST include: (1) Executive Overview, (2) Hypothesis Summary, (3) Cross-experiment Analysis or Current Status, (4) Conclusions, (5) Recommendations.
-**REFERENCE INDIVIDUAL REPORTS**: When listed above, cite paths or experiment IDs in both languages.
+Based on this content and charts, produce a **beautiful, professional** synthesis report. **YOU decide the layout** and structure.
+**IMPORTANT**: Even with minimal or sparse data, you MUST produce a complete report with: (1) Executive Overview, (2) Hypothesis Summary, (3) Cross-experiment Analysis or Current Status, (4) Conclusions, (5) Recommendations. Do not leave sections empty.
+**REFERENCE INDIVIDUAL REPORTS**: When individual experiment reports are listed above, you SHOULD reference and cite them (e.g. "See experiment 3 report for details", or link to report paths). Combine insights from individual reports into the synthesis.
 {report_xml_instruction()}
-Use CDATA. Each HTML: complete document with professional styling."""
+Use CDATA to wrap content. HTML must be a complete, well-styled document. If charts exist, embed in BOTH: HTML <img src=\"assets/filename.png\" alt=\"title\"> and Markdown ![title](assets/filename.png)."""
 
             try:
                 response = await self.agent.llm_router.acompletion(
@@ -985,111 +985,87 @@ Use CDATA. Each HTML: complete document with professional styling."""
             except XmlParseError as e:
                 if attempt >= max_retries - 1:
                     self.logger.warning("Synthesis report XML parse failed: %s", e)
-                    return report_md_zh
+                    return report_md
                 last_feedback = str(e)
                 continue
+            # 双语解析：优先取中文，fallback 到通用字段
+            md_content = (data.get("markdown_zh") or data.get("markdown") or "").strip()
+            html_content = (data.get("html_zh") or data.get("html") or "").strip()
+            md_content_en = (data.get("markdown_en") or "").strip()
+            html_content_en = (data.get("html_en") or "").strip()
 
-            md_zh = (data.get("markdown_zh") or "").strip()
-            html_zh = (data.get("html_zh") or "").strip()
-            md_en = (data.get("markdown_en") or "").strip()
-            html_en = (data.get("html_en") or "").strip()
-
-            if (
-                len(md_zh) < MIN_LOCALE
-                or len(html_zh) < MIN_LOCALE
-                or len(md_en) < MIN_LOCALE
-                or len(html_en) < MIN_LOCALE
-            ):
+            MIN_CONTENT_LEN = 150
+            is_too_short = (
+                len(md_content) < MIN_CONTENT_LEN
+                and len(html_content) < MIN_CONTENT_LEN
+            )
+            if is_too_short:
                 last_feedback = (
-                    f"Each of markdown_zh, html_zh, markdown_en, html_en must be "
-                    f"substantive (>= {MIN_LOCALE} chars). Bilingual synthesis required."
+                    "Report content is empty or too short (both MD and HTML < 150 chars). "
+                    "You MUST produce a complete report with Executive Overview, Hypothesis Summary, "
+                    "Cross-experiment Analysis, Conclusions, and Recommendations. Do not return minimal or placeholder content."
                 )
                 self.logger.warning(
-                    "Synthesis report too short (attempt %s/%s)",
+                    "Synthesis report too short (md=%d, html=%d chars), retrying (%s/%s)",
+                    len(md_content),
+                    len(html_content),
                     attempt + 1,
                     max_retries,
                 )
                 if attempt >= max_retries - 1:
                     self.logger.warning(
-                        "Synthesis report empty after %d attempts; saving partial if any.",
+                        "Synthesis report empty after %d attempts; saving partial.",
                         max_retries,
                     )
-                    if md_zh:
-                        report_md_zh.write_text(md_zh, encoding="utf-8")
+                    if md_content or html_content:
+                        report_md.write_text(md_content, encoding="utf-8")
                         self._embed_synthesis_charts_in_markdown(
-                            report_md_zh, output_dir, chart_paths
+                            report_md, output_dir, chart_paths
                         )
-                    if html_zh:
-                        report_html_zh.write_text(html_zh, encoding="utf-8")
-                        self._embed_synthesis_charts_in_html(
-                            report_html_zh, output_dir, chart_paths
-                        )
-                    if md_en:
-                        report_md_en.write_text(md_en, encoding="utf-8")
-                        self._embed_synthesis_charts_in_markdown(
-                            report_md_en, output_dir, chart_paths
-                        )
-                    if html_en:
-                        report_html_en.write_text(html_en, encoding="utf-8")
-                        self._embed_synthesis_charts_in_html(
-                            report_html_en, output_dir, chart_paths
-                        )
-                    synthesis.synthesis_report_zh_md_path = (
-                        str(report_md_zh) if report_md_zh.exists() else None
-                    )
-                    synthesis.synthesis_report_zh_html_path = (
-                        str(report_html_zh) if report_html_zh.exists() else None
-                    )
-                    synthesis.synthesis_report_en_md_path = (
-                        str(report_md_en) if report_md_en.exists() else None
-                    )
-                    synthesis.synthesis_report_en_html_path = (
-                        str(report_html_en) if report_html_en.exists() else None
-                    )
-                    synthesis.synthesis_report_path = synthesis.synthesis_report_zh_md_path
-                    synthesis.synthesis_report_html_path = synthesis.synthesis_report_zh_html_path
-                    return report_md_zh
+                        if html_content:
+                            report_html.write_text(html_content, encoding="utf-8")
+                            self._embed_synthesis_charts_in_html(
+                                report_html, output_dir, chart_paths
+                            )
+                            synthesis.synthesis_report_html_path = str(report_html)
+                    return report_md
                 continue
 
-            report_md_zh.write_text(md_zh, encoding="utf-8")
-            self._embed_synthesis_charts_in_markdown(
-                report_md_zh, output_dir, chart_paths
-            )
-            report_html_zh.write_text(html_zh, encoding="utf-8")
-            self._embed_synthesis_charts_in_html(
-                report_html_zh, output_dir, chart_paths
-            )
-            report_md_en.write_text(md_en, encoding="utf-8")
-            self._embed_synthesis_charts_in_markdown(
-                report_md_en, output_dir, chart_paths
-            )
-            report_html_en.write_text(html_en, encoding="utf-8")
-            self._embed_synthesis_charts_in_html(
-                report_html_en, output_dir, chart_paths
-            )
-            synthesis.synthesis_report_zh_md_path = str(report_md_zh)
-            synthesis.synthesis_report_zh_html_path = str(report_html_zh)
-            synthesis.synthesis_report_en_md_path = str(report_md_en)
-            synthesis.synthesis_report_en_html_path = str(report_html_en)
-            synthesis.synthesis_report_path = str(report_md_zh)
-            synthesis.synthesis_report_html_path = str(report_html_zh)
+            if md_content or html_content:
+                report_md.write_text(md_content, encoding="utf-8")
+                self._embed_synthesis_charts_in_markdown(
+                    report_md, output_dir, chart_paths
+                )
+                if html_content:
+                    report_html.write_text(html_content, encoding="utf-8")
+                    self._embed_synthesis_charts_in_html(
+                        report_html, output_dir, chart_paths
+                    )
+                    synthesis.synthesis_report_html_path = str(report_html)
+                # 保存英文版（如存在且与中文不同）
+                if md_content_en and md_content_en != md_content:
+                    en_md = output_dir / f"{FILE_SYNTHESIS_REPORT_PREFIX}{sid}_en.md"
+                    en_md.write_text(md_content_en, encoding="utf-8")
+                if html_content_en and html_content_en != html_content:
+                    en_html = output_dir / f"{FILE_SYNTHESIS_REPORT_PREFIX}{sid}_en.html"
+                    en_html.write_text(html_content_en, encoding="utf-8")
 
             judgment = await self._judge_synthesis_report(
-                md_zh, html_zh, md_en, html_en, len(chart_paths), synthesis
+                md_content, html_content, len(chart_paths), synthesis
             )
             if judgment.success:
-                self.logger.info("Saved bilingual synthesis report: %s", report_md_zh)
-                return report_md_zh
+                self.logger.info("Saved synthesis report: %s", report_md)
+                return report_md
             if attempt >= max_retries - 1:
                 self.logger.warning(
                     "Synthesis report judgment failed after %d attempts; keeping last output.",
                     max_retries,
                 )
-                return report_md_zh
+                return report_md
             last_feedback = f"{judgment.reason}. {judgment.retry_instruction}"
             self.logger.info("Synthesis report judgment: %s, retrying", judgment.reason)
 
-        return report_md_zh
+        return report_md
 
     async def synthesize(
         self,

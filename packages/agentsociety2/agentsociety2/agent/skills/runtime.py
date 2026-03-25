@@ -78,10 +78,10 @@ class AgentSkillRuntime:
         return True
 
     def workspace_list(self, relative_path: str = ".") -> list[str]:
+        work_dir = self.workspace_root()  # raises RuntimeError if not initialized
         root = self._resolve_workspace_path(relative_path)
         if not root.exists():
             return []
-        work_dir = self.ensure_agent_work_dir(env_obj=None)
         if root.is_file():
             return [str(root.relative_to(work_dir))]
         return sorted(str(p.relative_to(work_dir)) for p in root.rglob("*") if p.is_file())
@@ -113,12 +113,9 @@ class AgentSkillRuntime:
 
     def persist_session_state(
         self,
-        selected_skills: set[str],
         tick: int,
         t: datetime,
-        need: Any,
-        emotion: str,
-        intention: str | None,
+        selected_skills: set[str],
         activated_skills: set[str] | None = None,
     ) -> None:
         state = {
@@ -127,9 +124,6 @@ class AgentSkillRuntime:
             "time": t.isoformat(),
             "selected_skills": sorted(selected_skills),
             "activated_skills": sorted(activated_skills or set()),
-            "need": need,
-            "emotion": emotion,
-            "intention": intention,
         }
         self.workspace_write(
             "session_state.json",

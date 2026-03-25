@@ -11,7 +11,6 @@
 - **web_research**: 使用 Miro MCP 服务进行网络研究
 - **paper**: 学术论文生成，支持 EasyPaper 工作流
 - **analysis**: 数据分析与报告生成，包含洞察智能体和数据探索智能体
-- **agent**: 智能体处理工具，支持选择、生成和过滤
 
 使用示例
 ========
@@ -44,7 +43,6 @@ from agentsociety2.skills import (
     web_research,
     paper,
     analysis,
-    agent,
 )
 
 __all__ = [
@@ -54,5 +52,4 @@ __all__ = [
     "web_research",
     "paper",
     "analysis",
-    "agent",
 ]

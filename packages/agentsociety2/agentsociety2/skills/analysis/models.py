@@ -22,8 +22,8 @@ FILE_SQLITE = "sqlite.db"
 FILE_PID = "pid.json"
 FILE_HYPOTHESIS_MD = "HYPOTHESIS.md"
 FILE_EXPERIMENT_MD = "EXPERIMENT.md"
-FILE_REPORT_MD = "report_zh.md"
-FILE_REPORT_HTML = "report_zh.html"
+FILE_REPORT_MD = "report.md"
+FILE_REPORT_HTML = "report.html"
 FILE_ANALYSIS_SUMMARY_JSON = "analysis_summary.json"
 FILE_README_MD = "README.md"
 FILE_SYNTHESIS_REPORT_PREFIX = "synthesis_report_"
@@ -63,7 +63,7 @@ class PresentationPaths(BaseModel):
 
     生成产物布局：
     - output_dir/
-      - report_zh.md, report_zh.html, report_en.md, report_en.html, README.md
+      - report.md, report.html, README.md
       - data/analysis_summary.json
     - charts/  （AnalysisAgent 写图目录，再被复制到 assets）
       - assets/  （报告引用的图片，DIR_REPORT_ASSETS）
@@ -159,31 +159,35 @@ class AnalysisResult(BaseModel):
 
 
 class ReportContent(BaseModel):
-    """报告内容"""
+    """报告内容（支持中英双语）"""
 
     title: str = Field(..., description="Report title")
     subtitle: str = Field(default="", description="Report subtitle")
     format_preference: str = Field(
         default="markdown", description="Preferred format: markdown, html, or both"
     )
-    full_content_markdown: Optional[str] = Field(
-        default=None, description="默认中文 Markdown（与 markdown_zh 对齐）"
-    )
-    full_content_html: Optional[str] = Field(
-        default=None, description="默认中文 HTML（与 html_zh 对齐）"
-    )
+    # 双语字段
     full_content_markdown_zh: Optional[str] = Field(
-        default=None, description="简体中文 Markdown"
+        default=None, description="Chinese markdown report content"
     )
     full_content_html_zh: Optional[str] = Field(
-        default=None, description="简体中文 HTML"
+        default=None, description="Chinese HTML report content"
     )
     full_content_markdown_en: Optional[str] = Field(
-        default=None, description="English Markdown"
+        default=None, description="English markdown report content"
     )
     full_content_html_en: Optional[str] = Field(
-        default=None, description="English HTML"
+        default=None, description="English HTML report content"
     )
+
+    # 向后兼容：取中文优先的单语版本
+    @property
+    def full_content_markdown(self) -> Optional[str]:
+        return self.full_content_markdown_zh or self.full_content_markdown_en
+
+    @property
+    def full_content_html(self) -> Optional[str]:
+        return self.full_content_html_zh or self.full_content_html_en
 
     model_config = ConfigDict(arbitrary_types_allowed=True)
 
@@ -372,19 +376,7 @@ class ExperimentSynthesis(BaseModel):
         None, description="Synthesis report Markdown file path"
     )
     synthesis_report_html_path: Optional[str] = Field(
-        None, description="Synthesis report HTML file path (Chinese)"
-    )
-    synthesis_report_zh_md_path: Optional[str] = Field(
-        None, description="Synthesis Markdown (Chinese), explicit _zh filename"
-    )
-    synthesis_report_zh_html_path: Optional[str] = Field(
-        None, description="Synthesis HTML (Chinese), explicit _zh filename"
-    )
-    synthesis_report_en_md_path: Optional[str] = Field(
-        None, description="Synthesis Markdown (English)"
-    )
-    synthesis_report_en_html_path: Optional[str] = Field(
-        None, description="Synthesis HTML (English)"
+        None, description="Synthesis report HTML file path"
     )
 
     model_config = ConfigDict(arbitrary_types_allowed=True)

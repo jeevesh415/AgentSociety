@@ -21,7 +21,7 @@ Agent Skills 是 PersonAgent 的能力插件系统。PersonAgent 本身是轻量
 * **按需加载**：降低每步不必要的加载与执行开销。
 * **可解释选择**：选择依据来自 SKILL.md 元数据，便于调试与治理。
 * **热更新友好**：支持运行时扫描、导入、启用/禁用与重载。
-* **依赖可控**：用 requires/provides 声明依赖，避免硬编码耦合。
+* **依赖可控**：用 requires 声明依赖，避免硬编码耦合。
 
 
 Skill 目录结构
@@ -48,12 +48,10 @@ Skill 目录结构
        └── scripts/
            └── my_skill.py
 
-入口脚本约定：
+Skill 的两种模式（与当前 PersonAgent skills-first 设计一致）：
 
-.. code-block:: python
-
-   async def run(agent, ctx):
-       ...
+1. **Prompt-only（推荐）**：不声明 ``script``。当模型选择并 activate skill 后，SKILL.md 作为行为指南注入上下文，模型使用内置原子工具（bash/codegen/workspace_* 等）完成任务。
+2. **Subprocess script（确定性计算/解析用）**：在 frontmatter 中声明 ``script: scripts/my_skill.py``。执行时以子进程运行脚本，参数通过 ``--args-json`` 传入，产物写入 agent workspace（``AGENT_WORK_DIR``）。
 
 
 SKILL.md 格式
@@ -66,12 +64,8 @@ SKILL.md 格式
    ---
    name: cognition
    description: Update emotions and form intentions from current context
-   priority: 40
    requires:
      - observation
-   provides:
-     - emotion_update
-     - intention_formation
    ---
 
    # Cognition Skill
@@ -89,12 +83,14 @@ SKILL.md 格式
      - Skill 名称（唯一标识）。
    * - ``description``
      - 给选择器看的功能描述，尽量具体、可判别。
-   * - ``priority``
-     - 执行优先级，数值越小越先执行。
+   * - ``script``
+     - 可选，脚本路径（如 ``scripts/main.py``）。
+   * - ``executor``
+     - 可选，执行器类型（如 ``codegen``）。
+   * - ``disable_model_invocation``
+     - 可选，是否禁用模型调用。
    * - ``requires``
-     - 依赖项，可写 skill 名称或能力标签。
-   * - ``provides``
-     - 本技能提供的能力标签。
+     - 依赖的其他 skill 名称列表。
 
 
 每步执行流程
@@ -102,39 +98,37 @@ SKILL.md 格式
 
 PersonAgent.step() 的流程如下：
 
-1. 构建上下文 ``ctx``。
-2. 调用 ``_select_skills_for_step()``：
-   - 仅提供技能元数据目录给主 LLM。
-   - 返回 ``selected_skills``。
-3. 依赖校验：
-   - 若缺依赖，要求 LLM 修正一次。
-   - 若修正后仍缺依赖，裁剪不满足依赖的技能。
-4. 按 ``priority`` 排序，按需加载并执行已选技能。
-5. 若未选中 ``memory`` 但有认知缓冲，缓冲继续保留。
-6. 记录本 step 细节。
+1. 注入 L0 技能目录（metadata）+ 工作区状态 + 最近工具历史。
+2. 进入 tool-loop：模型每轮选择一个工具调用（activate/read/execute/workspace_* 等）。
+3. 当调用某个 skill 时：
+   - 运行时会按需加载 SKILL.md（L1）与 skill 目录文件（L2）。
+   - 若 skill 声明 ``requires``，运行时会自动激活其依赖；缺依赖则拒绝调用并返回 missing 列表。
+4. 达到 done 或轮次上限后结束本 step，并持久化最小会话状态与工具历史。
 
 关键点：
 
-* **未被选中的技能不会执行**。
-* **系统不会自动补选依赖技能**（由 LLM 修正或裁剪）。
-* **执行顺序由 priority 决定**。
+* **技能是能力目录 + 行为规范 +（可选）子进程脚本**，而不是框架内 pipeline。
+* **L0/L1/L2 渐进披露**用于减少上下文负担。
+* **requires 是运行时行为**（自动补齐依赖/缺依赖阻止），而不是仅展示字段。
 
 
 依赖管理
 ----------
 
-依赖声明支持两种形式：
+使用 ``requires`` 声明依赖的其他 skill 名称：
 
-* **直接依赖 skill 名称**（例如 ``observation``）
-* **依赖能力标签**（例如 ``intention_formation``）
+.. code-block:: yaml
 
-能力标签由其他技能在 ``provides`` 中声明，注册表会把能力映射为可满足依赖的技能。
+   ---
+   name: cognition
+   requires:
+     - observation
+   ---
 
 推荐实践：
 
 * 用 ``requires`` 明确最小前置条件。
-* 用 ``provides`` 暴露稳定能力名，减少技能间硬绑定。
-* 保持 ``description`` 可操作，避免“泛描述”。
+* 保持 ``description`` 可操作，避免”泛描述”。
 
 
 Memory 语义
@@ -185,17 +179,29 @@ Memory 语义
    ---
    name: hello_skill
    description: Add a short greeting into step log
-   priority: 80
    requires: []
-   provides: [greeting]
    ---
 
 ``scripts/hello_skill.py``：
 
 .. code-block:: python
 
-   async def run(agent, ctx):
-       ctx.setdefault("step_log", []).append("hello_skill: greeted")
+   import argparse
+   import json
+   from pathlib import Path
+
+   def main() -> int:
+       parser = argparse.ArgumentParser()
+       parser.add_argument("--args-json", default="{}")
+       ns = parser.parse_args()
+       args = json.loads(ns.args_json or "{}")
+       result = {"ok": True, "summary": "hello_skill: greeted", "tick": args.get("tick")}
+       Path("hello_skill.txt").write_text("hello_skill: greeted", encoding="utf-8")
+       print(json.dumps(result, ensure_ascii=False))
+       return 0
+
+   if __name__ == "__main__":
+       raise SystemExit(main())
 
 导入并启用后，主 LLM 会在合适上下文中选择它执行。
 
@@ -203,11 +209,10 @@ Memory 语义
 最佳实践
 ---------
 
-1. ``description`` 写成“触发条件 + 输出结果”，便于选择器判断。
-2. ``priority`` 按数据依赖排序，而不是按功能重要性排序。
-3. ``requires`` 只声明必要依赖，避免过度耦合。
-4. Skill 代码尽量幂等，避免重复执行造成状态污染。
-5. 对关键技能保留清晰日志，便于复盘每步选择与执行。
+1. ``description`` 写成”触发条件 + 输出结果”，便于选择器判断。
+2. ``requires`` 只声明必要依赖，避免过度耦合。
+3. Skill 代码尽量幂等，避免重复执行造成状态污染。
+4. 对关键技能保留清晰日志，便于复盘每步选择与执行。
 
 
 参考

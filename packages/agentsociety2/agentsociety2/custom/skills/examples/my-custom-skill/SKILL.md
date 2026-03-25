@@ -1,10 +1,6 @@
 ---
 name: my-custom-skill
 description: Example custom agent skill — a template to get started.
-trigger: on_demand
-priority: 100
-provides:
-  - custom_output
 ---
 
 # My Custom Skill

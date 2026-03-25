@@ -1,14 +1,9 @@
 ---
 name: economic-reasoning
 description: Economic decision-making for agents in EconomySpace. Activate when the agent observes currency, prices, income, tax, or trading opportunities to make informed financial decisions.
-trigger: on_demand
 script: scripts/economic_reasoning.py
-priority: 45
 requires:
   - observation
-provides:
-  - economic_analysis
-  - financial_reasoning
 ---
 
 # Economic Reasoning

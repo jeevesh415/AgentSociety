@@ -150,6 +150,11 @@
         "icon": "$(check)"
       },
       {
+        "command": "aiSocialScientist.reloadAgentSkill",
+        "title": "AI Social Scientist: Reload Agent Skill",
+        "icon": "$(refresh)"
+      },
+      {
         "command": "aiSocialScientist.openSkillFolder",
         "title": "AI Social Scientist: Open Skill Folder in File Manager",
         "icon": "$(folder)"
@@ -224,14 +229,19 @@
           "group": "1_actions@2"
         },
         {
+          "command": "aiSocialScientist.reloadAgentSkill",
+          "when": "view == projectStructureView && viewItem =~ /agentSkillItem/",
+          "group": "1_actions@2"
+        },
+        {
           "command": "aiSocialScientist.openSkillFolder",
           "when": "view == projectStructureView && viewItem =~ /agentSkillItem/",
           "group": "2_actions"
         },
         {
           "command": "aiSocialScientist.openSkillFolder",
-          "when": "view == projectStructureView && viewItem == syncBuiltinSkillItem",
-          "group": "1_actions"
+          "when": "view == projectStructureView && viewItem == extensionSkillItem",
+          "group": "2_actions"
         },
         {
           "command": "aiSocialScientist.formatJsonFile",

@@ -201,13 +201,17 @@ def get_analysis_skills(
 
     if strict_selection:
         # In strict mode: load required + explicitly selected
-        targets = required_skills + [m for m in metas if m.name in selected_set and not m.required]
+        targets = required_skills + [
+            m for m in metas if m.name in selected_set and not m.required
+        ]
     else:
         # In non-strict mode: load all if no selection, or required + selected
         if not selected_set:
             targets = metas
         else:
-            targets = required_skills + [m for m in metas if m.name in selected_set and not m.required]
+            targets = required_skills + [
+                m for m in metas if m.name in selected_set and not m.required
+            ]
 
     # Remove duplicates while preserving order
     seen = set()
@@ -341,26 +345,24 @@ def parse_llm_json_response(content: str) -> Dict[str, Any]:
     return data if isinstance(data, dict) else {}
 
 
-def _report_cdata(root, tag: str) -> str:
-    el = root.find(f".//{tag}")
-    if el is None:
-        el = root.find(tag)
-    if el is None:
-        return ""
-    return "".join(el.itertext()).strip()
-
-
 def parse_llm_report_response(content: str) -> Dict[str, str]:
-    """
-    解析报告类 LLM 输出，仅支持 XML 格式。
-    主格式（双语）：
-    <report>
-      <markdown_zh><![CDATA[...]]></markdown_zh>
-      <html_zh><![CDATA[...]]></html_zh>
-      <markdown_en><![CDATA[...]]></markdown_en>
-      <html_en><![CDATA[...]]></html_en>
-    </report>
-    仅接受双语四段输出，不做旧版单语兼容。
+    """解析报告类 LLM 输出（XML 格式），支持双语和单语两种 tag 结构。
+
+    双语格式（优先）::
+        <report>
+          <markdown_zh><![CDATA[...]]></markdown_zh>
+          <html_zh><![CDATA[...]]></html_zh>
+          <markdown_en><![CDATA[...]]></markdown_en>
+          <html_en><![CDATA[...]]></html_en>
+        </report>
+
+    单语兼容格式::
+        <report>
+          <markdown><![CDATA[...]]></markdown>
+          <html><![CDATA[...]]></html>
+        </report>
+
+    Returns dict with keys: markdown_zh, html_zh, markdown_en, html_en, markdown, html.
     """
     raw = (content or "").strip()
     if not raw:
@@ -374,31 +376,38 @@ def parse_llm_report_response(content: str) -> Dict[str, str]:
                 break
     root = _parse_xml_to_root(xml_str)
 
-    md_zh = _report_cdata(root, "markdown_zh")
-    html_zh = _report_cdata(root, "html_zh")
-    md_en = _report_cdata(root, "markdown_en")
-    html_en = _report_cdata(root, "html_en")
+    def _text(tag: str) -> str:
+        el = root.find(f".//{tag}")
+        if el is None:
+            el = root.find(tag)
+        return "".join(el.itertext()).strip() if el is not None else ""
 
-    if not (md_zh and html_zh and md_en and html_en):
-        raise XmlParseError(
-            "Report XML must include non-empty markdown_zh, html_zh, markdown_en, html_en.",
-            raw_content=content,
-        )
+    md_zh = _text("markdown_zh")
+    html_zh = _text("html_zh")
+    md_en = _text("markdown_en")
+    html_en = _text("html_en")
+    md_plain = _text("markdown")
+    html_plain = _text("html")
+
+    # 单语 fallback：若双语 tag 全空但单语有内容，复制到双语字段
+    if not md_zh and not md_en and md_plain:
+        md_zh = md_plain
+        md_en = md_plain
+    if not html_zh and not html_en and html_plain:
+        html_zh = html_plain
+        html_en = html_plain
 
     return {
         "markdown_zh": md_zh,
         "html_zh": html_zh,
         "markdown_en": md_en,
         "html_en": html_en,
+        "markdown": md_zh or md_en or md_plain,
+        "html": html_zh or html_en or html_plain,
     }
 
 
 # ---------- 先读结构再处理：DB schema 与实验文件 ----------
-
-
-def _quote_identifier(name: str) -> str:
-    """Safely quote SQLite identifiers (table/column names)."""
-    return '"' + str(name).replace('"', '""') + '"'
 
 
 def extract_database_schema(db_path: Path) -> Dict[str, Any]:
@@ -413,7 +422,7 @@ def extract_database_schema(db_path: Path) -> Dict[str, Any]:
     tables = cursor.fetchall()
     schema = {}
     for (table_name,) in tables:
-        cursor.execute(f"PRAGMA table_info({_quote_identifier(table_name)})")
+        cursor.execute(f"PRAGMA table_info({table_name})")
         columns = cursor.fetchall()
         schema[table_name] = [
             {
@@ -449,7 +458,7 @@ def format_database_schema_markdown(
         cursor = conn.cursor()
         lines.append("### Table Row Counts")
         for table_name in schema:
-            cursor.execute(f"SELECT COUNT(*) FROM {_quote_identifier(table_name)}")
+            cursor.execute(f"SELECT COUNT(*) FROM {table_name}")
             count = cursor.fetchone()[0]
             lines.append(f"- `{table_name}`: {count} rows")
         conn.close()

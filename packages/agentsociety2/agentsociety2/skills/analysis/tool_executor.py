@@ -338,7 +338,6 @@ Use these libraries for analysis and visualization:
 - **statsmodels**: Regression and time series analysis
 - **networkx**: Network/graph analysis for agent interactions
 - **sklearn**: Machine learning (clustering, dimensionality reduction)
-- **Optional (if installed in environment)**: **pingouin** (tests + effect sizes), **phik** (mixed-type correlations), **duckdb** (fast SQL aggregation on large tables before plotting)
 
 ## Visualization Best Practices
 
@@ -549,13 +548,10 @@ Please generate corrected code that addresses the issues above."""
         output_dir_files = list(self.output_dir.glob("**/*"))
 
         def _fallback_check() -> ExecutionResult:
-            has_stdout = bool(exec_result and (exec_result.stdout or "").strip())
-            has_new_files = bool(new_files)
-            has_stderr = bool(exec_result and (exec_result.stderr or "").strip())
             if (
                 exec_result
                 and exec_result.return_code == 0
-                and (has_stdout or has_new_files or not has_stderr)
+                and (exec_result.stdout.strip() or new_files or output_dir_files)
             ):
                 return ExecutionResult(
                     success=True, reason="Execution completed with output"

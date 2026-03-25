@@ -1,42 +1,93 @@
 ---
 name: cognition
-description: Update emotions, generate thoughts, and form intentions (TPB). Activate when the agent needs to reflect, decide what to do next, or process emotional events.
-trigger: always
-priority: 40
+description: Generate emotion, thought, and intention based on observation and needs.
 requires:
   - observation
-provides:
-  - emotion_update
-  - thought_generation
-  - intention_formation
-  - need_adjustment
+  - needs
 ---
 
 # Cognition
 
-Handles the agent's inner mental life: emotions, thoughts, and intention selection.
+This is your inner mind. Given what you observe and what you need, produce three outputs that represent your cognitive state: **emotion**, **thought**, and **intention**.
 
-## What It Does
+## Inputs
 
-1. **Emotion update** — Based on memories and current need satisfaction, updates six emotion dimensions (sadness, joy, fear, disgust, anger, surprise) on a 0–10 scale and selects a dominant emotion type (e.g. Joy, Distress, Hope).
-2. **Thought update** — Generates a natural-language thought reflecting the agent's current situation.
-3. **Intention formation** — Uses Theory of Planned Behavior (TPB) to generate candidate intentions, scoring each on attitude, subjective norm, and perceived behavioral control, then selects the highest-priority one.
+Read these workspace files before reasoning:
 
-All three updates are performed in a **single merged LLM call** for efficiency.
+| File | Content |
+|------|---------|
+| `observation.txt` | What you currently perceive |
+| `needs.json` | Your four need levels (satiety, energy, safety, social) |
+| `current_need.txt` | Your most urgent need |
+| `memory.jsonl` | Past experiences (read last few entries for recent context) |
 
-## Behavioral Guidelines
+Also consider your **profile** (personality, background, relationships) from the system prompt's Agent Identity section.
 
-- Emotions should evolve gradually — no wild swings without strong triggers.
-- Intentions should be grounded in the agent's profile, current needs, and recent memories.
-- The selected intention drives the downstream planning skill.
+## Output 1: Emotion
 
-## Data Models
+Write `emotion.json` with your current emotional state:
+
+```json
+{
+  "primary": "curious",
+  "valence": 0.6,
+  "arousal": 0.4,
+  "note": "Noticed a new shop opened nearby; feeling intrigued."
+}
+```
+
+Fields:
+- `primary`: a single emotion word (happy, sad, anxious, angry, curious, content, lonely, excited, bored, fearful, etc.)
+- `valence`: −1.0 (very negative) to 1.0 (very positive)
+- `arousal`: 0.0 (calm) to 1.0 (agitated/excited)
+- `note`: one sentence explaining why you feel this way
+
+**Guidelines**: Your emotion should be consistent with your personality and situation. Don't default to "happy" every tick. If nothing notable is happening and needs are satisfied, "content" or "neutral" is appropriate. If a need is critical, you should feel the corresponding distress.
+
+## Output 2: Thought
+
+Write `thought.txt` with a brief inner monologue (1–3 sentences, first person):
 
 ```
-EmotionType          — 21 discrete emotion categories (OCC model)
-Emotion              — 6-dimensional intensity vector (0–10)
-CognitionUpdateResult(emotion, emotion_type, thought)
-Intention(intention, priority, attitude, subjective_norm, perceived_control, reasoning)
-IntentionUpdate(intentions[], reasoning)
-CognitionIntentionUpdateResult(need_adjustment, current_need, cognition_update, intention_update)
+I notice the café across the street is open. My energy is getting low, and I could use some food too. Maybe I should head over there.
 ```
+
+**Guidelines**: Think like a real person. Reference what you observe, what you need, and what you remember. This is NOT a planning step—just natural reflection.
+
+## Output 3: Intention
+
+Write `intention.json` with what you want to do next:
+
+```json
+{
+  "action_type": "move",
+  "target": "café",
+  "reason": "Low energy and satiety; want to eat and rest.",
+  "priority": "high"
+}
+```
+
+Fields:
+- `action_type`: what kind of action (e.g., `move`, `interact`, `communicate`, `rest`, `explore`, `wait`, `work`)
+- `target`: the object, location, or agent you want to act on
+- `reason`: one sentence explaining the motivation
+- `priority`: `high` (urgent need or important event), `medium` (normal), `low` (idle/optional)
+
+**Guidelines**:
+- The intention should logically follow from your observation + needs + thought.
+- If a need is critical (< 0.2), your intention should address it unless there's an overriding emergency (safety).
+- If nothing pressing, it's fine to have a `low` priority intention like exploring or socializing.
+- If the observation indicates an ongoing multi-step activity (e.g., you're in the middle of a conversation), your intention should continue it rather than abruptly switching.
+
+## Execution
+
+Use `workspace_read` to load each input file, reason internally, then `workspace_write` each output. Example sequence:
+
+1. `workspace_read("observation.txt")`
+2. `workspace_read("needs.json")`
+3. `workspace_read("current_need.txt")`
+4. `workspace_read("memory.jsonl")` (optional, for context)
+5. Reason about your cognitive state...
+6. `workspace_write("emotion.json", ...)`
+7. `workspace_write("thought.txt", ...)`
+8. `workspace_write("intention.json", ...)`

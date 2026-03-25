@@ -1,45 +1,58 @@
 ---
 name: needs
-description: Adjust physiological and social need satisfaction levels (satiety, energy, safety, social). Activate when the agent's physical or social state may have changed.
-trigger: always
+description: Update physiological/social need levels via subprocess heuristic.
 script: scripts/needs.py
-priority: 30
 requires:
   - observation
-provides:
-  - need_adjustment
-  - current_need
 ---
 
 # Needs
 
-Models four fundamental human needs with continuous satisfaction levels (0–1).
+Subprocess skill that maintains four physiological/social need levels based on the current observation. Needs drive motivation: a hungry agent seeks food, a lonely agent seeks company.
 
-## Need Types
+## Need Dimensions
 
-| Need | Description | Threshold |
-|------|-------------|-----------|
-| **Satiety** | Hunger / food satisfaction | T_H (default 0.2) |
-| **Energy** | Rest / sleep satisfaction | T_D (default 0.2) |
-| **Safety** | Physical and psychological safety | T_P (default 0.2) |
-| **Social** | Social connection and belonging | T_C (default 0.3) |
+| Need | Range | Description |
+|------|-------|-------------|
+| `satiety` | 0.0–1.0 | Hunger satisfaction. Decays over time; increases when eating. |
+| `energy` | 0.0–1.0 | Physical energy. Decays over time; increases when resting/sleeping. |
+| `safety` | 0.0–1.0 | Feeling of security. Drops in dangerous situations. |
+| `social` | 0.0–1.0 | Social fulfillment. Increases through conversation and companionship. |
 
-## What It Does
+**Low values (< 0.3) indicate urgency**—the agent should prioritize addressing that need.
 
-1. After observation, the agent reviews its recent memories and current environment.
-2. An LLM call decides which satisfaction levels to adjust (increase / decrease / maintain) with reasoning.
-3. The most urgent need (lowest satisfaction relative to its threshold) becomes `current_need`, steering downstream intention and planning.
+## How to Call
 
-## Behavioral Guidelines
-
-- Needs decay naturally if not addressed; successful actions restore them.
-- The LLM considers time of day, recent activities, and environment when adjusting needs.
-- Need adjustments are recorded as cognition memory for later reflection.
-
-## Data Models
-
+```json
+{
+  "tool_name": "execute_skill",
+  "arguments": {
+    "skill_name": "needs",
+    "args": {
+      "observation": "<text from observation.txt>"
+    }
+  }
+}
 ```
-Satisfactions(satiety, energy, safety, social)   # 0.0–1.0 each
-NeedAdjustment(need_type, adjustment_type, amount, reasoning)
-NeedAdjustmentResult(adjustments[], reasoning)
-```
+
+The `tick` and `time` fields are auto-injected. Pass the full observation text so the heuristic can detect keywords (food, sleep, danger, social interactions, etc.).
+
+## Outputs
+
+The subprocess writes two files to the agent workspace:
+
+- **`needs.json`** — current levels:
+  ```json
+  {"satiety": 0.72, "energy": 0.65, "safety": 0.80, "social": 0.45}
+  ```
+- **`current_need.txt`** — the single most urgent need key (e.g. `"social"`)
+
+## How Downstream Skills Should Use This
+
+- **cognition**: read `current_need.txt` to understand what's driving motivation. Read `needs.json` for nuanced multi-need awareness.
+- **plan**: consider the current need when choosing actions. If `energy` is critically low (< 0.2), seeking rest should take priority over social goals.
+
+## Notes
+
+- Needs naturally decay each tick (satiety −0.02, energy −0.03), so even without negative events, the agent will eventually need to eat and rest.
+- The subprocess uses simple keyword matching—it's a heuristic baseline. The real intelligence comes from cognition and plan interpreting these levels.

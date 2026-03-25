@@ -1,47 +1,84 @@
 ---
 name: plan
-description: Generate multi-step plans from intentions and execute them via ReAct loop (reason → act → observe). Activate when the agent has an intention or active plan to carry out.
-trigger: on_demand
-priority: 50
+description: Turn the current intention into an environment action for this tick.
 requires:
   - observation
   - cognition
-provides:
-  - plan_execution
-  - environment_interaction
 ---
 
 # Plan
 
-Translates the agent's current intention into an executable multi-step plan and carries it out using a ReAct (Reasoning + Acting) loop.
+You are the agent's executive function. Read the intention (from cognition) and translate it into a concrete environment action via `codegen`.
 
-## What It Does
+## Inputs
 
-1. **Plan lifecycle management** — checks if the current plan step completed or failed based on new observations; advances the plan index accordingly.
-2. **Plan interruption** — if the agent's intention has shifted significantly, the current plan may be abandoned.
-3. **Plan generation** — given the selected intention and related memories, an LLM generates a structured plan (target, reasoning, ordered steps).
-4. **Step execution (ReAct)** — for each plan step, the agent enters a ReAct loop:
-   - *Reasoning*: decide what action to take next
-   - *Acting*: send an instruction to the environment router
-   - *Observing*: read the environment's response
-   - Repeat up to `max_react_interactions_per_step` times (default 3)
+| File | Content |
+|------|---------|
+| `intention.json` | What you want to do (action_type, target, reason, priority) |
+| `observation.txt` | Current perception (for grounding actions in reality) |
+| `observation_ctx.json` | Structured environment context (if available) |
+| `plan_state.json` | Ongoing multi-step plan state (if exists) |
 
-## Behavioral Guidelines
+## Single-Step Actions
 
-- Plans should be concise (≤ `max_plan_steps`, default 6).
-- Each ReAct action should be a single clear instruction to the environment.
-- If a step returns `status: in_progress`, the agent waits until the next tick to check again.
-- Plan completion or failure triggers an emotion update.
+For most intentions, a single `codegen` call suffices:
 
-## Data Models
-
-```
-PlanStep(intention, status, start_time, evaluation)
-PlanStepStatus      — pending / in_progress / completed / failed
-Plan(target, reasoning, steps[], index, completed, failed, start_time, end_time)
-StepEvaluation(success, evaluation, consumed_time)
+```json
+{
+  "tool_name": "codegen",
+  "arguments": {
+    "instruction": "<action description>",
+    "ctx": {}
+  }
+}
 ```
 
-## Template Mode
+The `instruction` should be a clear, specific command to the environment. Examples:
 
-When `template_mode_enabled=True`, the agent's instructions to the environment use `{variable_name}` placeholders with an accompanying `variables` dict, enabling structured environment APIs.
+| Intention | codegen instruction |
+|-----------|-------------------|
+| move to café | `"Move to the café on Main Street."` |
+| talk to Alice | `"Say hello to Alice and ask how she's doing."` |
+| buy food | `"Purchase a meal at the current location."` |
+| rest | `"Find a bench or quiet spot and rest."` |
+| explore | `"Walk around and observe the neighborhood."` |
+
+Pass relevant context from `observation_ctx.json` in the `ctx` argument if the environment expects structured data (e.g., location IDs, agent IDs).
+
+## Multi-Step Plans
+
+Some goals take multiple ticks. Use `plan_state.json` to track progress:
+
+```json
+{
+  "goal": "Go to the supermarket and buy groceries",
+  "steps": ["walk to supermarket", "enter store", "pick items", "pay"],
+  "current_step": 1,
+  "started_tick": 42
+}
+```
+
+Each tick:
+1. `workspace_read("plan_state.json")` — check if there's an ongoing plan.
+2. If the current step is done (based on observation), increment `current_step`.
+3. Execute the current step via `codegen`.
+4. `workspace_write("plan_state.json", ...)` — persist updated state.
+5. When all steps are done, delete or clear `plan_state.json`.
+
+## Handling Environment Responses
+
+After calling `codegen`, check the result:
+
+- **`ok: true`**: the action was accepted. Read `stdout` for any feedback.
+- **`status: "in_progress"`** (in stdout or ctx): the action is still ongoing (e.g., traveling). Call `done` and resume next tick.
+- **`ok: false`**: the action failed. Read `stderr` for the reason. Consider:
+  - Retrying with a different approach
+  - Adjusting the intention (write updated `intention.json` for next tick)
+  - Abandoning the plan if it's not feasible
+
+## Decision Guidelines
+
+- **Respect priority**: A `high` priority intention should be acted on immediately. A `low` priority intention can be deferred if something better comes up.
+- **Stay grounded**: Only attempt actions that make sense given your current location and observation. Don't try to interact with entities that aren't nearby.
+- **One action per tick**: Execute one meaningful action, then call `done`. Don't try to chain multiple environment actions in a single step.
+- **Handle idle gracefully**: If the intention is `wait` or there's nothing to do, it's fine to call `codegen` with a simple idle action or just call `done` directly.

@@ -1,8 +1,7 @@
-"""PersonAgent: 极简 skills-first agent.
+"""PersonAgent — 每个 Person 就是一个独立的 Claude-like tool-using agent。
 
-设计目标：
-- Person 本身尽可能轻，只保留状态、决策与编排。
-- skills/workspace/执行细节全部交给 runtime + registry。
+每个 agent 拥有独立工作区、独立会话线程，通过 skill catalog + 工具调用自主完成任务。
+skill 作者只需要写 SKILL.md（+ 可选 subprocess 脚本），无需了解 PersonAgent 内部。
 """
 
 from __future__ import annotations
@@ -12,7 +11,6 @@ import copy
 import json
 import re
 from datetime import datetime
-from pathlib import Path
 from typing import TYPE_CHECKING, Any, Optional
 
 from pydantic import BaseModel, Field
@@ -38,13 +36,9 @@ class ToolDecision(BaseModel):
 
 
 class PersonAgent(AgentBase):
-    """极简 PersonAgent。
+    """每个 Person = 一个独立的 Claude-like agent。
 
-    每步执行（Claude-like tool loop）：
-    1) 注入 L0 技能目录 + 工作区状态 + 最近工具历史
-    2) LLM 逐轮决策工具调用（activate/read/execute/workspace_*）
-    3) 达到 done 或轮次上限
-    4) 持久化最小会话状态
+    每步：system prompt 注入身份+技能目录+工具表 → LLM 逐轮选工具 → 结果回写 thread → done 结束。
     """
 
     @classmethod
@@ -67,7 +61,7 @@ class PersonAgent(AgentBase):
         self._agent_state: dict[str, Any] = dict(init_state or {})
         self._capability_kwargs: dict[str, Any] = dict(capability_kwargs)
 
-        # 每个 agent 拿全局 registry 的只读快照，避免 scan_env_skills 互相污染。
+        # 每个 agent 拿全局 registry 的深拷贝快照，避免 scan_env_skills 互相污染。
         base_registry = get_skill_registry()
         self._skill_registry = SkillRegistry()
         self._skill_registry._skills = copy.deepcopy(base_registry._skills)
@@ -76,6 +70,13 @@ class PersonAgent(AgentBase):
         self._selectable_skill_names: set[str] = set()
         self._skill_visibility_overrides: dict[str, bool] = {}
         self._activated_skills: set[str] = set()
+        # Claude-like capability disclosure: only a small core set is visible by default.
+        default_core = {"observation", "needs", "cognition", "plan", "memory"}
+        core = self._capability_kwargs.get("core_skills", None)
+        if isinstance(core, (list, set, tuple)):
+            self._core_skill_names: set[str] = {str(x).strip() for x in core if str(x).strip()}
+        else:
+            self._core_skill_names = set(default_core)
 
         self._step_count = 0
         self._last_selected_skills: set[str] = set()
@@ -90,6 +91,56 @@ class PersonAgent(AgentBase):
             return text
         return text[:max_len] + "...<truncated>"
 
+    # ── System Prompt ──────────────────────────────────────────────────────────
+
+    def get_system_prompt(self, tick: int, t: datetime) -> str:
+        """每轮注入完整上下文到 system role（对标 Claude Code 的行为）。"""
+        base = super().get_system_prompt(tick, t)
+
+        agent_identity = {
+            "id": self.id,
+            "name": self._name,
+            "profile": self.get_profile(),
+        }
+
+        try:
+            catalog = self._skill_runtime.skill_list(sorted(self._all_visible_skill_names()))
+        except Exception:
+            catalog = []
+
+        skill_section = (
+            f"\n\n# Agent Identity\n"
+            f"{json.dumps(agent_identity, ensure_ascii=False)}\n\n"
+            "# You Are an Autonomous Tool-Using Agent\n"
+            "Call tools one at a time. "
+            "Respond ONLY with valid JSON: {tool_name, arguments, done, summary}.\n\n"
+            "# Skills\n"
+            "The catalog below lists available skills (name + description). "
+            "Use `activate_skill` to load a skill's full instructions, then follow them.\n\n"
+            "# Tools\n"
+            "| Tool | Arguments | Purpose |\n"
+            "|------|-----------|----------|\n"
+            "| activate_skill | skill_name | Load skill instructions |\n"
+            "| read_skill | skill_name, path | Read a file inside a skill directory |\n"
+            "| execute_skill | skill_name, args | Run a skill's subprocess script |\n"
+            "| bash | command, timeout_sec | Shell command in workspace |\n"
+            "| codegen | instruction, ctx | Send instruction to the environment |\n"
+            "| workspace_read | path | Read file |\n"
+            "| workspace_write | path, content | Write file |\n"
+            "| workspace_list | path | List files |\n"
+            "| glob | glob, path | Find files by pattern |\n"
+            "| grep | pattern, glob, path | Search file contents |\n"
+            "| enable_skill | skill_name | Reveal a hidden skill |\n"
+            "| disable_skill | skill_name | Hide a skill |\n"
+            "| done | (done=true, summary) | Finish this step |\n\n"
+            f"# Skill Catalog\n{json.dumps(catalog, ensure_ascii=False, indent=1)}\n\n"
+            f"# Activated Skills\n{json.dumps(sorted(self._activated_skills), ensure_ascii=False)}"
+        )
+
+        return base + skill_section
+
+    # ── Thread Management ─────────────────────────────────────────────────────
+
     def _append_tool_result_to_thread(
         self,
         thread_messages: list[dict[str, str]],
@@ -103,6 +154,58 @@ class PersonAgent(AgentBase):
         thread_messages.append({"role": "user", "content": content})
         if len(thread_messages) > 40:
             del thread_messages[:-40]
+
+    # ── Skill Dependency ──────────────────────────────────────────────────────
+
+    def _ensure_requires_activated(
+        self,
+        tick: int,
+        t: datetime,
+        thread_messages: list[dict[str, str]],
+        skill_name: str,
+    ) -> dict[str, Any]:
+        """确保 skill 的 requires 依赖都已激活。"""
+        info = self._skill_registry.get_skill_info(skill_name, load_content=False)
+        requires = list(getattr(info, "requires", []) or []) if info else []
+        if not requires:
+            return {"ok": True, "requires": [], "activated": []}
+
+        missing: list[str] = []
+        activated: list[str] = []
+        for dep in requires:
+            dep = str(dep).strip()
+            if not dep:
+                continue
+            if dep not in self._all_visible_skill_names():
+                missing.append(dep)
+                continue
+            if dep in self._activated_skills:
+                continue
+            content = self._skill_runtime.skill_activate(dep)
+            if content:
+                self._activated_skills.add(dep)
+                activated.append(dep)
+
+        if activated:
+            self._persist_agent_config()
+            self._append_tool_result_to_thread(
+                thread_messages=thread_messages,
+                tick=tick,
+                t=t,
+                result_obj={
+                    "action": "auto_activate_requires",
+                    "skill_name": skill_name,
+                    "ok": True,
+                    "requires": requires,
+                    "activated": activated,
+                },
+            )
+
+        if missing:
+            return {"ok": False, "requires": requires, "activated": activated, "missing": missing}
+        return {"ok": True, "requires": requires, "activated": activated}
+
+    # ── Command Execution ─────────────────────────────────────────────────────
 
     # 危险命令/token 黑名单：阻止破坏性或逃逸操作，其余一律放行
     _BLOCKED_COMMAND_TOKENS = frozenset({
@@ -119,14 +222,22 @@ class PersonAgent(AgentBase):
         command = command.strip()
         if not command:
             return {"ok": False, "exit_code": -1, "stdout": "", "stderr": "empty command"}
+        # 基于“默认信任本机”的轻量护栏：
+        # - 禁止绝对路径，避免直接读写系统文件
+        # - 禁止 ../ 访问上级目录，避免越出 agent workspace 语义
+        if re.search(r"(^|[\s'\"();|&])\/", command):
+            return {"ok": False, "exit_code": -1, "stdout": "", "stderr": "blocked: absolute path"}
+        if "../" in command or "/.." in command or "..\\" in command:
+            return {"ok": False, "exit_code": -1, "stdout": "", "stderr": "blocked: parent traversal"}
         cmd_lower = command.lower()
         for token in self._BLOCKED_COMMAND_TOKENS:
             if token in cmd_lower:
                 return {"ok": False, "exit_code": -1, "stdout": "", "stderr": f"blocked: contains '{token}'"}
         work_dir = self._skill_runtime.workspace_root()
+        # 使用 bash -c 而非 bash -lc，避免加载用户 profile 引入不确定的 alias/env
         proc = await asyncio.create_subprocess_exec(
             "bash",
-            "-lc",
+            "-c",
             command,
             cwd=str(work_dir),
             stdout=asyncio.subprocess.PIPE,
@@ -147,23 +258,9 @@ class PersonAgent(AgentBase):
 
     async def _run_codegen(self, instruction: str, ctx: dict[str, Any], template_mode: bool) -> dict[str, Any]:
         if self._env is None:
-            return {
-                "ok": False,
-                "exit_code": -1,
-                "stdout": "",
-                "stderr": "Environment router is not initialized",
-                "error_type": "validation",
-                "artifacts": [],
-            }
+            return {"ok": False, "stdout": "", "stderr": "environment not initialized"}
         if not instruction.strip():
-            return {
-                "ok": False,
-                "exit_code": -1,
-                "stdout": "",
-                "stderr": "Codegen requires instruction",
-                "error_type": "validation",
-                "artifacts": [],
-            }
+            return {"ok": False, "stdout": "", "stderr": "empty instruction"}
         try:
             updated_ctx, answer = await self._env.ask(
                 ctx=ctx,
@@ -172,23 +269,8 @@ class PersonAgent(AgentBase):
                 template_mode=template_mode,
             )
         except Exception as e:
-            return {
-                "ok": False,
-                "exit_code": -1,
-                "stdout": "",
-                "stderr": str(e),
-                "error_type": "runtime",
-                "artifacts": [],
-            }
-        return {
-            "ok": True,
-            "exit_code": 0,
-            "stdout": answer,
-            "stderr": "",
-            "error_type": "none",
-            "artifacts": [],
-            "ctx": updated_ctx,
-        }
+            return {"ok": False, "stdout": "", "stderr": str(e)}
+        return {"ok": True, "stdout": answer, "stderr": "", "ctx": updated_ctx}
 
     def _glob_in_workspace(self, pattern: str, root: str) -> dict[str, Any]:
         work_dir = self._skill_runtime.workspace_root()
@@ -232,6 +314,8 @@ class PersonAgent(AgentBase):
                         return {"ok": True, "count": len(matches), "matches": matches, "truncated": True}
         return {"ok": True, "count": len(matches), "matches": matches, "truncated": False}
 
+    # ── Skill Visibility ──────────────────────────────────────────────────────
+
     def _refresh_selectable_skills(self) -> None:
         enabled = self._skill_registry.list_enabled()
         visible = []
@@ -239,8 +323,9 @@ class PersonAgent(AgentBase):
             override = self._skill_visibility_overrides.get(s.name)
             if override is False:
                 continue
+            if override is not True and s.name not in self._core_skill_names:
+                continue
             visible.append(s)
-        # 自由 agent 模式：所有可见技能默认可直接使用，不做预选 gate。
         self._selectable_skill_names = {s.name for s in visible}
 
     def _persist_agent_config(self) -> None:
@@ -252,11 +337,14 @@ class PersonAgent(AgentBase):
                     "state": self._agent_state,
                     "skill_overrides": self._skill_visibility_overrides,
                     "activated_skills": sorted(self._activated_skills),
+                    "core_skills": sorted(self._core_skill_names),
                 },
                 ensure_ascii=False,
                 indent=2,
             ),
         )
+
+    # ── Lifecycle ─────────────────────────────────────────────────────────────
 
     async def init(self, env: RouterBase):
         await super().init(env=env)
@@ -269,9 +357,14 @@ class PersonAgent(AgentBase):
             active_raw = existing_cfg.get("activated_skills", [])
             if isinstance(active_raw, list):
                 self._activated_skills = {str(x).strip() for x in active_raw if str(x).strip()}
+            core_raw = existing_cfg.get("core_skills", None)
+            if isinstance(core_raw, list):
+                loaded = {str(x).strip() for x in core_raw if str(x).strip()}
+                if loaded:
+                    self._core_skill_names = loaded
         self._persist_agent_config()
 
-        # 扫描 custom/skills/ 目录，使用户的自定义 skill 可被发现
+        # 扫描 custom/skills/ 和环境模块提供的 skills
         for module in env.env_modules:
             workspace_path = getattr(module, "workspace_path", None)
             if workspace_path:
@@ -280,59 +373,92 @@ class PersonAgent(AgentBase):
         for module in env.env_modules:
             skills_dir = module.get_agent_skills_dir()
             if skills_dir:
-                self._skill_registry.scan_env_skills(skills_dir, type(module).__name__)
+                added = self._skill_registry.scan_env_skills(skills_dir, type(module).__name__)
+                # 环境 skill 
+                self._core_skill_names.update(added)
         self._refresh_selectable_skills()
+
+    # ── Context Compaction (sliding summary) ─────────────────────────────────
+
+    async def _compact_thread_if_needed(
+        self,
+        thread_messages: list[dict[str, str]],
+        tick: int,
+        t: datetime,
+    ) -> list[dict[str, str]]:
+        """当 thread 过长时，用 LLM 对旧消息做摘要，保留最近消息。
+
+        对标 Claude Code 的 context window management：旧对话压缩为摘要，
+        最近 N 条消息原样保留，确保不超模型上下文窗口。
+        """
+        max_chars = int(self._capability_kwargs.get("thread_compact_chars", 24000))
+        keep_recent = int(self._capability_kwargs.get("thread_keep_recent", 6))
+
+        total_chars = sum(len(m.get("content", "")) for m in thread_messages)
+        if total_chars <= max_chars or len(thread_messages) <= keep_recent + 2:
+            return thread_messages
+
+        split_idx = len(thread_messages) - keep_recent
+        old_messages = thread_messages[:split_idx]
+        recent_messages = thread_messages[split_idx:]
+
+        digest_parts = []
+        char_budget = 6000
+        used = 0
+        for m in old_messages:
+            chunk = f"[{m['role']}]: {m['content'][:300]}"
+            if used + len(chunk) > char_budget:
+                digest_parts.append("... (earlier messages omitted)")
+                break
+            digest_parts.append(chunk)
+            used += len(chunk)
+
+        summary_prompt: list[dict[str, str]] = [
+            {
+                "role": "system",
+                "content": (
+                    "Summarize the following agent conversation history into a concise paragraph (3-5 sentences). "
+                    "Focus on: key decisions made, important tool results, current agent state, "
+                    "and any workspace files written. Be brief and factual."
+                ),
+            },
+            {"role": "user", "content": "\n---\n".join(digest_parts)},
+        ]
+
+        try:
+            response = await self.acompletion(summary_prompt, stream=False)  # type: ignore
+            summary_text = response.choices[0].message.content or ""
+            summary_text = summary_text.strip() or f"[Compacted {len(old_messages)} earlier messages]"
+        except Exception:
+            summary_text = f"[Compacted {len(old_messages)} earlier messages]"
+
+        compacted = [{"role": "user", "content": f"CONVERSATION_SUMMARY:\n{summary_text}"}]
+        compacted.extend(recent_messages)
+        return compacted
+
+    # ── Tool Loop ─────────────────────────────────────────────────────────────
 
     async def _tool_loop(
         self,
         tick: int,
         t: datetime,
-        selected: set[str],
     ) -> tuple[list[str], list[dict[str, Any]]]:
+        """每轮 LLM 决策 → 执行工具 → 结果回写 thread → 循环。"""
         logs: list[str] = []
         history: list[dict[str, Any]] = []
-        selected = set(selected)
         thread_messages = self._skill_runtime.read_recent_thread_messages(limit=40)
-        catalog = self._skill_runtime.skill_list(sorted(self._all_visible_skill_names()))
-        agent_identity = {
-            "id": self.id,
-            "name": self._name,
-            "profile": self.get_profile(),
-        }
-        system_prompt = (
-            "You are an autonomous person agent. You act by calling tools one at a time.\n"
-            f"AgentIdentity(JSON):\n{json.dumps(agent_identity, ensure_ascii=False)}\n\n"
-            "# Progressive Skill Disclosure (L0 → L1 → L2)\n"
-            "Skills extend your capabilities. You discover them progressively:\n"
-            "- **L0 (catalog below)**: You see skill name, description, requires/provides — enough to decide relevance.\n"
-            "- **L1 (activate_skill)**: Loads the full SKILL.md — behavioral instructions telling you WHAT to do and HOW.\n"
-            "- **L2 (read_skill)**: Read any file inside the skill directory (e.g., script source).\n"
-            "- **execute_skill**: Run a skill's subprocess script (only if it has one).\n\n"
-            "Workflow: scan the catalog → activate relevant skills → follow their instructions using tools → done.\n"
-            "Prompt-only skills (no script) give you instructions; you use bash/codegen/workspace_* to carry them out.\n\n"
-            "# Available Tools\n"
-            "| Tool | Arguments | Purpose |\n"
-            "|------|-----------|----------|\n"
-            "| activate_skill | skill_name | Load full SKILL.md (L1) |\n"
-            "| read_skill | skill_name, path | Read file in skill dir (L2) |\n"
-            "| execute_skill | skill_name, args | Run skill subprocess script |\n"
-            "| bash | command, timeout_sec | Run shell command in workspace |\n"
-            "| codegen | instruction, ctx | Interact with environment via code generation |\n"
-            "| workspace_read | path | Read file in agent workspace |\n"
-            "| workspace_write | path, content | Write file in agent workspace |\n"
-            "| workspace_list | path | List files in agent workspace |\n"
-            "| glob | glob, path | Find files by pattern in workspace |\n"
-            "| grep | pattern, glob, path | Search file contents in workspace |\n"
-            "| enable_skill | skill_name | Make a disabled skill visible |\n"
-            "| disable_skill | skill_name | Hide a skill from selection |\n"
-            "| done | (set done=true, summary) | Finish this step |\n\n"
-            f"# Skill Catalog (L0)\n{json.dumps(catalog, ensure_ascii=False, indent=1)}\n\n"
-            f"# Already Activated (L1 loaded)\n{json.dumps(sorted(self._activated_skills), ensure_ascii=False)}\n\n"
-            "Return valid JSON: {tool_name, arguments, done, summary}."
-        )
 
         for i in range(self._max_tool_rounds):
-            prompt = system_prompt if i == 0 else "Continue with next best tool call based on latest TOOL_RESULT_JSON."
+            # 滑动摘要：当 thread 过长时压缩旧消息
+            thread_messages = await self._compact_thread_if_needed(thread_messages, tick, t)
+
+            prompt = (
+                "Begin your step. Review the skill catalog, activate relevant skills, "
+                "and complete your objectives."
+                if i == 0
+                else "Continue. Call the next best tool based on the latest "
+                "TOOL_RESULT_JSON, or set done=true if finished."
+            )
             try:
                 messages = list(thread_messages)
                 messages.append({"role": "user", "content": prompt})
@@ -344,12 +470,7 @@ class PersonAgent(AgentBase):
                 )
                 decision_json = json.dumps(decision.model_dump(), ensure_ascii=False)
                 self._skill_runtime.append_thread_message("user", prompt, tick=tick, t=t)
-                self._skill_runtime.append_thread_message(
-                    "assistant",
-                    decision_json,
-                    tick=tick,
-                    t=t,
-                )
+                self._skill_runtime.append_thread_message("assistant", decision_json, tick=tick, t=t)
                 thread_messages.append({"role": "user", "content": prompt})
                 thread_messages.append({"role": "assistant", "content": decision_json})
                 if len(thread_messages) > 40:
@@ -361,43 +482,36 @@ class PersonAgent(AgentBase):
             action = decision.tool_name.strip()
             args = dict(decision.arguments or {})
             skill_name = str(args.get("skill_name", "")).strip()
+
             if decision.done or action == "done":
                 logs.append(f"done:{decision.summary or 'step_complete'}")
                 break
 
+            # ── disable_skill ──
             if action == "disable_skill":
                 if not skill_name:
-                    history.append({"action": action, "ok": False, "error": "empty skill_name"})
+                    result_obj = {"action": action, "ok": False, "error": "empty skill_name"}
+                    history.append(result_obj)
+                    self._append_tool_result_to_thread(thread_messages, tick, t, result_obj)
                     logs.append("disable_skill:empty")
                     continue
                 self._skill_visibility_overrides[skill_name] = False
-                selected.discard(skill_name)
                 self._activated_skills.discard(skill_name)
                 self._persist_agent_config()
                 self._refresh_selectable_skills()
-                selected &= self._all_visible_skill_names()
-                history.append({"action": action, "skill_name": skill_name, "ok": True})
-                self._skill_runtime.append_tool_log(
-                    {
-                        "tick": tick,
-                        "time": t.isoformat(),
-                        "action": action,
-                        "skill_name": skill_name,
-                        "ok": True,
-                    }
-                )
-                self._append_tool_result_to_thread(
-                    thread_messages=thread_messages,
-                    tick=tick,
-                    t=t,
-                    result_obj={"action": action, "skill_name": skill_name, "ok": True},
-                )
+                result_obj = {"action": action, "skill_name": skill_name, "ok": True}
+                history.append(result_obj)
+                self._skill_runtime.append_tool_log({"tick": tick, "time": t.isoformat(), **result_obj})
+                self._append_tool_result_to_thread(thread_messages, tick, t, result_obj)
                 logs.append(f"disable_skill:{skill_name}:ok")
                 continue
 
+            # ── enable_skill ──
             if action == "enable_skill":
                 if not skill_name:
-                    history.append({"action": action, "ok": False, "error": "empty skill_name"})
+                    result_obj = {"action": action, "ok": False, "error": "empty skill_name"}
+                    history.append(result_obj)
+                    self._append_tool_result_to_thread(thread_messages, tick, t, result_obj)
                     logs.append("enable_skill:empty")
                     continue
                 if skill_name not in self._all_visible_skill_names():
@@ -405,309 +519,245 @@ class PersonAgent(AgentBase):
                     self._persist_agent_config()
                     self._refresh_selectable_skills()
                 if skill_name in self._all_visible_skill_names():
-                    selected.add(skill_name)
-                    history.append({"action": action, "skill_name": skill_name, "ok": True})
-                    self._skill_runtime.append_tool_log(
-                        {
-                            "tick": tick,
-                            "time": t.isoformat(),
-                            "action": action,
-                            "skill_name": skill_name,
-                            "ok": True,
-                        }
-                    )
-                    self._append_tool_result_to_thread(
-                        thread_messages=thread_messages,
-                        tick=tick,
-                        t=t,
-                        result_obj={"action": action, "skill_name": skill_name, "ok": True},
-                    )
+                    result_obj = {"action": action, "skill_name": skill_name, "ok": True}
+                    history.append(result_obj)
+                    self._skill_runtime.append_tool_log({"tick": tick, "time": t.isoformat(), **result_obj})
+                    self._append_tool_result_to_thread(thread_messages, tick, t, result_obj)
                     logs.append(f"enable_skill:{skill_name}:ok")
                 else:
-                    history.append(
-                        {
-                            "action": action,
-                            "skill_name": skill_name,
-                            "ok": False,
-                            "error": "skill not visible or not enabled globally",
-                        }
-                    )
-                    logs.append(f"enable_skill:{skill_name}:miss")
-                continue
-
-            if action in {"activate_skill", "read_skill", "execute_skill"} and (
-                not skill_name or skill_name not in self._all_visible_skill_names()
-            ):
-                history.append(
-                    {
+                    result_obj = {
                         "action": action,
                         "skill_name": skill_name,
                         "ok": False,
-                        "error": "skill not visible for this agent",
-                        "tick": tick,
+                        "error": "skill not found in registry",
                     }
-                )
+                    history.append(result_obj)
+                    self._skill_runtime.append_tool_log({"tick": tick, "time": t.isoformat(), **result_obj})
+                    self._append_tool_result_to_thread(thread_messages, tick, t, result_obj)
+                    logs.append(f"enable_skill:{skill_name}:miss")
+                continue
+
+            # ── skill visibility gate ──
+            if action in {"activate_skill", "read_skill", "execute_skill"} and (
+                not skill_name or skill_name not in self._all_visible_skill_names()
+            ):
+                result_obj = {
+                    "action": action,
+                    "skill_name": skill_name,
+                    "ok": False,
+                    "error": "skill not visible for this agent",
+                }
+                history.append(result_obj)
+                self._append_tool_result_to_thread(thread_messages, tick, t, result_obj)
                 logs.append(f"{action}:{skill_name}:rejected")
                 continue
 
+            # ── activate_skill ──
             if action == "activate_skill":
+                dep_status = self._ensure_requires_activated(
+                    tick=tick, t=t, thread_messages=thread_messages, skill_name=skill_name,
+                )
+                if not dep_status.get("ok"):
+                    result_obj = {
+                        "action": action,
+                        "skill_name": skill_name,
+                        "ok": False,
+                        "error": "missing required skills",
+                        "missing": dep_status.get("missing", []),
+                    }
+                    history.append(result_obj)
+                    self._append_tool_result_to_thread(thread_messages, tick, t, result_obj)
+                    logs.append(f"activate:{skill_name}:blocked_requires")
+                    continue
+
                 content = self._skill_runtime.skill_activate(skill_name)
                 ok = bool(content)
                 if ok:
                     self._activated_skills.add(skill_name)
                     self._persist_agent_config()
-                item = {
+                result_obj = {
                     "action": action,
                     "skill_name": skill_name,
                     "ok": ok,
-                    "size": len(content),
-                    "content_preview": self._truncate_text(content, max_len=6000),
+                    "content": content,
                 }
-                history.append(item)
+                history.append(result_obj)
                 self._skill_runtime.append_tool_log(
-                    {
-                        "tick": tick,
-                        "time": t.isoformat(),
-                        "action": action,
-                        "skill_name": skill_name,
-                        "ok": ok,
-                        "size": len(content),
-                    }
+                    {"tick": tick, "time": t.isoformat(), "action": action,
+                     "skill_name": skill_name, "ok": ok, "size": len(content)}
                 )
-                self._append_tool_result_to_thread(
-                    thread_messages=thread_messages,
-                    tick=tick,
-                    t=t,
-                    result_obj=item,
-                )
+                self._append_tool_result_to_thread(thread_messages, tick, t, result_obj)
                 logs.append(f"activate:{skill_name}:{'ok' if ok else 'miss'}")
                 continue
 
+            # ── read_skill ──
             if action == "read_skill":
                 read_path = str(args.get("path", ""))
                 content = self._skill_runtime.skill_read(skill_name, read_path)
                 ok = bool(content)
-                item = {
+                result_obj = {
                     "action": action,
                     "skill_name": skill_name,
                     "path": read_path,
                     "ok": ok,
-                    "size": len(content),
-                    "content_preview": self._truncate_text(content, max_len=1200),
+                    "content": self._truncate_text(content, max_len=8000),
                 }
-                history.append(item)
+                history.append(result_obj)
                 self._skill_runtime.append_tool_log(
-                    {
-                        "tick": tick,
-                        "time": t.isoformat(),
-                        "action": action,
-                        "skill_name": skill_name,
-                        "path": read_path,
-                        "ok": ok,
-                        "size": len(content),
-                    }
+                    {"tick": tick, "time": t.isoformat(), "action": action,
+                     "skill_name": skill_name, "path": read_path, "ok": ok, "size": len(content)}
                 )
-                self._append_tool_result_to_thread(
-                    thread_messages=thread_messages,
-                    tick=tick,
-                    t=t,
-                    result_obj=item,
-                )
+                self._append_tool_result_to_thread(thread_messages, tick, t, result_obj)
                 logs.append(f"read:{skill_name}:{read_path}:{'ok' if ok else 'miss'}")
                 continue
 
+            # ── execute_skill ──
             if action == "execute_skill":
-                payload = {
-                    "tick": tick,
-                    "time": t.isoformat(),
-                    "profile": self.get_profile(),
-                    "agent_state": self._agent_state,
-                    "capabilities": self._capability_kwargs,
-                    "workspace_files": self._skill_runtime.workspace_list("."),
-                }
-                payload.update(args.get("args", {}) or {})
+                dep_status = self._ensure_requires_activated(
+                    tick=tick, t=t, thread_messages=thread_messages, skill_name=skill_name,
+                )
+                if not dep_status.get("ok"):
+                    result_obj = {
+                        "action": action,
+                        "skill_name": skill_name,
+                        "ok": False,
+                        "error": "missing required skills",
+                        "missing": dep_status.get("missing", []),
+                    }
+                    history.append(result_obj)
+                    self._append_tool_result_to_thread(thread_messages, tick, t, result_obj)
+                    logs.append(f"execute:{skill_name}:blocked_requires")
+                    continue
+
+                payload = dict(args.get("args", {}) or {})
+                payload.setdefault("tick", tick)
+                payload.setdefault("time", t.isoformat())
                 out = await self.execute(skill_name, payload)
                 ok = bool(out.get("ok"))
-                item = {
+                result_obj = {
                     "action": action,
                     "skill_name": skill_name,
                     "ok": ok,
                     "exit_code": out.get("exit_code"),
                     "error_type": out.get("error_type"),
                     "artifacts": out.get("artifacts", []),
-                    "stdout_preview": self._truncate_text(str(out.get("stdout", "")), max_len=1200),
-                    "stderr_preview": self._truncate_text(str(out.get("stderr", "")), max_len=1200),
+                    "stdout": self._truncate_text(str(out.get("stdout", "")), max_len=4000),
+                    "stderr": self._truncate_text(str(out.get("stderr", "")), max_len=2000),
                 }
-                history.append(item)
+                history.append(result_obj)
                 self._skill_runtime.append_tool_log(
-                    {
-                        "tick": tick,
-                        "time": t.isoformat(),
-                        "action": action,
-                        "skill_name": skill_name,
-                        "ok": ok,
-                        "exit_code": out.get("exit_code"),
-                        "error_type": out.get("error_type"),
-                        "artifacts": out.get("artifacts", []),
-                    }
+                    {"tick": tick, "time": t.isoformat(), "action": action,
+                     "skill_name": skill_name, "ok": ok, "exit_code": out.get("exit_code"),
+                     "error_type": out.get("error_type"), "artifacts": out.get("artifacts", [])}
                 )
-                self._append_tool_result_to_thread(
-                    thread_messages=thread_messages,
-                    tick=tick,
-                    t=t,
-                    result_obj=item,
-                )
+                self._append_tool_result_to_thread(thread_messages, tick, t, result_obj)
                 logs.append(f"execute:{skill_name}:{'ok' if ok else 'fail'}")
                 continue
 
+            # ── workspace_read ──
             if action == "workspace_read":
                 ws_read_path = str(args.get("path", ""))
                 try:
-                    content = self._skill_runtime.workspace_read(ws_read_path)
-                    item = {
-                        "action": action,
-                        "path": ws_read_path,
-                        "ok": True,
-                        "size": len(content),
-                        "content_preview": self._truncate_text(content, max_len=1200),
-                    }
+                    if not self._skill_runtime.workspace_exists(ws_read_path):
+                        result_obj = {
+                            "action": action,
+                            "path": ws_read_path,
+                            "ok": False,
+                            "error": "file not found",
+                        }
+                    else:
+                        content = self._skill_runtime.workspace_read(ws_read_path)
+                        result_obj = {
+                            "action": action,
+                            "path": ws_read_path,
+                            "ok": True,
+                            "content": self._truncate_text(content, max_len=8000),
+                        }
                 except Exception as e:
-                    item = {"action": action, "path": ws_read_path, "ok": False, "error": str(e)}
-                history.append(item)
-                self._skill_runtime.append_tool_log({"tick": tick, "time": t.isoformat(), **item})
-                self._append_tool_result_to_thread(
-                    thread_messages=thread_messages,
-                    tick=tick,
-                    t=t,
-                    result_obj=item,
-                )
-                logs.append(f"workspace_read:{ws_read_path}:{'ok' if item.get('ok') else 'fail'}")
+                    result_obj = {"action": action, "path": ws_read_path, "ok": False, "error": str(e)}
+                history.append(result_obj)
+                self._skill_runtime.append_tool_log({"tick": tick, "time": t.isoformat(), **result_obj})
+                self._append_tool_result_to_thread(thread_messages, tick, t, result_obj)
+                logs.append(f"workspace_read:{ws_read_path}:{'ok' if result_obj.get('ok') else 'fail'}")
                 continue
 
+            # ── workspace_write ──
             if action == "workspace_write":
                 path = str(args.get("path", ""))
                 content = str(args.get("content", ""))
                 try:
                     self._skill_runtime.workspace_write(path, content)
-                    item = {
-                        "action": action,
-                        "path": path,
-                        "ok": True,
-                        "size": len(content),
-                    }
-                    history.append(item)
-                    self._skill_runtime.append_tool_log(
-                        {
-                            "tick": tick,
-                            "time": t.isoformat(),
-                            "action": action,
-                            "path": path,
-                            "ok": True,
-                            "size": len(content),
-                        }
-                    )
-                    self._append_tool_result_to_thread(
-                        thread_messages=thread_messages,
-                        tick=tick,
-                        t=t,
-                        result_obj=item,
-                    )
-                    logs.append(f"workspace_write:{path}:ok")
+                    result_obj = {"action": action, "path": path, "ok": True, "size": len(content)}
                 except Exception as e:
-                    item = {"action": action, "path": path, "ok": False, "error": str(e)}
-                    history.append(item)
-                    self._skill_runtime.append_tool_log(
-                        {
-                            "tick": tick,
-                            "time": t.isoformat(),
-                            "action": action,
-                            "path": path,
-                            "ok": False,
-                            "error": str(e),
-                        }
-                    )
-                    self._append_tool_result_to_thread(
-                        thread_messages=thread_messages,
-                        tick=tick,
-                        t=t,
-                        result_obj=item,
-                    )
-                    logs.append(f"workspace_write:{path}:fail")
+                    result_obj = {"action": action, "path": path, "ok": False, "error": str(e)}
+                history.append(result_obj)
+                self._skill_runtime.append_tool_log({"tick": tick, "time": t.isoformat(), **result_obj})
+                self._append_tool_result_to_thread(thread_messages, tick, t, result_obj)
+                logs.append(f"workspace_write:{path}:{'ok' if result_obj.get('ok') else 'fail'}")
                 continue
 
+            # ── workspace_list ──
             if action == "workspace_list":
                 path = str(args.get("path", ".") or ".")
                 files = self._skill_runtime.workspace_list(path)
-                item = {
+                result_obj = {
                     "action": action,
                     "path": path,
                     "ok": True,
                     "count": len(files),
-                    "files_preview": files[:100],
+                    "files": files[:200],
                 }
-                history.append(item)
+                history.append(result_obj)
                 self._skill_runtime.append_tool_log(
-                    {
-                        "tick": tick,
-                        "time": t.isoformat(),
-                        "action": action,
-                        "path": path,
-                        "ok": True,
-                        "count": len(files),
-                    }
+                    {"tick": tick, "time": t.isoformat(), "action": action,
+                     "path": path, "ok": True, "count": len(files)}
                 )
-                self._append_tool_result_to_thread(
-                    thread_messages=thread_messages,
-                    tick=tick,
-                    t=t,
-                    result_obj=item,
-                )
+                self._append_tool_result_to_thread(thread_messages, tick, t, result_obj)
                 logs.append(f"workspace_list:{path}:{len(files)}")
                 continue
 
+            # ── bash ──
             if action == "bash":
                 command = str(args.get("command", "")).strip()
                 timeout_sec = int(args.get("timeout_sec", 20))
                 timeout_sec = max(1, min(120, timeout_sec))
                 out = await self._run_bash_in_workspace(command=command, timeout_sec=timeout_sec)
                 ok = bool(out.get("ok"))
-                item = {
+                result_obj = {
                     "action": action,
                     "ok": ok,
                     "exit_code": out.get("exit_code"),
                     "stdout": self._truncate_text(str(out.get("stdout", "")), max_len=5000),
                     "stderr": self._truncate_text(str(out.get("stderr", "")), max_len=2000),
                 }
-                history.append(item)
-                self._skill_runtime.append_tool_log({"tick": tick, "time": t.isoformat(), **item})
-                self._append_tool_result_to_thread(
-                    thread_messages=thread_messages, tick=tick, t=t, result_obj=item
-                )
+                history.append(result_obj)
+                self._skill_runtime.append_tool_log({"tick": tick, "time": t.isoformat(), **result_obj})
+                self._append_tool_result_to_thread(thread_messages, tick, t, result_obj)
                 logs.append(f"bash:{'ok' if ok else 'fail'}")
                 continue
 
+            # ── glob ──
             if action == "glob":
                 try:
                     parsed = self._glob_in_workspace(
                         pattern=str(args.get("glob", "**/*")),
                         root=str(args.get("path", ".")),
                     )
-                    item = {
+                    result_obj = {
                         "action": action,
                         "ok": True,
                         "count": parsed.get("count", 0),
                         "matches": parsed.get("matches", [])[:100],
                     }
                 except Exception as e:
-                    item = {"action": action, "ok": False, "error": str(e)}
-                history.append(item)
-                self._skill_runtime.append_tool_log({"tick": tick, "time": t.isoformat(), **item})
-                self._append_tool_result_to_thread(
-                    thread_messages=thread_messages, tick=tick, t=t, result_obj=item
-                )
-                logs.append(f"glob:{'ok' if item.get('ok') else 'fail'}")
+                    result_obj = {"action": action, "ok": False, "error": str(e)}
+                history.append(result_obj)
+                self._skill_runtime.append_tool_log({"tick": tick, "time": t.isoformat(), **result_obj})
+                self._append_tool_result_to_thread(thread_messages, tick, t, result_obj)
+                logs.append(f"glob:{'ok' if result_obj.get('ok') else 'fail'}")
                 continue
 
+            # ── grep ──
             if action == "grep":
                 try:
                     parsed = self._grep_in_workspace(
@@ -715,74 +765,86 @@ class PersonAgent(AgentBase):
                         root=str(args.get("path", ".")),
                         file_glob=str(args.get("glob", "")),
                     )
-                    item = {
+                    result_obj = {
                         "action": action,
                         "ok": True,
                         "count": parsed.get("count", 0),
                         "matches": parsed.get("matches", [])[:100],
                     }
                 except Exception as e:
-                    item = {"action": action, "ok": False, "error": str(e)}
-                history.append(item)
-                self._skill_runtime.append_tool_log({"tick": tick, "time": t.isoformat(), **item})
-                self._append_tool_result_to_thread(
-                    thread_messages=thread_messages, tick=tick, t=t, result_obj=item
-                )
-                logs.append(f"grep:{'ok' if item.get('ok') else 'fail'}")
+                    result_obj = {"action": action, "ok": False, "error": str(e)}
+                history.append(result_obj)
+                self._skill_runtime.append_tool_log({"tick": tick, "time": t.isoformat(), **result_obj})
+                self._append_tool_result_to_thread(thread_messages, tick, t, result_obj)
+                logs.append(f"grep:{'ok' if result_obj.get('ok') else 'fail'}")
                 continue
 
+            # ── codegen ──
             if action == "codegen":
                 instruction = str(args.get("instruction", ""))
                 ctx = dict(args.get("ctx", {}))
                 template_mode = bool(args.get("template_mode", False))
                 out = await self._run_codegen(
-                    instruction=instruction,
-                    ctx=ctx,
-                    template_mode=template_mode,
+                    instruction=instruction, ctx=ctx, template_mode=template_mode,
                 )
                 ok = bool(out.get("ok"))
-                item = {
+                result_obj: dict[str, Any] = {
                     "action": action,
                     "ok": ok,
-                    "exit_code": out.get("exit_code"),
                     "stdout": self._truncate_text(str(out.get("stdout", "")), max_len=5000),
                     "stderr": self._truncate_text(str(out.get("stderr", "")), max_len=2000),
                 }
-                history.append(item)
-                self._skill_runtime.append_tool_log({"tick": tick, "time": t.isoformat(), **item})
-                self._append_tool_result_to_thread(
-                    thread_messages=thread_messages, tick=tick, t=t, result_obj=item
-                )
+                if out.get("ctx"):
+                    try:
+                        ctx_str = json.dumps(out["ctx"], ensure_ascii=False)
+                        result_obj["ctx"] = self._truncate_text(ctx_str, max_len=4000)
+                    except Exception:
+                        pass
+                history.append(result_obj)
+                self._skill_runtime.append_tool_log({"tick": tick, "time": t.isoformat(), **result_obj})
+                self._append_tool_result_to_thread(thread_messages, tick, t, result_obj)
                 logs.append(f"codegen:{'ok' if ok else 'fail'}")
                 continue
 
-            history.append({"action": action, "ok": False, "error": "unsupported action"})
+            # ── unsupported action：通知 LLM ──
+            valid_tools = (
+                "activate_skill, read_skill, execute_skill, bash, codegen, "
+                "workspace_read, workspace_write, workspace_list, glob, grep, "
+                "enable_skill, disable_skill, done"
+            )
+            result_obj = {
+                "action": action,
+                "ok": False,
+                "error": f"unsupported tool: '{action}'. Valid tools: {valid_tools}",
+            }
+            history.append(result_obj)
+            self._skill_runtime.append_tool_log({"tick": tick, "time": t.isoformat(), **result_obj})
+            self._append_tool_result_to_thread(thread_messages, tick, t, result_obj)
             logs.append(f"unsupported:{action}")
 
         return logs, history
+
+    # ── Public API ────────────────────────────────────────────────────────────
 
     async def execute(self, skill_name: str, args: dict[str, Any]) -> dict[str, Any]:
         return await self._skill_runtime.execute(skill_name=skill_name, args=args)
 
     async def step(self, tick: int, t: datetime) -> str:
         self._step_count += 1
-        selected = set(self._selectable_skill_names)
-        self._last_selected_skills = selected
-        logs, tool_history = await self._tool_loop(tick=tick, t=t, selected=selected)
+        self._last_selected_skills = set(self._selectable_skill_names)
+        logs, tool_history = await self._tool_loop(tick=tick, t=t)
 
+        # 使用 tool loop 结束后的最终技能状态（可能因 enable/disable 有变化）
         self._skill_runtime.persist_session_state(
-            selected_skills=selected,
             tick=tick,
             t=t,
-            need=None,
-            emotion="unknown",
-            intention=None,
+            selected_skills=self._selectable_skill_names,
             activated_skills=self._activated_skills,
         )
         self._skill_runtime.append_step_replay(
             tick=tick,
             t=t,
-            selected_skills=selected,
+            selected_skills=self._selectable_skill_names,
             tool_history=tool_history,
         )
         if not logs:
@@ -791,7 +853,7 @@ class PersonAgent(AgentBase):
 
     async def ask(self, message: str, readonly: bool = True) -> str:
         if self._env is not None:
-            _, answer = await self.ask_with_env({"id": self.id}, message, readonly=readonly)
+            _, answer = await self.ask_env({"id": self.id}, message, readonly=readonly)
             return answer
         return message
 
@@ -807,4 +869,3 @@ class PersonAgent(AgentBase):
     async def load(self, dump_data: dict):
         self._step_count = int(dump_data.get("step_count", 0))
         self._last_selected_skills = set(dump_data.get("last_selected_skills", []))
-

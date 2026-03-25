@@ -1,4 +1,4 @@
-import { GithubOutlined, ExperimentOutlined, ApiOutlined, TeamOutlined, GlobalOutlined, NodeIndexOutlined, SettingOutlined, RocketOutlined } from "@ant-design/icons";
+import { GithubOutlined, ExperimentOutlined, ApiOutlined, TeamOutlined, GlobalOutlined, NodeIndexOutlined, SettingOutlined, RocketOutlined, ThunderboltOutlined } from "@ant-design/icons";
 import { Menu, MenuProps, Space, Dropdown, Button } from "antd";
 import { Link } from "react-router-dom";
 import Account from "./components/Account";
@@ -27,6 +27,11 @@ const RootMenu = ({ selectedKey, style }: {
             key: '/profiles',
             label: <Link to="/profiles">{t('menu.profiles')}</Link>,
             icon: <TeamOutlined />,
+        },
+        {
+            key: '/skills',
+            label: <Link to="/skills">{t('menu.skills')}</Link>,
+            icon: <ThunderboltOutlined />,
         },
     ];
 

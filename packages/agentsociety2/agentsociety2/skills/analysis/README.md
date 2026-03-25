@@ -137,8 +137,8 @@ analysis/
 presentation/
 └── hypothesis_{id}/
     └── experiment_{id}/
-        ├── report_zh.md / report_zh.html   # 简体中文报告
-        ├── report_en.md / report_en.html   # English report
+        ├── report.md              # Markdown 报告（主输出）
+        ├── report.html            # HTML 报告（含嵌入式 EDA 链接）
         ├── README.md              # 本目录文件说明
         ├── data/
         │   ├── analysis_summary.json   # 分析结果结构化数据（insights, findings, conclusions, recommendations）
@@ -154,8 +154,8 @@ presentation/
 
 | 文件/目录 | 说明 |
 |-----------|------|
-| `report_zh.md` / `report_zh.html` | 简体中文完整报告 |
-| `report_en.md` / `report_en.html` | English full report |
+| `report.md` | 主报告 Markdown，含洞察、发现、结论、推荐及图表引用 |
+| `report.html` | 完整 HTML 报告，可嵌入 EDA 链接 |
 | `data/analysis_summary.json` | 结构化分析结果，含 `insights`、`findings`、`conclusions`、`recommendations` |
 | `data/eda_profile.html` | ydata-profiling 生成的数据画像（表统计、分布、缺失） |
 | `data/eda_sweetviz.html` | Sweetviz 目标分析与相关性报告 |
@@ -168,23 +168,17 @@ presentation/
 
 ```
 synthesis/
-├── synthesis_report_{ts}_zh.md         # 简体中文综合报告
-├── synthesis_report_{ts}_zh.html
-├── synthesis_report_{ts}_en.md         # English synthesis
-├── synthesis_report_{ts}_en.html
+├── synthesis_report_{YYYYMMDD_HHMMSS}.md    # 综合报告 Markdown
+├── synthesis_report_{YYYYMMDD_HHMMSS}.html  # 综合报告 HTML
 └── assets/
-    └── synthesis_comparison.png
+    └── synthesis_comparison.png             # 跨假设对比图（完成度、成功实验数）
 ```
 
 | 文件 | 说明 |
 |------|------|
-| `synthesis_report_*_zh.*` | 简体中文综合报告 |
-| `synthesis_report_*_en.*` | English synthesis |
+| `synthesis_report_*.md` | 跨假设综合报告，含策略、对比分析、结论与推荐 |
+| `synthesis_report_*.html` | 综合报告 HTML 版本 |
 | `assets/synthesis_comparison.png` | 各假设完成度与成功实验数柱状图 |
-
-### 可选增强依赖（按需安装）
-
-提升统计与大规模表分析质量时可选用：**pingouin**（常用检验与效应量）、**phik**（混合类型相关）、**DuckDB**（对大 SQLite 做聚合后再可视化）。沙箱内代码执行需已安装相应包。
 
 ---
 

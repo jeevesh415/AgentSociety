@@ -60,9 +60,7 @@ class ContextSummary(BaseModel):
 def _system_with_skills(config: Optional[AnalysisConfig] = None) -> str:
     """返回分析子智能体的技能说明，并要求返回XML格式。"""
     selected_names = config.analysis_skill_names if config else None
-    strict_selection = (
-        config.analysis_skill_strict_selection if config else True
-    )
+    strict_selection = config.analysis_skill_strict_selection if config else True
     skills = get_analysis_skills(
         selected_names=selected_names,
         strict_selection=strict_selection,
@@ -106,9 +104,15 @@ class DataSummary(BaseModel):
     tables: List[str] = Field(default_factory=list)
     row_counts: Dict[str, int] = Field(default_factory=dict)
     quick_stats: str = ""
-    sample_data: Dict[str, List[Dict]] = Field(default_factory=dict)  # 每个表的前几行数据
-    numeric_stats: Dict[str, Dict[str, Any]] = Field(default_factory=dict)  # 数值列统计摘要
-    categorical_stats: Dict[str, Dict[str, Any]] = Field(default_factory=dict)  # 分类列统计摘要
+    sample_data: Dict[str, List[Dict]] = Field(
+        default_factory=dict
+    )  # 每个表的前几行数据
+    numeric_stats: Dict[str, Dict[str, Any]] = Field(
+        default_factory=dict
+    )  # 数值列统计摘要
+    categorical_stats: Dict[str, Dict[str, Any]] = Field(
+        default_factory=dict
+    )  # 分类列统计摘要
 
 
 def _quote_identifier(name: str) -> str:
@@ -241,20 +245,26 @@ class AnalysisAgent:
                 data_analysis_result["tool_results"] = tool_results
 
                 # 提取 EDA 路径
-                data_analysis_result["eda_profile_path"] = tool_results.get("eda_profile", {}).get("path")
-                data_analysis_result["eda_sweetviz_path"] = tool_results.get("eda_sweetviz", {}).get("path")
+                data_analysis_result["eda_profile_path"] = tool_results.get(
+                    "eda_profile", {}
+                ).get("path")
+                data_analysis_result["eda_sweetviz_path"] = tool_results.get(
+                    "eda_sweetviz", {}
+                ).get("path")
 
             # Step 3.3: 生成可视化
             await progress("Generating visualizations...")
-            viz_plan, charts = await self._decide_and_generate_visualizations_with_judgment(
-                context,
-                analysis_result,
-                data_summary,
-                data_analysis_result["tool_results"],
-                db_path,
-                output_dir,
-                tool_executor,
-                on_progress=on_progress,
+            viz_plan, charts = (
+                await self._decide_and_generate_visualizations_with_judgment(
+                    context,
+                    analysis_result,
+                    data_summary,
+                    data_analysis_result["tool_results"],
+                    db_path,
+                    output_dir,
+                    tool_executor,
+                    on_progress=on_progress,
+                )
             )
             data_analysis_result["visualization_plan"] = viz_plan
             data_analysis_result["generated_charts"] = charts
@@ -285,6 +295,7 @@ class AnalysisAgent:
 
         # 提取行数
         import sqlite3
+
         conn = sqlite3.connect(str(db_path))
         cursor = conn.cursor()
         for table in summary.tables:
@@ -298,9 +309,7 @@ class AnalysisAgent:
         for table in summary.tables:
             if summary.row_counts.get(table, 0) > 0:
                 try:
-                    cursor.execute(
-                        f"SELECT * FROM {_quote_identifier(table)} LIMIT 5"
-                    )
+                    cursor.execute(f"SELECT * FROM {_quote_identifier(table)} LIMIT 5")
                     columns = [desc[0] for desc in cursor.description]
                     rows = cursor.fetchall()
                     summary.sample_data[table] = [
@@ -310,8 +319,12 @@ class AnalysisAgent:
                     pass
 
         # 计算数值列和分类列的统计摘要
-        summary.numeric_stats = self._compute_numeric_stats(conn, summary.tables, schema)
-        summary.categorical_stats = self._compute_categorical_stats(conn, summary.tables, schema)
+        summary.numeric_stats = self._compute_numeric_stats(
+            conn, summary.tables, schema
+        )
+        summary.categorical_stats = self._compute_categorical_stats(
+            conn, summary.tables, schema
+        )
 
         # 生成快速统计
         summary.quick_stats = self._generate_quick_stats_markdown(summary)
@@ -327,14 +340,17 @@ class AnalysisAgent:
     ) -> Dict[str, Dict[str, Any]]:
         """计算数值列的统计摘要（min, max, avg, count）。"""
         import sqlite3
+
         cursor = conn.cursor()
         result: Dict[str, Dict[str, Any]] = {}
 
         for table in tables:
             columns_info = schema.get(table, [])
             numeric_cols = [
-                col["name"] for col in columns_info
-                if col.get("type", "").upper() in ("INTEGER", "REAL", "FLOAT", "DOUBLE", "NUMERIC")
+                col["name"]
+                for col in columns_info
+                if col.get("type", "").upper()
+                in ("INTEGER", "REAL", "FLOAT", "DOUBLE", "NUMERIC")
             ]
             if not numeric_cols:
                 continue
@@ -370,13 +386,15 @@ class AnalysisAgent:
     ) -> Dict[str, Dict[str, Any]]:
         """计算分类列的统计摘要（唯一值数量、高频值）。"""
         import sqlite3
+
         cursor = conn.cursor()
         result: Dict[str, Dict[str, Any]] = {}
 
         for table in tables:
             columns_info = schema.get(table, [])
             text_cols = [
-                col["name"] for col in columns_info
+                col["name"]
+                for col in columns_info
                 if col.get("type", "").upper() in ("TEXT", "VARCHAR", "CHAR", "STRING")
             ]
             if not text_cols:
@@ -401,7 +419,9 @@ class AnalysisAgent:
                     if unique_count > 0:
                         table_stats[col] = {
                             "unique_count": unique_count,
-                            "top_values": [(v[0], v[1]) for v in top_values] if top_values else [],
+                            "top_values": (
+                                [(v[0], v[1]) for v in top_values] if top_values else []
+                            ),
                         }
                 except sqlite3.Error:
                     pass
@@ -435,16 +455,20 @@ class AnalysisAgent:
             if table in summary.numeric_stats:
                 lines.append("Numeric columns stats:")
                 for col, stats in summary.numeric_stats[table].items():
-                    lines.append(f"  - `{col}`: min={stats.get('min')}, max={stats.get('max')}, avg={stats.get('avg')}")
+                    lines.append(
+                        f"  - `{col}`: min={stats.get('min')}, max={stats.get('max')}, avg={stats.get('avg')}"
+                    )
                 lines.append("")
 
             # 分类列统计
             if table in summary.categorical_stats:
                 lines.append("Categorical columns stats:")
                 for col, stats in summary.categorical_stats[table].items():
-                    unique = stats.get('unique_count', 0)
-                    top_vals = stats.get('top_values', [])[:3]
-                    top_str = ", ".join([f"'{v[0]}'({v[1]})" for v in top_vals if v[0] is not None])
+                    unique = stats.get("unique_count", 0)
+                    top_vals = stats.get("top_values", [])[:3]
+                    top_str = ", ".join(
+                        [f"'{v[0]}'({v[1]})" for v in top_vals if v[0] is not None]
+                    )
                     lines.append(f"  - `{col}`: {unique} unique values, top: {top_str}")
                 lines.append("")
 
@@ -471,7 +495,9 @@ class AnalysisAgent:
                 "hypothesis",
                 max_length=800,
             )
-            hypothesis_md_block = f"\n## Hypothesis Document\n\n```markdown\n{hyp_md}\n```\n"
+            hypothesis_md_block = (
+                f"\n## Hypothesis Document\n\n```markdown\n{hyp_md}\n```\n"
+            )
 
         experiment_md_block = ""
         if getattr(context.design, "experiment_markdown", None):
@@ -480,7 +506,9 @@ class AnalysisAgent:
                 "experiment design",
                 max_length=800,
             )
-            experiment_md_block = f"\n## Experiment Design Document\n\n```markdown\n{exp_md}\n```\n"
+            experiment_md_block = (
+                f"\n## Experiment Design Document\n\n```markdown\n{exp_md}\n```\n"
+            )
 
         literature_block = ""
         if literature_summary and literature_summary.strip():
@@ -572,25 +600,37 @@ Based on the experiment context and **actual data structure above**, generate an
                 )
                 raw = response.choices[0].message.content or ""
                 parsed = self._parse_analysis_response(raw)
-                judgment = await self._judge_analysis_result(parsed, context, data_summary)
+                judgment = await self._judge_analysis_result(
+                    parsed, context, data_summary
+                )
             except XmlParseError as e:
                 if attempt >= self.max_retries - 1:
-                    self.logger.warning("XML解析失败，尝试 %s 次后失败: %s", self.max_retries, e)
+                    self.logger.warning(
+                        "XML解析失败，尝试 %s 次后失败: %s", self.max_retries, e
+                    )
                     parsed = {}
                     break
-                messages.append({
-                    "role": "user",
-                    "content": f"XML parse failed: {e}\n\nPlease fix and return valid XML only.",
-                })
+                messages.append(
+                    {
+                        "role": "user",
+                        "content": f"XML parse failed: {e}\n\nPlease fix and return valid XML only.",
+                    }
+                )
                 continue
 
-            if judgment.success or not judgment.should_retry or attempt >= self.max_retries - 1:
+            if (
+                judgment.success
+                or not judgment.should_retry
+                or attempt >= self.max_retries - 1
+            ):
                 break
 
-            messages.append({
-                "role": "user",
-                "content": f"Previous output needs improvement: {judgment.reason}\n{judgment.retry_instruction}\nReturn corrected XML only.",
-            })
+            messages.append(
+                {
+                    "role": "user",
+                    "content": f"Previous output needs improvement: {judgment.reason}\n{judgment.retry_instruction}\nReturn corrected XML only.",
+                }
+            )
 
         if not parsed:
             parsed = {}
@@ -613,17 +653,35 @@ Based on the experiment context and **actual data structure above**, generate an
         recs = data.get("recommendations", [])
 
         if isinstance(insights, dict) and "item" in insights:
-            insights = insights["item"] if isinstance(insights["item"], list) else [insights["item"]]
+            insights = (
+                insights["item"]
+                if isinstance(insights["item"], list)
+                else [insights["item"]]
+            )
         if isinstance(findings, dict) and "item" in findings:
-            findings = findings["item"] if isinstance(findings["item"], list) else [findings["item"]]
+            findings = (
+                findings["item"]
+                if isinstance(findings["item"], list)
+                else [findings["item"]]
+            )
         if isinstance(recs, dict) and "item" in recs:
             recs = recs["item"] if isinstance(recs["item"], list) else [recs["item"]]
 
         return {
-            "insights": insights if isinstance(insights, list) else [insights] if insights else [],
-            "findings": findings if isinstance(findings, list) else [findings] if findings else [],
+            "insights": (
+                insights
+                if isinstance(insights, list)
+                else [insights] if insights else []
+            ),
+            "findings": (
+                findings
+                if isinstance(findings, list)
+                else [findings] if findings else []
+            ),
             "conclusions": data.get("conclusions", "") or "",
-            "recommendations": recs if isinstance(recs, list) else [recs] if recs else [],
+            "recommendations": (
+                recs if isinstance(recs, list) else [recs] if recs else []
+            ),
         }
 
     async def _judge_analysis_result(
@@ -648,8 +706,12 @@ Based on the experiment context and **actual data structure above**, generate an
 
         # 构建数据摘要
         total_rows = sum(data_summary.row_counts.values())
-        non_empty_tables = [t for t in data_summary.tables if data_summary.row_counts.get(t, 0) > 0]
-        empty_tables = [t for t in data_summary.tables if data_summary.row_counts.get(t, 0) == 0]
+        non_empty_tables = [
+            t for t in data_summary.tables if data_summary.row_counts.get(t, 0) > 0
+        ]
+        empty_tables = [
+            t for t in data_summary.tables if data_summary.row_counts.get(t, 0) == 0
+        ]
 
         prompt = f"""Evaluate the analysis for experiment {context.experiment_id}.
 
@@ -701,7 +763,9 @@ Based on the experiment context and **actual data structure above**, generate an
                 analysis_plan = await self._decide_analysis_strategy(
                     context, analysis_result, data_summary, tool_executor
                 )
-                judgment = await self._judge_analysis_strategy(analysis_plan, context, data_summary)
+                judgment = await self._judge_analysis_strategy(
+                    analysis_plan, context, data_summary
+                )
             except XmlParseError as e:
                 if attempt >= max_retries - 1:
                     self.logger.warning("分析策略XML解析失败: %s", e)
@@ -710,7 +774,11 @@ Based on the experiment context and **actual data structure above**, generate an
                     await on_progress(f"Strategy XML parse failed, retrying: {e}")
                 continue
 
-            if judgment.success or not judgment.should_retry or attempt >= max_retries - 1:
+            if (
+                judgment.success
+                or not judgment.should_retry
+                or attempt >= max_retries - 1
+            ):
                 return analysis_plan
 
             if on_progress:
@@ -727,8 +795,12 @@ Based on the experiment context and **actual data structure above**, generate an
     ) -> Dict[str, Any]:
         """决定分析策略，选表/选工具。使用 LLM 总结而非截断。"""
         available_tools = tool_executor.discover_tools_with_schemas()
-        builtin = {k: v for k, v in available_tools.items() if v.get("type") == "builtin"}
-        tools_list = self._format_tools_list(builtin) if builtin else "No built-in tools"
+        builtin = {
+            k: v for k, v in available_tools.items() if v.get("type") == "builtin"
+        }
+        tools_list = (
+            self._format_tools_list(builtin) if builtin else "No built-in tools"
+        )
 
         # 添加 EDA 工具说明
         if data_summary.db_path:
@@ -780,11 +852,15 @@ Based on the experiment context and **actual data structure above**, generate an
             temperature=self.temperature,
         )
 
-        data = parse_llm_xml_response(response.choices[0].message.content or "", root_tag="strategy")
+        data = parse_llm_xml_response(
+            response.choices[0].message.content or "", root_tag="strategy"
+        )
         tools = data.get("tools_to_use", [])
 
         if isinstance(tools, dict) and "tool" in tools:
-            tools = tools["tool"] if isinstance(tools["tool"], list) else [tools["tool"]]
+            tools = (
+                tools["tool"] if isinstance(tools["tool"], list) else [tools["tool"]]
+            )
         if not isinstance(tools, list):
             tools = []
 
@@ -798,14 +874,19 @@ Based on the experiment context and **actual data structure above**, generate an
                     params = json_repair.loads(params) if params.strip() else {}
                 except Exception:
                     params = {}
-            normalized.append({
-                "tool_name": t.get("tool_name", "code_executor"),
-                "tool_type": t.get("tool_type", "code_executor"),
-                "action": t.get("action", ""),
-                "parameters": params if isinstance(params, dict) else {},
-            })
+            normalized.append(
+                {
+                    "tool_name": t.get("tool_name", "code_executor"),
+                    "tool_type": t.get("tool_type", "code_executor"),
+                    "action": t.get("action", ""),
+                    "parameters": params if isinstance(params, dict) else {},
+                }
+            )
 
-        return {"analysis_strategy": data.get("analysis_strategy", ""), "tools_to_use": normalized}
+        return {
+            "analysis_strategy": data.get("analysis_strategy", ""),
+            "tools_to_use": normalized,
+        }
 
     async def _judge_analysis_strategy(
         self,
@@ -816,8 +897,12 @@ Based on the experiment context and **actual data structure above**, generate an
         """判断分析策略是否合理。"""
         # 构建数据摘要
         total_rows = sum(data_summary.row_counts.values())
-        non_empty_tables = [t for t in data_summary.tables if data_summary.row_counts.get(t, 0) > 0]
-        empty_tables = [t for t in data_summary.tables if data_summary.row_counts.get(t, 0) == 0]
+        non_empty_tables = [
+            t for t in data_summary.tables if data_summary.row_counts.get(t, 0) > 0
+        ]
+        empty_tables = [
+            t for t in data_summary.tables if data_summary.row_counts.get(t, 0) == 0
+        ]
 
         prompt = f"""Evaluate the analysis strategy for experiment {context.experiment_id}.
 
@@ -889,7 +974,9 @@ Based on the experiment context and **actual data structure above**, generate an
                         results,
                         iteration + 1,
                     )
-                    self.logger.info("第 %d 轮无新增工具，完成总结后停止迭代", iteration + 1)
+                    self.logger.info(
+                        "第 %d 轮无新增工具，完成总结后停止迭代", iteration + 1
+                    )
                     break
                 current_tools = adj.get("tools_to_use", [])
 
@@ -900,14 +987,23 @@ Based on the experiment context and **actual data structure above**, generate an
 
                 await progress(f"Running tool: {tool_name}...")
 
-                if tool_type in ("eda_profile", "eda_sweetviz") or tool_name in ("eda_profile", "eda_sweetviz"):
-                    result = await self._run_eda_tool(tool_name, db_path, output_dir, on_progress=progress)
+                if tool_type in ("eda_profile", "eda_sweetviz") or tool_name in (
+                    "eda_profile",
+                    "eda_sweetviz",
+                ):
+                    result = await self._run_eda_tool(
+                        tool_name, db_path, output_dir, on_progress=progress
+                    )
                 else:
                     exec_parameters = parameters.copy()
                     if tool_type == "code_executor":
                         exec_parameters["db_path"] = str(db_path)
-                        exec_parameters["code_description"] = tool_spec.get("action", "")
-                        exec_parameters["extra_files"] = collect_experiment_files(db_path)
+                        exec_parameters["code_description"] = tool_spec.get(
+                            "action", ""
+                        )
+                        exec_parameters["extra_files"] = collect_experiment_files(
+                            db_path
+                        )
                     result = await tool_executor.execute_tool(
                         tool_name=tool_name,
                         tool_type=tool_type,
@@ -916,12 +1012,17 @@ Based on the experiment context and **actual data structure above**, generate an
 
                 results[tool_name] = result
                 # 只保留关键信息，不保留完整结果
-                conversation_history.append({
-                    "tool": tool_name,
-                    "success": result.get("success", False),
-                    "iteration": iteration + 1,
-                    "result": {"success": result.get("success", False), "error": result.get("error", "")[:100]}
-                })
+                conversation_history.append(
+                    {
+                        "tool": tool_name,
+                        "success": result.get("success", False),
+                        "iteration": iteration + 1,
+                        "result": {
+                            "success": result.get("success", False),
+                            "error": result.get("error", "")[:100],
+                        },
+                    }
+                )
 
             # 每一轮都总结：有工具执行时总结执行结果；无工具时总结当前状态。
             context_summary = await self._summarize_context(
@@ -930,14 +1031,6 @@ Based on the experiment context and **actual data structure above**, generate an
                 iteration + 1,
             )
             self.logger.info("已完成第 %d 轮总结，进入下一轮策略迭代", iteration + 1)
-            self.logger.info(
-                "第 %d 轮总结详情: key_findings=%d, failed_attempts=%d, successful_tools=%d, recommendations=%s",
-                iteration + 1,
-                len(context_summary.key_findings),
-                len(context_summary.failed_attempts),
-                len(context_summary.successful_tools),
-                (context_summary.recommendations or "N/A")[:180],
-            )
 
         return results
 
@@ -955,18 +1048,24 @@ Based on the experiment context and **actual data structure above**, generate an
 
         if tool_name == "eda_profile":
             from .eda import generate_eda_profile
+
             path = generate_eda_profile(db_path, data_dir, config=self.config)
             if path and on_progress:
                 await on_progress(f"EDA (ydata) generated: {path.name}")
         elif tool_name == "eda_sweetviz":
             from .eda import generate_sweetviz_profile
+
             path = generate_sweetviz_profile(db_path, data_dir, config=self.config)
             if path and on_progress:
                 await on_progress(f"EDA (sweetviz) generated: {path.name}")
 
         if path and path.exists():
             return {"success": True, "path": str(path), "tool_name": tool_name}
-        return {"success": False, "error": "EDA generation failed or skipped", "tool_name": tool_name}
+        return {
+            "success": False,
+            "error": "EDA generation failed or skipped",
+            "tool_name": tool_name,
+        }
 
     async def _adjust_strategy_based_on_results(
         self,
@@ -986,13 +1085,18 @@ Based on the experiment context and **actual data structure above**, generate an
             history_context = f"**Iteration**: {iteration}"
 
         # 使用 LLM 总结当前结果（如果有多个或者很长）
-        if current_results and sum(len(str(r)) for r in current_results.values()) > 1500:
+        if (
+            current_results
+            and sum(len(str(r)) for r in current_results.values()) > 1500
+        ):
             results_summary = await self._summarize_tool_results(
                 current_results,
                 analysis_result.insights,
             )
         else:
-            results_summary = self._format_tool_results(current_results, max_length=1500)
+            results_summary = self._format_tool_results(
+                current_results, max_length=1500
+            )
 
         prompt = f"""Decide whether to run more tools or stop.
 
@@ -1020,7 +1124,9 @@ Based on the experiment context and **actual data structure above**, generate an
             temperature=self.temperature,
         )
 
-        data = parse_llm_xml_response(response.choices[0].message.content or "", root_tag="adjust")
+        data = parse_llm_xml_response(
+            response.choices[0].message.content or "", root_tag="adjust"
+        )
         tools = data.get("tools_to_use", [])
 
         if isinstance(tools, dict):
@@ -1039,12 +1145,14 @@ Based on the experiment context and **actual data structure above**, generate an
                     params = json_repair.loads(params) if params.strip() else {}
                 except Exception:
                     params = {}
-            normalized.append({
-                "tool_name": t.get("tool_name", "code_executor"),
-                "tool_type": t.get("tool_type", "code_executor"),
-                "action": t.get("action", ""),
-                "parameters": params if isinstance(params, dict) else {},
-            })
+            normalized.append(
+                {
+                    "tool_name": t.get("tool_name", "code_executor"),
+                    "tool_type": t.get("tool_type", "code_executor"),
+                    "action": t.get("action", ""),
+                    "parameters": params if isinstance(params, dict) else {},
+                }
+            )
 
         return {"assessment": data.get("assessment", ""), "tools_to_use": normalized}
 
@@ -1073,7 +1181,11 @@ Based on the experiment context and **actual data structure above**, generate an
             try:
                 await progress("Deciding visualizations...")
                 visualization_plan = await self._decide_visualizations(
-                    context, analysis_result, data_summary, tool_results, previous_feedback
+                    context,
+                    analysis_result,
+                    data_summary,
+                    tool_results,
+                    previous_feedback,
                 )
             except XmlParseError as e:
                 if attempt >= max_retries - 1:
@@ -1087,13 +1199,21 @@ Based on the experiment context and **actual data structure above**, generate an
 
             await progress("Generating charts...")
             generated_charts, error_logs = await self._generate_visualizations(
-                visualization_plan, db_path, output_dir, tool_executor, on_progress=on_progress
+                visualization_plan,
+                db_path,
+                output_dir,
+                tool_executor,
+                on_progress=on_progress,
             )
 
             try:
                 judgment = await self._judge_visualizations(
-                    visualization_plan, generated_charts, context, tool_results, error_logs,
-                    data_summary=data_summary
+                    visualization_plan,
+                    generated_charts,
+                    context,
+                    tool_results,
+                    error_logs,
+                    data_summary=data_summary,
                 )
             except XmlParseError as e:
                 if attempt >= max_retries - 1:
@@ -1101,7 +1221,11 @@ Based on the experiment context and **actual data structure above**, generate an
                 previous_feedback = str(e)
                 continue
 
-            if judgment.success or not judgment.should_retry or attempt >= max_retries - 1:
+            if (
+                judgment.success
+                or not judgment.should_retry
+                or attempt >= max_retries - 1
+            ):
                 return visualization_plan, generated_charts
 
             previous_feedback = f"{judgment.reason}. {judgment.retry_instruction}"
@@ -1174,7 +1298,9 @@ Based on the experiment context and **actual data structure above**, generate an
             temperature=self.temperature,
         )
 
-        data = parse_llm_xml_response(response.choices[0].message.content or "", root_tag="visualizations")
+        data = parse_llm_xml_response(
+            response.choices[0].message.content or "", root_tag="visualizations"
+        )
         viz = data.get("viz", data.get("visualizations", []))
 
         if isinstance(viz, dict):
@@ -1185,8 +1311,14 @@ Based on the experiment context and **actual data structure above**, generate an
         return [
             {
                 "use_tool": v.get("use_tool", True) if isinstance(v, dict) else True,
-                "tool_name": v.get("tool_name", "code_executor") if isinstance(v, dict) else "code_executor",
-                "tool_description": v.get("tool_description", "") if isinstance(v, dict) else "",
+                "tool_name": (
+                    v.get("tool_name", "code_executor")
+                    if isinstance(v, dict)
+                    else "code_executor"
+                ),
+                "tool_description": (
+                    v.get("tool_description", "") if isinstance(v, dict) else ""
+                ),
             }
             for v in viz
         ]
@@ -1204,13 +1336,17 @@ Based on the experiment context and **actual data structure above**, generate an
         chart_names = [p.name for p in generated_charts]
         errors_block = ""
         if error_logs:
-            errors_block = "\n**Execution Errors**:\n" + "\n".join(f"- {e}" for e in error_logs)
+            errors_block = "\n**Execution Errors**:\n" + "\n".join(
+                f"- {e}" for e in error_logs
+            )
 
         # 数据摘要
         data_block = ""
         if data_summary:
             total_rows = sum(data_summary.row_counts.values())
-            non_empty = [t for t in data_summary.tables if data_summary.row_counts.get(t, 0) > 0]
+            non_empty = [
+                t for t in data_summary.tables if data_summary.row_counts.get(t, 0) > 0
+            ]
             data_block = f"""
 **Actual Data Context**:
 - Tables with data: {non_empty}
@@ -1239,7 +1375,9 @@ Based on the experiment context and **actual data structure above**, generate an
             temperature=0.3,
         )
         content = response.choices[0].message.content or ""
-        return parse_llm_xml_to_model(content, VisualizationJudgment, root_tag="judgment")
+        return parse_llm_xml_to_model(
+            content, VisualizationJudgment, root_tag="judgment"
+        )
 
     async def _generate_visualizations(
         self,
@@ -1261,16 +1399,24 @@ Based on the experiment context and **actual data structure above**, generate an
         if not visualization_plan:
             return generated_charts, error_logs
 
-        total = sum(1 for v in visualization_plan if v.get("use_tool") or v.get("tool_name"))
+        total = sum(
+            1 for v in visualization_plan if v.get("use_tool") or v.get("tool_name")
+        )
         done = 0
 
         for viz in visualization_plan:
             if not viz.get("use_tool") and not viz.get("tool_name"):
                 continue
             done += 1
-            await progress(f"Generating chart {done}/{total}..." if total > 1 else "Generating chart...")
+            await progress(
+                f"Generating chart {done}/{total}..."
+                if total > 1
+                else "Generating chart..."
+            )
 
-            tool_description = viz.get("tool_description") or viz.get("description") or ""
+            tool_description = (
+                viz.get("tool_description") or viz.get("description") or ""
+            )
             if not tool_description:
                 continue
 
@@ -1290,11 +1436,15 @@ Based on the experiment context and **actual data structure above**, generate an
                 error_logs.append(f"Chart {done} failed: {error_msg}")
                 continue
 
-            generated_charts.extend(self._collect_generated_chart_paths(result, output_dir))
+            generated_charts.extend(
+                self._collect_generated_chart_paths(result, output_dir)
+            )
 
         return generated_charts, error_logs
 
-    def _collect_generated_chart_paths(self, tool_result: Dict[str, Any], output_dir: Path) -> List[Path]:
+    def _collect_generated_chart_paths(
+        self, tool_result: Dict[str, Any], output_dir: Path
+    ) -> List[Path]:
         """收集工具产出的图表文件。"""
         chart_paths: List[Path] = []
         for artifact_path_str in tool_result.get("artifacts", []):
@@ -1313,19 +1463,31 @@ Based on the experiment context and **actual data structure above**, generate an
         """格式化工具列表。"""
         if not tools:
             return "No built-in tools available"
-        file_order = ["read_file", "write_file", "list_directory", "glob", "search_file_content"]
+        file_order = [
+            "read_file",
+            "write_file",
+            "list_directory",
+            "glob",
+            "search_file_content",
+        ]
         entries = []
         for name, info in tools.items():
             desc = info.get("description", "No description")
             params = info.get("parameters_description") or info.get("parameters")
             if params is not None and not isinstance(params, str):
                 params = ", ".join(str(p) for p in params)
-            line = f"- **{name}**: {desc}" + (f" Parameters: {params}" if params else "")
-            entries.append((file_order.index(name) if name in file_order else 999, line))
+            line = f"- **{name}**: {desc}" + (
+                f" Parameters: {params}" if params else ""
+            )
+            entries.append(
+                (file_order.index(name) if name in file_order else 999, line)
+            )
         entries.sort(key=lambda x: x[0])
         return "\n".join(e[1] for e in entries)
 
-    def _format_tool_results(self, tool_results: Dict[str, Any], max_length: int = 2000) -> str:
+    def _format_tool_results(
+        self, tool_results: Dict[str, Any], max_length: int = 2000
+    ) -> str:
         """格式化工具执行结果。注意：这是格式化方法，总结由 _summarize_tool_results 负责。"""
         if not tool_results:
             return "No tool execution results"
@@ -1337,13 +1499,15 @@ Based on the experiment context and **actual data structure above**, generate an
                 if "path" in result:
                     lines.append(f"Output: {result['path']}")
                 elif "stdout" in result:
-                    stdout = result['stdout']
+                    stdout = result["stdout"]
                     # 保留较长输出，后续由 LLM 总结
                     if len(stdout) > 800:
-                        stdout = stdout[:800] + f"...[+{len(result['stdout'])-800} chars]"
+                        stdout = (
+                            stdout[:800] + f"...[+{len(result['stdout'])-800} chars]"
+                        )
                     lines.append(f"Output: {stdout}")
             else:
-                error = result.get('error', 'Unknown')
+                error = result.get("error", "Unknown")
                 if len(error) > 500:
                     error = error[:500] + "...[more]"
                 lines.append(f"Error: {error}")
@@ -1373,10 +1537,12 @@ Based on the experiment context and **actual data structure above**, generate an
                     results_overview.append(f"- {name}: Generated {result['path']}")
                 elif "stdout" in result:
                     # 取输出的关键部分
-                    stdout = result['stdout']
+                    stdout = result["stdout"]
                     results_overview.append(f"- {name}: {len(stdout)} chars output")
             else:
-                results_overview.append(f"- {name}: FAILED - {str(result.get('error', ''))[:100]}")
+                results_overview.append(
+                    f"- {name}: FAILED - {str(result.get('error', ''))[:100]}"
+                )
 
         prompt = f"""Summarize the key findings from these tool execution results.
 
@@ -1470,14 +1636,10 @@ Return ONLY the summary, no additional text."""
             return schema_markdown
 
         # 提取关键表（有数据的表优先）
-        tables_with_data = [
-            (t, c) for t, c in row_counts.items() if c > 0
-        ]
+        tables_with_data = [(t, c) for t, c in row_counts.items() if c > 0]
         tables_sorted = sorted(tables_with_data, key=lambda x: -x[1])[:max_tables]
 
-        key_tables_info = "\n".join([
-            f"- {t}: {c} rows" for t, c in tables_sorted
-        ])
+        key_tables_info = "\n".join([f"- {t}: {c} rows" for t, c in tables_sorted])
 
         prompt = f"""Summarize this database schema for analysis purposes.
 
@@ -1526,22 +1688,27 @@ Keep it under 1500 characters. Return ONLY the summary."""
 
         当上下文过长时，用 LLM 提取关键信息，避免上下文膨胀。
         """
-        # 仅当本轮尚未执行任何工具时跳过 LLM：只要跑过工具，就必须压缩一轮，
-        # 把成功/失败与错误信号写进 ContextSummary，供下一轮 _adjust 使用。
-        if not conversation_history:
+        if not conversation_history or len(conversation_history) <= 2:
+            # 历史记录较短，不需要压缩
             return ContextSummary(
                 key_findings=[],
                 failed_attempts=[],
-                successful_tools=[],
+                successful_tools=[
+                    h["tool"]
+                    for h in conversation_history
+                    if h.get("result", {}).get("success")
+                ],
                 recommendations="",
                 iteration_count=iteration,
             )
 
         # 构建历史摘要
-        history_text = "\n".join([
-            f"- Iter {h['iteration']}: {h['tool']} - {'OK' if h.get('result', {}).get('success') else 'FAILED'}"
-            for h in conversation_history[-10:]  # 最多取最近10条
-        ])
+        history_text = "\n".join(
+            [
+                f"- Iter {h['iteration']}: {h['tool']} - {'OK' if h.get('result', {}).get('success') else 'FAILED'}"
+                for h in conversation_history[-10:]  # 最多取最近10条
+            ]
+        )
 
         # 提取关键输出
         outputs_text = ""
@@ -1549,7 +1716,9 @@ Keep it under 1500 characters. Return ONLY the summary."""
             if result.get("success") and result.get("stdout"):
                 outputs_text += f"\n**{name}**: {result['stdout'][:300]}...\n"
             elif not result.get("success"):
-                outputs_text += f"\n**{name}** FAILED: {str(result.get('error', ''))[:200]}\n"
+                outputs_text += (
+                    f"\n**{name}** FAILED: {str(result.get('error', ''))[:200]}\n"
+                )
 
         prompt = f"""Summarize the analysis execution history into a structured summary.
 
@@ -1582,7 +1751,10 @@ Extract:
                     return [str(i) for i in v[:3]]
                 if isinstance(v, dict) and "item" in v:
                     items = v["item"]
-                    return [str(i) for i in (items if isinstance(items, list) else [items])[:3]]
+                    return [
+                        str(i)
+                        for i in (items if isinstance(items, list) else [items])[:3]
+                    ]
                 return []
 
             return ContextSummary(
@@ -1597,7 +1769,11 @@ Extract:
             return ContextSummary(
                 key_findings=[],
                 failed_attempts=[],
-                successful_tools=[h["tool"] for h in conversation_history if h.get("result", {}).get("success")],
+                successful_tools=[
+                    h["tool"]
+                    for h in conversation_history
+                    if h.get("result", {}).get("success")
+                ],
                 recommendations="",
                 iteration_count=iteration,
             )
@@ -1626,4 +1802,4 @@ Extract:
 
     async def close(self) -> None:
         """关闭智能体"""
-        pass    
+        pass

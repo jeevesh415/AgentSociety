@@ -345,13 +345,11 @@ class AgentBase(ABC):
             state: 该 skill 的状态对象（可以是任意类型）
 
         Example:
-            在 skill 的 run() 函数中::
+            技能实现中（无论是 prompt-only 还是 subprocess），都可以通过 Agent 对象维护自己的状态::
 
-                async def run(agent, ctx):
-                    # 首次运行时初始化状态
-                    if agent.get_skill_state("observation") is None:
-                        agent.set_skill_state("observation", {"last_observation": None})
-                    # 执行逻辑...
+                if agent.get_skill_state("observation") is None:
+                    agent.set_skill_state("observation", {"last_observation": None})
+                # 执行逻辑...
         """
         self._skill_states[skill_name] = state
 

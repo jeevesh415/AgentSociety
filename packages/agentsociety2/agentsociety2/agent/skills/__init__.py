@@ -1,8 +1,47 @@
-"""Skills registry (new architecture only).
+"""Skills 注册中心 - 基于 SKILL.md frontmatter + 可选 subprocess script。
 
-设计原则：
-- skill 能力由 SKILL.md frontmatter + 可选 script 驱动
-- 支持 L0/L1/L2 渐进加载
+本模块提供 Agent Skills 的注册、发现和执行功能。
+
+主要组件
+--------
+
+**SkillRegistry** — Skill 注册中心：
+- 扫描内置 skills（agentsociety2/agent/skills/）
+- 扫描自定义 skills（workspace/custom/skills/）
+- 扫描环境 skills（env modules skills/）
+
+**SkillInfo** — Skill 元信息：
+- name: Skill 名称
+- description: 描述
+- script: 脚本路径（可选）
+- executor: 执行器类型（如 "codegen"）
+- source: 来源（builtin | custom | env:<name>）
+- path: Skill 目录路径
+- enabled: 是否启用
+- disable_model_invocation: 是否禁用模型调用
+- requires: 依赖的其他 skill 名称列表
+- skill_md: SKILL.md 文件内容
+
+**get_skill_registry** — 获取全局注册中心实例
+
+Skill 目录结构::
+
+    my_skill/
+    ├── SKILL.md          # 必需，包含 frontmatter 和文档
+    └── scripts/          # 可选，Python 脚本
+        └── main.py
+
+SKILL.md frontmatter 示例::
+
+    ---
+    name: my_skill
+    description: 这是一个示例 skill
+    script: scripts/main.py
+    executor: codegen
+    disable_model_invocation: false
+    requires:
+      - other_skill
+    ---
 """
 
 from __future__ import annotations
@@ -25,32 +64,39 @@ _BUILTIN_ROOT = Path(__file__).resolve().parent
 class SkillInfo:
     name: str
     description: str = ""
-    trigger: str = "on_demand"  # always | on_demand
     script: str = ""
     executor: str = ""  # codegen
-    priority: int = 100
     source: str = ""  # builtin | custom | env:<name>
     path: str = ""
     enabled: bool = True
     disable_model_invocation: bool = False
-    user_invocable: bool = True
     requires: list[str] = field(default_factory=list)
-    provides: list[str] = field(default_factory=list)
-    provides_state: list[str] = field(default_factory=list)
     skill_md: str = ""
     _skill_md_loaded: bool = False
+
+
+# 全局子进程并发限制：所有 agent 的 registry 共享同一个 semaphore，
+# 避免 N 个 agent 各自拥有 16 个配额导致 N×16 个子进程。
+# 使用懒初始化确保在 asyncio 事件循环启动后才创建。
+_global_subprocess_semaphore: asyncio.Semaphore | None = None
+
+
+def _get_global_subprocess_semaphore() -> asyncio.Semaphore:
+    global _global_subprocess_semaphore
+    if _global_subprocess_semaphore is None:
+        max_workers_str = os.getenv("AGENT_SKILL_SUBPROCESS_MAX_WORKERS", "16")
+        try:
+            max_workers = max(1, int(max_workers_str))
+        except ValueError:
+            max_workers = 16
+        _global_subprocess_semaphore = asyncio.Semaphore(max_workers)
+    return _global_subprocess_semaphore
 
 
 class SkillRegistry:
     def __init__(self) -> None:
         self._skills: dict[str, SkillInfo] = {}
         self._builtin_scanned = False
-        max_workers = os.getenv("AGENT_SKILL_SUBPROCESS_MAX_WORKERS", "16")
-        try:
-            worker_count = max(1, int(max_workers))
-        except ValueError:
-            worker_count = 16
-        self._subprocess_semaphore = asyncio.Semaphore(worker_count)
 
     # ---------- discover ----------
     def scan_builtin(self, root: Path = _BUILTIN_ROOT) -> None:
@@ -87,17 +133,15 @@ class SkillRegistry:
 
     # ---------- list ----------
     def list_all(self) -> list[SkillInfo]:
-        return sorted(self._skills.values(), key=lambda s: (s.priority, s.name))
+        return sorted(self._skills.values(), key=lambda s: s.name)
 
     def list_enabled(self) -> list[SkillInfo]:
         return [s for s in self.list_all() if s.enabled]
 
-    def list_always_on_names(self) -> list[str]:
-        return [s.name for s in self.list_enabled() if s.trigger == "always"]
-
     def list_selection_metadata(
         self, names: list[str] | None = None, only_enabled: bool = True
     ) -> list[dict[str, Any]]:
+        """L0 catalog: LLM 只需要 name + description + requires。"""
         base = self.list_enabled() if only_enabled else self.list_all()
         name_set = set(names) if names is not None else None
         result: list[dict[str, Any]] = []
@@ -106,19 +150,13 @@ class SkillRegistry:
                 continue
             if name_set is not None and info.name not in name_set:
                 continue
-            result.append(
-                {
-                    "name": info.name,
-                    "description": info.description,
-                    "trigger": info.trigger,
-                    "script": info.script,
-                    "executor": info.executor,
-                    "priority": info.priority,
-                    "requires": list(info.requires),
-                    "provides": list(info.provides),
-                    "source": info.source,
-                }
-            )
+            entry: dict[str, Any] = {
+                "name": info.name,
+                "description": info.description,
+            }
+            if info.requires:
+                entry["requires"] = list(info.requires)
+            result.append(entry)
         return result
 
     # ---------- read ----------
@@ -156,6 +194,56 @@ class SkillRegistry:
         if not info:
             return False
         info.enabled = False
+        return True
+
+    def remove_custom(self, name: str) -> bool:
+        """Remove a custom skill from registry only.
+
+        NOTE: This does not delete files on disk. Callers (e.g. API layer) should
+        handle filesystem removal, then call this method to drop it from memory.
+        """
+        info = self._skills.get(name)
+        if not info:
+            return False
+        if info.source != "custom":
+            return False
+        del self._skills[name]
+        return True
+
+    def reload_skill(self, name: str) -> bool:
+        """Hot-reload a skill's metadata and clear cached SKILL.md content.
+
+        This is designed for the current skills-first architecture:
+        - skills are discovered from SKILL.md frontmatter (+ optional script path)
+        - activation lazily loads full SKILL.md into memory
+        """
+        info = self._skills.get(name)
+        if not info:
+            return False
+
+        skill_root = Path(info.path)
+        skill_md = skill_root / "SKILL.md"
+        if not skill_md.exists():
+            return False
+
+        meta = _parse_frontmatter_from_file(skill_md)
+        new_name = str(meta.get("name", info.name)).strip() or info.name
+        if new_name != name:
+            if new_name in self._skills:
+                return False
+            del self._skills[name]
+            self._skills[new_name] = info
+
+        info.name = new_name
+        info.description = str(meta.get("description", info.description))
+        info.script = str(meta.get("script", info.script)).strip()
+        info.executor = str(meta.get("executor", info.executor)).strip().lower()
+        info.disable_model_invocation = _to_bool(
+            meta.get("disable_model_invocation", meta.get("disable-model-invocation"))
+        )
+        info.requires = _to_list(meta.get("requires"))
+        info._skill_md_loaded = False
+        info.skill_md = ""
         return True
 
     def get_skill_info(self, name: str, load_content: bool = True) -> SkillInfo | None:
@@ -210,7 +298,7 @@ class SkillRegistry:
         env["SKILL_DIR"] = str(skill_root)
         env["AGENT_WORK_DIR"] = str(work_dir)
 
-        async with self._subprocess_semaphore:
+        async with _get_global_subprocess_semaphore():
             proc = await asyncio.create_subprocess_exec(
                 sys.executable,
                 str(script_path),
@@ -262,7 +350,6 @@ def _discover_skills(root: Path, source: str) -> list[SkillInfo]:
     result: list[SkillInfo] = []
     if not root.is_dir():
         return result
-    auto_priority = 100
     for child in sorted(root.iterdir()):
         if not child.is_dir() or child.name.startswith(("_", ".")):
             continue
@@ -274,35 +361,19 @@ def _discover_skills(root: Path, source: str) -> list[SkillInfo]:
         info = SkillInfo(
             name=str(meta.get("name", child.name)),
             description=str(meta.get("description", "")),
-            trigger=_normalize_trigger(meta.get("trigger", "on_demand")),
             script=str(meta.get("script", "")).strip(),
             executor=str(meta.get("executor", "")).strip().lower(),
-            priority=_to_int(meta.get("priority"), auto_priority),
             source=source,
             path=str(child.resolve()),
             enabled=True,
             disable_model_invocation=_to_bool(
                 meta.get("disable_model_invocation", meta.get("disable-model-invocation"))
             ),
-            user_invocable=not _to_bool(
-                str(meta.get("user_invocable", meta.get("user-invocable", "true"))).lower()
-                in ("false", "0", "no")
-            ),
             requires=_to_list(meta.get("requires")),
-            provides=_to_list(meta.get("provides")),
-            provides_state=_to_list(meta.get("provides_state")),
             _skill_md_loaded=False,
         )
         result.append(info)
-        auto_priority += 1
     return result
-
-
-def _normalize_trigger(raw: Any) -> str:
-    val = str(raw or "on_demand").strip().lower()
-    if val == "always":
-        return "always"
-    return "on_demand"
 
 
 def _to_bool(raw: Any) -> bool:
@@ -312,14 +383,6 @@ def _to_bool(raw: Any) -> bool:
         return False
     return str(raw).strip().lower() in ("true", "1", "yes")
 
-
-def _to_int(raw: Any, default: int) -> int:
-    if raw is None:
-        return default
-    try:
-        return int(raw)
-    except Exception:
-        return default
 
 
 def _to_list(raw: Any) -> list[str]:

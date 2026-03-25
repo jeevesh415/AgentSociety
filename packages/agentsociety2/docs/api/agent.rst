@@ -26,44 +26,5 @@ PersonAgent
 数据模型
 --------
 
-情感模型
-~~~~~~~~
-
-.. autoclass:: agentsociety2.agent.models.EmotionType
-   :members:
-
-.. autoclass:: agentsociety2.agent.models.Emotion
-   :members:
-
-需求模型
-~~~~~~~~
-
-.. autoclass:: agentsociety2.agent.models.Satisfactions
-   :members:
-
-.. autoclass:: agentsociety2.agent.models.Need
-   :members:
-
-计划模型
-~~~~~~~~
-
-.. autoclass:: agentsociety2.agent.models.PlanStepStatus
-   :members:
-
-.. autoclass:: agentsociety2.agent.models.PlanStep
-   :members:
-
-.. autoclass:: agentsociety2.agent.models.Plan
-   :members:
-
-意图模型
-~~~~~~~~
-
-.. autoclass:: agentsociety2.agent.models.Intention
-   :members:
-
-Skill 选择
-~~~~~~~~~~
-
-.. autoclass:: agentsociety2.agent.models.SkillSelection
-   :members:
+当前 Agent 已切换到 skills-first 的运行方式：数据结构更多通过 skill frontmatter + SKILL.md + tool-loop 的 JSON 结果来约定。
+如需扩展技能与查看技能元信息，请参见 :doc:`agent_skills` 与 :doc:`skills`。

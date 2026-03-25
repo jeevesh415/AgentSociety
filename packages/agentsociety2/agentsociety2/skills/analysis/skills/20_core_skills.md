@@ -99,11 +99,12 @@ Leave `tools_to_use` empty when done.
 
 ## Report
 
-- Write **bilingual** reports inside `<report>`: **four** CDATA blocks — `markdown_zh`, `html_zh`, `markdown_en`, `html_en` (English). Same charts/paths in all four (e.g. `assets/...`).
-- Structure and narrative are your choice per locale; findings should align across languages.
-- If EDA reports were generated, link or summarize in both languages where relevant.
-- All four blocks must be non-empty and substantive.
-- Each HTML must be a complete document (`<!DOCTYPE html>` ... `</html>`) with professional styles.
+- Write **one complete report** in Markdown and HTML inside `<report>`.
+- Structure and narrative are your choice.
+- **Decide** which charts best support your analysis; embed them where they fit the narrative.
+- If EDA reports were generated, link or summarize their key findings.
+- Both `<markdown>` and `<html>` blocks must be non-empty.
+- HTML must be a complete document (`<!DOCTYPE html>` ... `</html>`) with professional styles.
 
 ## Synthesis
 

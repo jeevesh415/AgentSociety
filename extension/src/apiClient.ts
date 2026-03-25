@@ -264,11 +264,13 @@ export interface CustomModulesStatusResponse {
 
 export interface AgentSkillItem {
   name: string;
-  priority: number;
-  source: string;      // "builtin" | "custom"
+  description: string;
+  source: string;      // "builtin" | "custom" | "env:*"
   enabled: boolean;
   path: string;
   has_skill_md: boolean;
+  script: string;
+  requires: string[];
 }
 
 export interface AgentSkillsListResponse {
@@ -292,10 +294,12 @@ export interface AgentSkillsScanResponse {
 export interface AgentSkillInfoResponse {
   success: boolean;
   name: string;
-  priority: number;
+  description: string;
   source: string;
   enabled: boolean;
   path: string;
+  script: string;
+  requires: string[];
   skill_md: string;
 }
 

@@ -192,41 +192,80 @@ async def my_tool(self, agent_id: int) -> dict:
 
 ## 创建自定义 Agent Skill
 
-在 `custom/skills/` 下创建 skill 目录，包含 `SKILL.md` 和 `scripts/<name>.py`：
+每个 PersonAgent 就是一个独立的 Claude-like agent——它从 skill catalog 中选择技能、读取指令、调用工具完成任务。**skill 作者不需要了解 PersonAgent 的内部实现**，只需写一个 `SKILL.md`。
+
+### 目录结构
 
 ```
 custom/skills/my-skill/
-├── SKILL.md              # YAML frontmatter + 行为描述
-└── scripts/my-skill.py   # 导出 async def run(agent, ctx)
+├── SKILL.md              # YAML frontmatter + 行为指令（必需）
+└── scripts/my-skill.py   # （可选）subprocess 脚本
 ```
 
-**SKILL.md 示例：**
+### SKILL.md frontmatter
+
+只需要三个字段：
+
+| 字段 | 必需 | 说明 |
+|------|------|------|
+| `name` | 是 | skill 唯一标识 |
+| `description` | 是 | 一句话描述（出现在 agent 的 skill catalog 里） |
+| `script` | 否 | subprocess 脚本路径（如 `scripts/my-skill.py`） |
+| `requires` | 否 | 依赖列表（activate 时自动激活依赖） |
 
 ```yaml
 ---
 name: my-skill
-description: My custom skill description
-priority: 60
+description: One-line description of what this skill does.
 ---
-
-# My Skill
-
-Behavior description here...
 ```
 
-**scripts/my-skill.py 示例：**
+### 两种模式
+
+#### Prompt-only（推荐）
+
+不声明 `script`。agent `activate_skill` 后，`SKILL.md` 正文作为行为指令注入上下文，agent 用内置工具（`bash` / `codegen` / `workspace_*` / `glob` / `grep`）完成任务。
+
+#### Subprocess
+
+声明 `script: scripts/my-skill.py`。agent 调用 `execute_skill` 时框架以子进程运行脚本：
+
+- 参数：`--args-json '{...}'`（由 LLM 决定传什么）
+- 环境变量：`SKILL_NAME` / `SKILL_DIR` / `AGENT_WORK_DIR`
+- 产物：写入 `AGENT_WORK_DIR`（每个 agent 独立目录）
 
 ```python
-from __future__ import annotations
-from typing import Any
+import argparse, json
+from pathlib import Path
 
-async def run(agent: Any, ctx: dict[str, Any]) -> None:
-    step_log: list[str] = ctx["step_log"]
-    # your skill logic here
-    step_log.append("MySkill: done")
+def main() -> int:
+    parser = argparse.ArgumentParser()
+    parser.add_argument("--args-json", default="{}")
+    args = json.loads(parser.parse_args().args_json or "{}")
+
+    result = {"ok": True, "summary": f"ran (tick={args.get('tick')})"}
+    Path("result.json").write_text(json.dumps(result), encoding="utf-8")
+    print(json.dumps(result))
+    return 0
+
+if __name__ == "__main__":
+    raise SystemExit(main())
 ```
 
-创建后，在 VSCode 中运行"Scan Agent Skills"命令或调用 API：
+### Agent 可用的工具（skill 作者须知）
+
+当 agent 激活你的 skill 后，它能用以下工具执行你的指令：
+
+| 工具 | 用途 |
+|------|------|
+| `codegen` | 向仿真环境发送指令（观察、行动等） |
+| `bash` | 在 agent workspace 运行 shell 命令 |
+| `workspace_read/write/list` | 读写 agent workspace 文件 |
+| `glob` / `grep` | 在 workspace 搜索文件 |
+| `execute_skill` | 运行另一个 skill 的 subprocess 脚本 |
+| `activate_skill` | 加载另一个 skill 的指令 |
+
+### 扫描注册
 
 ```bash
 curl -X POST http://localhost:8001/api/v1/agent-skills/scan \

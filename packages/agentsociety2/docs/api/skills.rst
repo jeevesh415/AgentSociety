@@ -1,7 +1,7 @@
 Agent Skills 模块
 ==================
 
-本模块提供智能体技能的注册与管理，支持渐进式加载和依赖管理。
+本模块提供智能体技能的注册与管理，支持渐进式加载。
 
 SkillRegistry
 -------------
@@ -18,40 +18,33 @@ SkillInfo
    :members:
    :undoc-members:
 
-LoadedSkill
------------
-
-.. autoclass:: agentsociety2.agent.skills.LoadedSkill
-   :members:
-   :undoc-members:
-
 工具函数
 --------
 
 .. autofunction:: agentsociety2.agent.skills.get_skill_registry
 
-依赖管理
---------
+SKILL.md Frontmatter
+--------------------
 
-Skill 支持 ``requires`` 和 ``provides`` 字段声明依赖关系：
+SKILL.md 文件使用 YAML frontmatter 声明 skill 元信息：
 
 .. code-block:: yaml
 
    ---
-   name: cognition
-   description: Update emotions and form intentions
-   priority: 40
+   name: my_skill
+   description: 这是一个示例 skill
+   script: scripts/main.py
+   executor: codegen
+   disable_model_invocation: false
    requires:
-     - observation           # skill 名称
-     - intention_formation   # 或能力标签
-   provides:
-     - intention_formation
-     - emotion_update
+     - other_skill
    ---
 
-**能力标签 vs Skill 名称**：
+**支持的字段**：
 
-- **Skill 名称**：直接引用其他 skill（如 ``observation``）
-- **能力标签**：抽象能力描述，由 ``provides`` 声明（如 ``intention_formation``）
-
-使用能力标签可以实现松耦合的依赖声明。
+- ``name``: Skill 名称（默认为目录名）
+- ``description``: 描述信息
+- ``script``: 脚本路径（可选）
+- ``executor``: 执行器类型（如 "codegen"）
+- ``disable_model_invocation``: 是否禁用模型调用
+- ``requires``: 依赖的其他 skill 名称列表
