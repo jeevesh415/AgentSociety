@@ -1213,21 +1213,30 @@ async def get_table_content(
     db_path = get_db_path(workspace_path, hypothesis_id, experiment_id)
 
     async for session in get_db_session(db_path):
-        # Use simple text SQL for dynamic table content to avoid schema reflection overhead/complexity
-        # Get columns
-        # Use PRAGMA or just select * limit 0?
-        # Using raw sql is easiest here for generic table
+        # Validate table_name against actual tables to prevent SQL injection
+        def _get_valid_tables(sync_session):
+            from sqlalchemy import inspect
+            return inspect(sync_session.connection()).get_table_names()
 
+        valid_tables = await session.run_sync(_get_valid_tables)
+        if table_name not in valid_tables:
+            raise HTTPException(
+                status_code=404,
+                detail=f"Table '{table_name}' not found",
+            )
+
+        # Safe to use: table_name is validated against actual table names
+        quoted_name = f'"{table_name}"'
         offset = (page - 1) * page_size
 
-        # Get total count
-        count_sql = f"SELECT COUNT(*) FROM {table_name}"
+        count_sql = f"SELECT COUNT(*) FROM {quoted_name}"
         total_result = await session.execute(text(count_sql))
         total = total_result.scalar() or 0
 
-        # Get data
-        data_sql = f"SELECT * FROM {table_name} LIMIT {page_size} OFFSET {offset}"
-        result = await session.execute(text(data_sql))
+        data_sql = f"SELECT * FROM {quoted_name} LIMIT :limit OFFSET :offset"
+        result = await session.execute(
+            text(data_sql), {"limit": page_size, "offset": offset}
+        )
 
         columns = list(result.keys())
         rows = [dict(row._mapping) for row in result.all()]

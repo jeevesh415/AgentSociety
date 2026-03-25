@@ -1,5 +1,34 @@
-"""
-分析子智能体
+"""数据分析子智能体模块。
+
+本模块提供实验结果分析和报告生成的完整工具链，核心子智能体为：
+
+- :class:`AnalysisAgent` — 统一分析智能体，负责洞察、策略、工具执行与可视化
+
+核心功能：
+
+- **数据分析**: 使用 LLM 和代码执行器分析 SQLite 数据库
+- **可视化生成**: 自动生成图表和 EDA 报告
+- **报告生成**: 产出结构化的分析报告（支持中英双语）
+
+主要入口函数：
+
+- :func:`run_analysis` — 运行完整的分析流程
+- :func:`run_synthesis` — 生成综合报告
+
+Example::
+
+    from agentsociety2.skills.analysis import run_analysis, Analyzer
+
+    # 使用便捷函数
+    result = await run_analysis(
+        workspace_path=Path("./workspace"),
+        hypothesis_id="1",
+        experiment_id="1",
+    )
+
+    # 使用 Analyzer 类
+    analyzer = Analyzer(AnalysisConfig(workspace_path="./workspace"))
+    await analyzer.analyze(hypothesis_id="1", experiment_id="1")
 """
 
 from .models import (
@@ -33,15 +62,17 @@ from .models import (
     FILE_SYNTHESIS_REPORT_ZH_SUFFIX,
     FILE_SYNTHESIS_REPORT_EN_SUFFIX,
 )
-from .agents import InsightAgent, DataExplorer
+from .agents import AnalysisAgent
 from .tool_executor import AnalysisRunner
 from .service import Analyzer, run_analysis, Synthesizer, run_synthesis
 from .report_generator import Reporter
 from .utils import (
+    AnalysisSkillMeta,
     XmlParseError,
     parse_llm_xml_response,
     parse_llm_xml_to_model,
     parse_llm_report_response,
+    list_analysis_skills,
     get_analysis_skills,
     experiment_paths,
     presentation_paths,
@@ -49,7 +80,14 @@ from .utils import (
     format_database_schema_markdown,
     collect_experiment_files,
 )
-from .eda import generate_eda_profile, generate_sweetviz_profile, generate_quick_stats
+from .eda import (
+    generate_eda_profile,
+    generate_sweetviz_profile,
+    generate_quick_stats,
+    generate_missingno_visualization,
+    generate_multitable_summary,
+    generate_full_eda_report,
+)
 
 __all__ = [
     # Models
@@ -88,9 +126,9 @@ __all__ = [
     "run_analysis",
     "Synthesizer",
     "run_synthesis",
-    # 子智能体组件
-    "InsightAgent",
-    "DataExplorer",
+    # 统一分析智能体
+    "AnalysisAgent",
+    # 其他组件
     "AnalysisRunner",
     "Reporter",
     # Paths & schema (utils)
@@ -101,11 +139,16 @@ __all__ = [
     "collect_experiment_files",
     # Utils
     "XmlParseError",
+    "AnalysisSkillMeta",
     "parse_llm_xml_response",
     "parse_llm_xml_to_model",
     "parse_llm_report_response",
+    "list_analysis_skills",
     "get_analysis_skills",
     "generate_eda_profile",
     "generate_sweetviz_profile",
     "generate_quick_stats",
+    "generate_missingno_visualization",
+    "generate_multitable_summary",
+    "generate_full_eda_report",
 ]

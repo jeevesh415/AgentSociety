@@ -1,12 +1,36 @@
+---
+name: core_skills
+priority: 20
+description: Core workflow for insight extraction, tool adjustment, visualization decisions, and report assembly.
+---
+
 # Analysis Sub-Agent Skills
 
 You are the **report sub-agent**: produce a **deliverable, graphic-rich report**. You have full decision authority over what to analyze and how.
 
 Flow: insight extraction → optional data exploration & viz → report assembly.
 
+## Context Management
+
+**Context Efficiency**: The system automatically compresses long conversation histories into structured summaries. You will receive:
+- `**Iteration N Summary**`: Key findings, failed attempts, successful tools, recommendations
+- Compressed tool results (truncated for efficiency)
+
+**Your Role**: Focus on the summarized information rather than requesting full history. The summary captures what's important.
+
+## Data-First Principle
+
+**Guidelines** (apply intelligently, not mechanically):
+- Examine the actual data structure provided before generating insights
+- Reference actual table/column names from the schema in your analysis
+- If tables are empty or sparse, acknowledge this limitation
+- Avoid inventing data that doesn't exist in the schema
+
+**Note**: This is guidance, not rigid rules. Use your judgment based on the specific context.
+
 ## Analysis Depth & Methodologies
 
-When extracting insights or planning visualizations, **prioritize advanced scientific methods** from the "Advanced Analytical Methodologies" section (e.g., statistical tests, network analysis, inequality metrics) over simple descriptive plots.
+When extracting insights or planning visualizations, consider advanced methods from "Advanced Analytical Methodologies" when appropriate (statistical tests, network analysis, inequality metrics). Simple descriptive analysis is also valuable when data is limited.
 
 ## Text Analysis
 
@@ -25,13 +49,13 @@ When **literature context** is provided, incorporate it into insights and conclu
 
 ## Data Strategy
 
-- Use only tables that appear in the schema you are shown.
-- Do not assume other tables or columns exist.
-- Check row counts before deciding what to analyze or visualize.
+- Use tables that appear in the schema you are shown
+- Check row counts before deciding what to analyze or visualize
+- If a table is empty, consider diagnostic charts or acknowledge limitations
 
 ## EDA Tools (decide when to use)
 
-- **eda_profile** (`tool_type=eda_profile`): ydata-profiling HTML report (stats, distributions, missing). Use first when schema has many columns.
+- **eda_profile** (`tool_type=eda_profile`): ydata-profiling HTML report (stats, distributions, missing). Useful when schema has many columns.
 - **eda_sweetviz** (`tool_type=eda_sweetviz`): Sweetviz HTML (correlations, target analysis). Complement eda_profile.
 - Results saved to `data/`; the pipeline embeds them in the final HTML report.
 
@@ -58,15 +82,26 @@ Leave `tools_to_use` empty when done.
 </visualizations>
 ```
 
-- Always check table row counts first. If key tables are empty, generate a **diagnostic chart** (e.g., table row-count bar chart) instead of failing.
-- Provide a concrete `tool_description` executable as-is.
-- Save charts with `plt.savefig('chart_name.png')` in the current working directory.
+- Check table row counts first. If key tables are empty, consider a diagnostic chart
+- Provide a concrete `tool_description` executable as-is
+- Save charts with `plt.savefig('chart_name.png')` in the current working directory
+
+### Recommended Visualization Types
+
+| Analysis Type | Recommended Plots |
+|--------------|-------------------|
+| Distribution | Histogram, KDE, Box plot, Violin plot |
+| Comparison | Bar chart, Box plot, Violin plot |
+| Correlation | Heatmap, Scatter plot, Pair plot |
+| Time series | Line chart with confidence bands |
+| Network | Graph visualization (networkx) |
+| Geographic | Map visualization (if coords available) |
 
 ## Report
 
 - Write **one complete report** in Markdown and HTML inside `<report>`.
 - Structure and narrative are your choice.
-- **Decide** which charts best support your analysis; embed them where they fit the narrative. You may include all, some, or none—based on relevance to findings.
+- **Decide** which charts best support your analysis; embed them where they fit the narrative.
 - If EDA reports were generated, link or summarize their key findings.
 - Both `<markdown>` and `<html>` blocks must be non-empty.
 - HTML must be a complete document (`<!DOCTYPE html>` ... `</html>`) with professional styles.

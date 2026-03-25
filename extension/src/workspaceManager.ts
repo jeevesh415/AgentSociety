@@ -6,7 +6,7 @@
  * 关联文件：
  * - @extension/src/projectStructureProvider.ts - 树视图调用WorkspaceManager初始化工作区
  * - @extension/src/extension.ts - 主入口，创建WorkspaceManager实例
- * - @extension/skills/ - Skills目录，复制到工作区
+ * - @extension/skills/ - AgentSociety 内置 skills（插件侧只读展示）
  */
 
 import * as vscode from 'vscode';
@@ -27,12 +27,10 @@ export interface WorkspaceInitResult {
 
 export class WorkspaceManager {
   private outputChannel: vscode.OutputChannel;
-  private skillsSourcePath: string;
 
   constructor(context: vscode.ExtensionContext) {
     this.outputChannel = vscode.window.createOutputChannel('Workspace Manager');
-    // Skills are stored in the extension's skills directory
-    this.skillsSourcePath = path.join(context.extensionPath, 'skills');
+    void context;
   }
 
   private log(message: string): void {
@@ -207,14 +205,6 @@ export class WorkspaceManager {
         }
       }
 
-      reportProgress('正在同步技能文件...');
-
-      // Copy skills to .claude/skills/ (always overwrite for upgrade support)
-      const skillsResult = await this.copySkills();
-      if (skillsResult.success) {
-        this.log(`Skills installed: ${skillsResult.copied.join(', ')}`);
-      }
-
       reportProgress('正在完成初始化...');
 
       return {
@@ -317,139 +307,6 @@ export class WorkspaceManager {
   }
 
   /**
-   * Copy skills to workspace .claude/skills directory and update CLAUDE.md
-   */
-  async copySkills(): Promise<{ success: boolean; message: string; copied: string[]; claudeMdUpdated: boolean }> {
-    const workspacePath = this.getWorkspacePath();
-    if (!workspacePath) {
-      return {
-        success: false,
-        message: 'No workspace folder open',
-        copied: [],
-        claudeMdUpdated: false,
-      };
-    }
-
-    // Check if skills source directory exists
-    if (!fs.existsSync(this.skillsSourcePath)) {
-      return {
-        success: false,
-        message: `Skills source directory not found: ${this.skillsSourcePath}`,
-        copied: [],
-        claudeMdUpdated: false,
-      };
-    }
-
-    // Target directory: .claude/skills/
-    const targetDir = path.join(workspacePath, '.claude', 'skills');
-
-    // Clear and recreate target directory for overwrite support
-    if (fs.existsSync(targetDir)) {
-      // Remove all items in the target directory
-      const existingItems = fs.readdirSync(targetDir);
-      for (const item of existingItems) {
-        const itemPath = path.join(targetDir, item);
-        try {
-          const stat = fs.statSync(itemPath);
-          if (stat.isDirectory()) {
-            fs.rmSync(itemPath, { recursive: true, force: true });
-          } else {
-            fs.unlinkSync(itemPath);
-          }
-          this.log(`Removed existing: ${item}`);
-        } catch (error) {
-          this.log(`Failed to remove ${item}: ${error}`);
-        }
-      }
-    } else {
-      // Create target directory if it doesn't exist
-      fs.mkdirSync(targetDir, { recursive: true });
-      this.log(`Created directory: ${targetDir}`);
-    }
-
-    const copied: string[] = [];
-    const skills = fs.readdirSync(this.skillsSourcePath);
-
-    for (const skill of skills) {
-      const sourcePath = path.join(this.skillsSourcePath, skill);
-      const targetPath = path.join(targetDir, skill);
-
-      const stat = fs.statSync(sourcePath);
-
-      try {
-        if (stat.isDirectory()) {
-          // Recursively copy directory
-          this.copyDirectoryRecursive(sourcePath, targetPath);
-          copied.push(skill);
-          this.log(`Copied skill directory: ${skill}`);
-        } else if (stat.isFile()) {
-          // Copy single file
-          fs.copyFileSync(sourcePath, targetPath);
-          copied.push(skill);
-          this.log(`Copied skill file: ${skill}`);
-        }
-      } catch (error) {
-        this.log(`Failed to copy skill ${skill}: ${error}`);
-      }
-    }
-
-    // Update CLAUDE.md
-    let claudeMdUpdated = false;
-    const claudeMdPath = path.join(workspacePath, 'CLAUDE.md');
-    try {
-      const claudeMdContent = this.getClaudeMdContent();
-      fs.writeFileSync(claudeMdPath, claudeMdContent, 'utf-8');
-      claudeMdUpdated = true;
-      this.log(`Updated CLAUDE.md`);
-    } catch (error) {
-      this.log(`Failed to update CLAUDE.md: ${error}`);
-    }
-
-    if (copied.length === 0) {
-      return {
-        success: false,
-        message: 'No skills copied',
-        copied: [],
-        claudeMdUpdated,
-      };
-    }
-
-    return {
-      success: true,
-      message: `Copied ${copied.length} skill(s) to .claude/skills/`,
-      copied,
-      claudeMdUpdated,
-    };
-  }
-
-  /**
-   * Recursively copy directory
-   */
-  private copyDirectoryRecursive(source: string, target: string): void {
-    // Create target directory
-    if (!fs.existsSync(target)) {
-      fs.mkdirSync(target, { recursive: true });
-    }
-
-    // Read source directory
-    const items = fs.readdirSync(source);
-
-    for (const item of items) {
-      const sourcePath = path.join(source, item);
-      const targetPath = path.join(target, item);
-      const stat = fs.statSync(sourcePath);
-
-      if (stat.isDirectory()) {
-        // Recursively copy subdirectory
-        this.copyDirectoryRecursive(sourcePath, targetPath);
-      } else if (stat.isFile()) {
-        // Copy file
-        fs.copyFileSync(sourcePath, targetPath);
-      }
-    }
-  }
-
-  /**
    * Initialize custom modules using agentsociety2 CLI
    *
    * Note: This requires agentsociety2 to be installed in the Python environment
@@ -545,40 +402,6 @@ export class WorkspaceManager {
   }
 
   /**
-   * Get skills status in workspace
-   */
-  getSkillsStatus(): {
-    skillsDirExists: boolean;
-    installedSkills: string[];
-  } {
-    const workspacePath = this.getWorkspacePath();
-    if (!workspacePath) {
-      return {
-        skillsDirExists: false,
-        installedSkills: [],
-      };
-    }
-
-    const skillsDir = path.join(workspacePath, '.claude', 'skills');
-
-    if (!fs.existsSync(skillsDir)) {
-      return {
-        skillsDirExists: false,
-        installedSkills: [],
-      };
-    }
-
-    const installedSkills = fs.readdirSync(skillsDir).filter(f =>
-      fs.statSync(path.join(skillsDir, f)).isFile()
-    );
-
-    return {
-      skillsDirExists: true,
-      installedSkills,
-    };
-  }
-
-  /**
    * Update .gitignore to exclude .env file
    */
   private updateGitignore(gitignorePath: string): void {
@@ -649,9 +472,6 @@ The workspace \`.env\` file contains \`PYTHON_PATH\` pointing to the Python envi
 # Read PYTHON_PATH from .env (with fallback to python3)
 PYTHON_PATH=$(grep "^PYTHON_PATH=" .env | cut -d'=' -f2)
 PYTHON_PATH=\${PYTHON_PATH:-python3}
-
-# Use this Python for ALL skill invocations
-$PYTHON_PATH .claude/skills/agentsociety-hypothesis/scripts/hypothesis.py list
 \`\`\`
 
 ### Why PYTHON_PATH Matters
@@ -789,22 +609,11 @@ When interacting with users:
 
 ---
 
-## Essential Commands
+## Skills Notes
 
-\`\`\`bash
-# Always use PYTHON_PATH from .env
-PYTHON_PATH=$(grep "^PYTHON_PATH=" .env | cut -d'=' -f2)
-PYTHON_PATH=\${PYTHON_PATH:-python3}
-
-# List available modules
-$PYTHON_PATH .claude/skills/agentsociety-scan-modules/scripts/scan_modules.py list
-
-# List hypotheses
-$PYTHON_PATH .claude/skills/agentsociety-hypothesis/scripts/hypothesis.py list
-
-# Run experiment
-$PYTHON_PATH .claude/skills/agentsociety-run-experiment/scripts/run.py start --hypothesis-id 1 --experiment-id 1
-\`\`\`
+- Use the VSCode extension tree view to browse:
+  - **Agent Skills** (backend-managed, supports import/reload)
+  - **AgentSociety Skills** (extension bundled, read-only)
 `;
   }
 

@@ -8,17 +8,30 @@ JUDGMENT_XML = (
     "<should_retry>false</should_retry><retry_instruction>...</retry_instruction></judgment>"
 )
 
-# 报告生成 XML 格式
+# 报告生成 XML 格式（中英双语各一份 Markdown + HTML，图表路径与 assets 引用保持一致）
 REPORT_XML = (
-    "<report><markdown><![CDATA[full Markdown]]></markdown>"
-    "<html><![CDATA[full HTML document]]></html></report>"
+    "<report>"
+    "<markdown_zh><![CDATA[Chinese Markdown]]></markdown_zh>"
+    "<html_zh><![CDATA[Chinese full HTML document]]></html_zh>"
+    "<markdown_en><![CDATA[English Markdown]]></markdown_en>"
+    "<html_en><![CDATA[English full HTML document]]></html_en>"
+    "</report>"
 )
 
-# 报告裁判 XML（含是否包含 Markdown/HTML）
+# 报告裁判 XML
 REPORT_JUDGMENT_XML = (
     "<judgment><success>true</success><reason>...</reason>"
-    "<has_markdown>true</has_markdown><has_html>true</has_html>"
+    "<has_markdown_zh>true</has_markdown_zh><has_html_zh>true</has_html_zh>"
+    "<has_markdown_en>true</has_markdown_en><has_html_en>true</has_html_en>"
     "<should_retry>false</should_retry><retry_instruction>...</retry_instruction></judgment>"
+)
+
+# 上下文摘要 XML 格式
+SUMMARY_XML = (
+    "<summary><key_findings><item>...</item></key_findings>"
+    "<failed_attempts><item>...</item></failed_attempts>"
+    "<successful_tools><item>...</item></successful_tools>"
+    "<recommendations>...</recommendations></summary>"
 )
 
 
@@ -29,12 +42,22 @@ def judgment_prompt(suffix: str = "") -> str:
 
 def report_xml_instruction() -> str:
     """返回报告生成的 XML 要求。"""
-    return f"**Must** return only XML: {REPORT_XML}"
+    return (
+        f"**Must** return only XML: {REPORT_XML} "
+        "Chinese sections use professional 简体中文; English sections are full English. "
+        "Both locales must embed the same charts using the same relative paths "
+        '(e.g. `assets/file.png`).'
+    )
 
 
 def report_judgment_prompt() -> str:
     """返回报告裁判的 XML 要求。"""
     return f"Return only XML: {REPORT_JUDGMENT_XML}"
+
+
+def summary_xml_contract() -> str:
+    """返回上下文摘要的 XML 要求。"""
+    return f"Return only XML: {SUMMARY_XML}"
 
 
 def analysis_xml_contract() -> str:

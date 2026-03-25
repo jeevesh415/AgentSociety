@@ -1,3 +1,10 @@
+---
+name: xml_contract
+priority: 0
+description: Strict XML output contract for analysis, judgment, and report generation.
+required: true
+---
+
 # XML Output Contract (Strict)
 
 - Return only XML requested by the prompt; do not output JSON.

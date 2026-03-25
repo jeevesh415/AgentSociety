@@ -7,15 +7,9 @@ from __future__ import annotations
 
 import json
 import httpx
-from datetime import datetime
 from pathlib import Path
 from typing import Any, Dict, List, Optional
 
-from agentsociety2.skills.paper.models import (
-    PaperMetadata,
-    PaperGenerationRequest,
-    PaperGenerationResult,
-)
 from agentsociety2.config.config import Config
 from agentsociety2.logger import get_logger
 

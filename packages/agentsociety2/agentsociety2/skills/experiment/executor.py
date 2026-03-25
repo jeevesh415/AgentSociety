@@ -11,7 +11,6 @@ from __future__ import annotations
 
 import asyncio
 import json
-import logging
 from datetime import datetime
 from pathlib import Path
 from typing import Any, Dict, List, Optional, Union
@@ -99,7 +98,7 @@ class ExperimentExecutor:
             timestamp = datetime.now().strftime("%Y%m%d_%H%M%S_%f")[:-3]
             log_file = self._log_dir / f"{timestamp}_console.log"
             self._console_log_file = log_file
-            logger.debug(f"Console logs output to stdout (file logging disabled)")
+            logger.debug("Console logs output to stdout (file logging disabled)")
         except Exception as e:
             logger.warning(f"Failed to setup console logging: {e}")
 

@@ -138,7 +138,20 @@ const translations: Record<string, Record<string, string>> = {
 
     // projectStructureProvider.ts - settings
     'projectStructure.settings': '配置设置',
-    'projectStructure.syncResources': '同步 AI 助手资源',
+    'projectStructure.agentSkills': 'Agent Skills',
+    'projectStructure.extensionSkills': 'AgentSociety Skills',
+    'projectStructure.agentSkillsScan': '扫描 Skills',
+    'projectStructure.agentSkillsImport': '导入 Skill',
+    'projectStructure.agentSkillsBuiltin': '内置 Skills',
+    'projectStructure.agentSkillsCustom': '自定义 Skills',
+    'projectStructure.agentSkillsEmpty': '暂无 Skills，点击扫描或导入',
+    'projectStructure.skillEnabled': '已启用',
+    'projectStructure.skillDisabled': '已禁用',
+    'projectStructure.skillPriority': '优先级',
+    'projectStructure.skillRemove': '删除 Skill',
+    'projectStructure.skillRemoveConfirm': '确定要删除自定义 Skill "{0}" 吗？此操作无法撤销。',
+    'projectStructure.skillImportLocal': '从本地目录导入 Skill',
+    'projectStructure.skillImportPlaceholder': '选择 Skill 导入方式',
 
     // backendManager.ts
     'backendManager.openSettings': '打开设置',
@@ -198,6 +211,9 @@ const translations: Record<string, Record<string, string>> = {
     'projectStructure.reportHtmlEn': 'English HTML Report',
     'projectStructure.reportMdEn': 'English Markdown Report',
     'projectStructure.openReplay': '打开回放',
+    'projectStructure.literatureIndex': '文献索引',
+    'projectStructure.articles': '篇文献',
+    'projectStructure.files': '个文件',
   },
   'en-US': {
     // extension.ts
@@ -328,7 +344,20 @@ const translations: Record<string, Record<string, string>> = {
 
     // projectStructureProvider.ts - settings
     'projectStructure.settings': 'Settings',
-    'projectStructure.syncResources': 'Sync AI Assistant Resources',
+    'projectStructure.agentSkills': 'Agent Skills',
+    'projectStructure.extensionSkills': 'AgentSociety Skills',
+    'projectStructure.agentSkillsScan': 'Scan Skills',
+    'projectStructure.agentSkillsImport': 'Import Skill',
+    'projectStructure.agentSkillsBuiltin': 'Built-in Skills',
+    'projectStructure.agentSkillsCustom': 'Custom Skills',
+    'projectStructure.agentSkillsEmpty': 'No Skills found. Click to scan or import.',
+    'projectStructure.skillEnabled': 'Enabled',
+    'projectStructure.skillDisabled': 'Disabled',
+    'projectStructure.skillPriority': 'Priority',
+    'projectStructure.skillRemove': 'Remove Skill',
+    'projectStructure.skillRemoveConfirm': 'Are you sure you want to remove custom skill "{0}"? This action cannot be undone.',
+    'projectStructure.skillImportLocal': 'Import Skill from local directory',
+    'projectStructure.skillImportPlaceholder': 'Select Skill import method',
 
     // backendManager.ts
     'backendManager.openSettings': 'Open Settings',
@@ -388,6 +417,9 @@ const translations: Record<string, Record<string, string>> = {
     'projectStructure.reportHtmlEn': 'English HTML Report',
     'projectStructure.reportMdEn': 'English Markdown Report',
     'projectStructure.openReplay': 'Open Replay',
+    'projectStructure.literatureIndex': 'Literature Index',
+    'projectStructure.articles': 'articles',
+    'projectStructure.files': 'files',
   },
 };
 

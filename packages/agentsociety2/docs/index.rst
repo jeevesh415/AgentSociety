@@ -85,6 +85,7 @@ AgentSociety 2
    :caption: 用户指南:
 
    agents
+   agent_skills
    env_modules
    storage
    custom_modules
@@ -101,6 +102,7 @@ AgentSociety 2
    :maxdepth: 2
    :caption: 参考:
 
+   api/index
    examples
 
 链接

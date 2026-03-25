@@ -1,7 +1,7 @@
 """SQLModel definitions for replay data storage."""
 
 from datetime import datetime
-from typing import Any, Dict, List, Optional
+from typing import Any, Dict, Optional
 
 from sqlalchemy import JSON, Column
 from sqlmodel import Field, SQLModel

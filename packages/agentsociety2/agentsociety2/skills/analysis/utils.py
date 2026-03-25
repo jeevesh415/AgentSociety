@@ -6,6 +6,7 @@
 import re
 import sqlite3
 import xml.etree.ElementTree as ET
+from dataclasses import dataclass
 from pathlib import Path
 from typing import Any, Awaitable, Callable, Dict, List, Optional, TypeVar, Type
 
@@ -45,6 +46,17 @@ class XmlParseError(Exception):
 
 _SKILLS_DIR = Path(__file__).resolve().parent / "skills"
 T = TypeVar("T", bound=BaseModel)
+
+
+@dataclass(frozen=True)
+class AnalysisSkillMeta:
+    """Analysis prompt-skill metadata used for explicit selection."""
+
+    name: str
+    priority: int
+    description: str
+    path: Path
+    required: bool = False  # If True, always loaded regardless of selection
 
 
 def _sanitize_id(raw: str) -> str:
@@ -102,14 +114,121 @@ def presentation_paths(
     )
 
 
-def get_analysis_skills() -> str:
-    """从 skills/ 目录按文件名顺序加载所有 .md 技能文件。"""
+def _parse_skill_frontmatter(path: Path) -> Dict[str, Any]:
+    """Parse YAML-like frontmatter from markdown skill files.
+
+    Supported keys: name, priority, description, required.
+    """
+    if not path.exists():
+        return {}
+    try:
+        content = path.read_text(encoding="utf-8")
+    except Exception:
+        return {}
+
+    lines = content.splitlines()
+    if len(lines) < 3 or lines[0].strip() != "---":
+        return {}
+
+    result: Dict[str, Any] = {}
+    for line in lines[1:]:
+        s = line.strip()
+        if s == "---":
+            break
+        if not s or ":" not in s:
+            continue
+        key, value = s.split(":", 1)
+        k = key.strip()
+        v = value.strip().strip('"').strip("'")
+        if k == "priority":
+            try:
+                result[k] = int(v)
+            except ValueError:
+                continue
+        elif k == "required":
+            result[k] = v.lower() in ("true", "yes", "1")
+        else:
+            result[k] = v
+    return result
+
+
+def list_analysis_skills() -> List[AnalysisSkillMeta]:
+    """Discover analysis prompt-skills and return metadata only.
+
+    This function is metadata-only and does not load full markdown skill bodies.
+    """
+    result: List[AnalysisSkillMeta] = []
+    if not _SKILLS_DIR.exists():
+        return result
+
+    for idx, path in enumerate(sorted(_SKILLS_DIR.glob("*.md"))):
+        meta = _parse_skill_frontmatter(path)
+        name = meta.get("name") or path.stem
+        priority = int(meta.get("priority", idx + 1))
+        description = meta.get("description", "")
+        required = meta.get("required", False)
+        result.append(
+            AnalysisSkillMeta(
+                name=name,
+                priority=priority,
+                description=description,
+                path=path,
+                required=required,
+            )
+        )
+
+    result.sort(key=lambda x: (x.priority, x.name))
+    return result
+
+
+def get_analysis_skills(
+    selected_names: Optional[List[str]] = None,
+    strict_selection: bool = True,
+) -> str:
+    """Load selected analysis prompt-skills.
+
+    strict_selection=True means only explicitly selected skills will be loaded.
+    Required skills are ALWAYS loaded regardless of selection.
+    If no skills are selected and no required skills exist, returns empty string.
+    """
+    metas = list_analysis_skills()
+    if not metas:
+        return ""
+
+    # Always include required skills
+    required_skills = [m for m in metas if m.required]
+    selected_set = set(selected_names or [])
+
+    if strict_selection:
+        # In strict mode: load required + explicitly selected
+        targets = required_skills + [
+            m for m in metas if m.name in selected_set and not m.required
+        ]
+    else:
+        # In non-strict mode: load all if no selection, or required + selected
+        if not selected_set:
+            targets = metas
+        else:
+            targets = required_skills + [
+                m for m in metas if m.name in selected_set and not m.required
+            ]
+
+    # Remove duplicates while preserving order
+    seen = set()
+    unique_targets: List[AnalysisSkillMeta] = []
+    for m in targets:
+        if m.name not in seen:
+            seen.add(m.name)
+            unique_targets.append(m)
+
+    # Sort by priority
+    unique_targets.sort(key=lambda x: (x.priority, x.name))
+
     parts: List[str] = []
-    if _SKILLS_DIR.exists():
-        for p in sorted(_SKILLS_DIR.glob("*.md")):
-            txt = p.read_text(encoding="utf-8").strip()
-            if txt:
-                parts.append(txt)
+    for m in unique_targets:
+        txt = m.path.read_text(encoding="utf-8").strip()
+        if txt:
+            parts.append(txt)
     return "\n\n---\n\n".join(parts).strip()
 
 
@@ -227,16 +346,27 @@ def parse_llm_json_response(content: str) -> Dict[str, Any]:
 
 
 def parse_llm_report_response(content: str) -> Dict[str, str]:
-    """
-    解析报告类 LLM 输出，仅支持 XML 格式。
-    格式：<report><markdown><![CDATA[...]]></markdown><html><![CDATA[...]]></html></report>
-    CDATA 便于嵌入 HTML，无需转义。
-    解析失败（含 xenon 修复后仍失败）则抛出 XmlParseError，由调用方触发 LLM 重试。
+    """解析报告类 LLM 输出（XML 格式），支持双语和单语两种 tag 结构。
+
+    双语格式（优先）::
+        <report>
+          <markdown_zh><![CDATA[...]]></markdown_zh>
+          <html_zh><![CDATA[...]]></html_zh>
+          <markdown_en><![CDATA[...]]></markdown_en>
+          <html_en><![CDATA[...]]></html_en>
+        </report>
+
+    单语兼容格式::
+        <report>
+          <markdown><![CDATA[...]]></markdown>
+          <html><![CDATA[...]]></html>
+        </report>
+
+    Returns dict with keys: markdown_zh, html_zh, markdown_en, html_en, markdown, html.
     """
     raw = (content or "").strip()
     if not raw:
         raise XmlParseError("Empty report content", raw_content=content)
-    # 从代码块提取 XML（若 LLM 包在 ```xml 中）
     xml_str = raw
     if "```" in raw:
         for part in raw.split("```"):
@@ -245,15 +375,36 @@ def parse_llm_report_response(content: str) -> Dict[str, str]:
                 xml_str = s
                 break
     root = _parse_xml_to_root(xml_str)
-    md_el = root.find(".//markdown")
-    if md_el is None:
-        md_el = root.find("markdown")
-    html_el = root.find(".//html")
-    if html_el is None:
-        html_el = root.find("html")
-    md = "".join((md_el.itertext() if md_el is not None else []))
-    html = "".join((html_el.itertext() if html_el is not None else []))
-    return {"markdown": md.strip(), "html": html.strip()}
+
+    def _text(tag: str) -> str:
+        el = root.find(f".//{tag}")
+        if el is None:
+            el = root.find(tag)
+        return "".join(el.itertext()).strip() if el is not None else ""
+
+    md_zh = _text("markdown_zh")
+    html_zh = _text("html_zh")
+    md_en = _text("markdown_en")
+    html_en = _text("html_en")
+    md_plain = _text("markdown")
+    html_plain = _text("html")
+
+    # 单语 fallback：若双语 tag 全空但单语有内容，复制到双语字段
+    if not md_zh and not md_en and md_plain:
+        md_zh = md_plain
+        md_en = md_plain
+    if not html_zh and not html_en and html_plain:
+        html_zh = html_plain
+        html_en = html_plain
+
+    return {
+        "markdown_zh": md_zh,
+        "html_zh": html_zh,
+        "markdown_en": md_en,
+        "html_en": html_en,
+        "markdown": md_zh or md_en or md_plain,
+        "html": html_zh or html_en or html_plain,
+    }
 
 
 # ---------- 先读结构再处理：DB schema 与实验文件 ----------

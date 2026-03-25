@@ -19,6 +19,7 @@ export default {
         demoUser: '示例用户',
         bill: '账单',
         profiles: '智能体画像',
+        skills: 'Agent Skills',
     },
     common: {
         name: "名称",

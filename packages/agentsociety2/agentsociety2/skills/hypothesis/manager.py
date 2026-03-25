@@ -16,7 +16,6 @@ if TYPE_CHECKING:
 from pydantic import ValidationError
 
 from agentsociety2.skills.hypothesis.models import (
-    HypothesisModel,
     ExperimentGroupModel,
     HypothesisDataModel,
 )
@@ -484,7 +483,7 @@ def get_hypothesis(
         ),
         "hypothesis_id": hyp_id,
         "path": str(hyp_dir.relative_to(workspace_path)),
-        "content": hypothesis_content,
+        "hypothesis_content": hypothesis_content,
         "sim_settings": sim_settings_data,
         "experiments": sorted(experiment_dirs),
     }

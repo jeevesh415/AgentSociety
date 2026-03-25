@@ -1,5 +1,33 @@
-"""
-Create logger named agentsociety as singleton for ray.
+"""日志模块 - 提供统一的日志配置和管理。
+
+本模块提供 agentsociety 项目的日志功能：
+
+主要函数
+--------
+
+- **get_logger**: 获取 agentsociety logger 单例
+- **set_logger_level**: 设置日志级别
+- **setup_logging**: 完整的日志配置（控制台 + 文件）
+- **setup_litellm_logging**: 配置 LiteLLM 日志集成
+
+特性
+----
+
+- 彩色控制台输出（按日志级别着色）
+- INFO 级别超长日志自动截断
+- 支持文件日志输出
+- LiteLLM API 调用日志集成
+
+使用示例::
+
+    from agentsociety2.logger import get_logger, setup_logging
+
+    # 简单使用
+    logger = get_logger()
+    logger.info("Hello, world!")
+
+    # 完整配置
+    setup_logging(log_file="app.log", log_level=logging.DEBUG)
 """
 
 import json

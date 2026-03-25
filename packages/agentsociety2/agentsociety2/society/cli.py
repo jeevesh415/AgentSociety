@@ -4,8 +4,6 @@ import argparse
 import asyncio
 import json
 import os
-import signal
-import socket
 import sqlite3
 import sys
 import yaml

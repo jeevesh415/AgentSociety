@@ -147,7 +147,30 @@ async def get_experiment_info(
     experiment_id: str,
     workspace_path: str = Query(..., description="Workspace directory path"),
 ) -> ExperimentInfo:
-    """获取实验基本信息"""
+    """
+    获取实验基本信息
+
+    返回指定实验的基本信息，包括状态、时间、Agent数量等。
+
+    Args:
+        hypothesis_id: 假设ID，用于定位实验所属的假设目录
+        experiment_id: 实验ID，用于定位具体的实验目录
+        workspace_path: 工作区根目录路径
+
+    Returns:
+        ExperimentInfo: 实验基本信息对象，包含：
+            - experiment_id: 实验ID
+            - hypothesis_id: 假设ID
+            - status: 实验状态 (not_started/running/completed/failed)
+            - start_time: 开始时间
+            - end_time: 结束时间
+            - agent_count: Agent数量
+            - step_count: 已执行步骤数
+
+    Raises:
+        HTTPException: 404 - 实验目录不存在
+        HTTPException: 500 - 数据库查询失败
+    """
     workspace = Path(workspace_path)
     exp_path = _get_experiment_path(workspace, hypothesis_id, experiment_id)
 
@@ -218,7 +241,25 @@ async def get_timeline(
     experiment_id: str,
     workspace_path: str = Query(..., description="Workspace directory path"),
 ) -> List[TimePoint]:
-    """获取实验时间线（所有记录的时间点）"""
+    """
+    获取实验时间线
+
+    返回实验所有记录的时间点，用于在时间轴上展示实验进度。
+
+    Args:
+        hypothesis_id: 假设ID
+        experiment_id: 实验ID
+        workspace_path: 工作区根目录路径
+
+    Returns:
+        List[TimePoint]: 时间点列表，每个时间点包含：
+            - day: 模拟天数（从0开始）
+            - t: 当天秒数 (0-86400)
+            - timestamp: ISO格式的时间戳字符串
+
+    Raises:
+        HTTPException: 404 - 数据库不存在（实验未运行）
+    """
     workspace = Path(workspace_path)
     exp_path = _get_experiment_path(workspace, hypothesis_id, experiment_id)
     db_file = exp_path / "run" / "sqlite.db"
@@ -263,7 +304,25 @@ async def get_agents(
     experiment_id: str,
     workspace_path: str = Query(..., description="Workspace directory path"),
 ) -> List[AgentProfile]:
-    """获取所有agent的配置信息"""
+    """
+    获取所有Agent的配置信息
+
+    返回实验中所有Agent的配置文件信息。
+
+    Args:
+        hypothesis_id: 假设ID
+        experiment_id: 实验ID
+        workspace_path: 工作区根目录路径
+
+    Returns:
+        List[AgentProfile]: Agent配置列表，每个配置包含：
+            - id: Agent唯一标识符
+            - name: Agent名称
+            - profile: Agent详细配置字典
+
+    Raises:
+        HTTPException: 404 - 数据库不存在
+    """
     workspace = Path(workspace_path)
     exp_path = _get_experiment_path(workspace, hypothesis_id, experiment_id)
     db_file = exp_path / "run" / "sqlite.db"
@@ -311,10 +370,35 @@ async def get_agent_status(
     t: Optional[int] = Query(None, description="Time within day (seconds, 0-86400)"),
 ) -> List[AgentStatus]:
     """
-    获取指定agent的状态历史
+    获取指定Agent的状态历史
 
-    如果指定day和t，返回该时刻的状态；
-    否则返回所有状态历史。
+    返回指定Agent在实验中的状态变化记录。
+
+    Args:
+        hypothesis_id: 假设ID
+        experiment_id: 实验ID
+        agent_id: Agent的唯一标识符
+        workspace_path: 工作区根目录路径
+        day: 可选，指定查询的模拟天数（0-indexed）
+        t: 可选，指定查询的当天秒数（0-86400），与day配合使用
+
+    Returns:
+        List[AgentStatus]: Agent状态列表，每个状态包含：
+            - id: Agent ID
+            - day: 模拟天数
+            - t: 当天秒数
+            - lng: 经度坐标（如果有位置信息）
+            - lat: 纬度坐标（如果有位置信息）
+            - parent_id: 父Agent ID（如果有）
+            - action: 当前动作
+            - status: 状态详情字典
+
+    Note:
+        如果指定了day和t参数，返回该时刻附近的状态（允许1分钟误差）；
+        否则返回所有历史状态记录。
+
+    Raises:
+        HTTPException: 404 - 数据库不存在
     """
     workspace = Path(workspace_path)
     exp_path = _get_experiment_path(workspace, hypothesis_id, experiment_id)
@@ -387,7 +471,30 @@ async def get_step_executions(
     experiment_id: str,
     workspace_path: str = Query(..., description="Workspace directory path"),
 ) -> List[StepExecution]:
-    """获取步骤执行记录"""
+    """
+    获取步骤执行记录
+
+    返回实验中所有步骤的执行记录，包括ask、intervene、step等操作。
+
+    Args:
+        hypothesis_id: 假设ID
+        experiment_id: 实验ID
+        workspace_path: 工作区根目录路径
+
+    Returns:
+        List[StepExecution]: 步骤执行记录列表，每条记录包含：
+            - id: 记录ID
+            - step_index: 步骤索引
+            - step_type: 步骤类型 (ask/intervene/step)
+            - step_config: 步骤配置参数
+            - start_time: 开始时间
+            - end_time: 结束时间
+            - success: 是否成功执行
+            - result: 执行结果
+
+    Raises:
+        HTTPException: 404 - 数据库不存在
+    """
     workspace = Path(workspace_path)
     exp_path = _get_experiment_path(workspace, hypothesis_id, experiment_id)
     db_file = exp_path / "run" / "sqlite.db"
@@ -442,7 +549,26 @@ async def get_latest_state(
     experiment_id: str,
     workspace_path: str = Query(..., description="Workspace directory path"),
 ) -> Dict[str, Any]:
-    """获取实验最新状态数据"""
+    """
+    获取实验最新状态数据
+
+    返回实验的最新完整状态，包括所有Agent的当前状态。
+
+    Args:
+        hypothesis_id: 假设ID
+        experiment_id: 实验ID
+        workspace_path: 工作区根目录路径
+
+    Returns:
+        Dict[str, Any]: 最新状态数据，包含：
+            - timestamp: 记录时间戳
+            - current_time: 当前模拟时间
+            - step_count: 已执行步骤数
+            - state: 完整状态数据（包含所有Agent信息）
+
+    Raises:
+        HTTPException: 404 - 数据库不存在或无状态数据
+    """
     workspace = Path(workspace_path)
     exp_path = _get_experiment_path(workspace, hypothesis_id, experiment_id)
     db_file = exp_path / "run" / "sqlite.db"
@@ -477,7 +603,22 @@ async def list_artifacts(
     experiment_id: str,
     workspace_path: str = Query(..., description="Workspace directory path"),
 ) -> List[Dict[str, str]]:
-    """列出实验产出文件"""
+    """
+    列出实验产出文件
+
+    返回实验运行过程中生成的所有产出文件列表（如ask/intervene结果）。
+
+    Args:
+        hypothesis_id: 假设ID
+        experiment_id: 实验ID
+        workspace_path: 工作区根目录路径
+
+    Returns:
+        List[Dict[str, str]]: 产出文件列表，每个文件包含：
+            - name: 文件名
+            - path: 文件绝对路径
+            - type: 文件类型 (ask/intervene)
+    """
     workspace = Path(workspace_path)
     exp_path = _get_experiment_path(workspace, hypothesis_id, experiment_id)
     artifacts_dir = exp_path / "run" / "artifacts"
@@ -505,7 +646,25 @@ async def get_artifact(
     artifact_name: str,
     workspace_path: str = Query(..., description="Workspace directory path"),
 ) -> Dict[str, str]:
-    """获取指定产出文件内容"""
+    """
+    获取指定产出文件内容
+
+    返回指定产出文件的完整内容。
+
+    Args:
+        hypothesis_id: 假设ID
+        experiment_id: 实验ID
+        artifact_name: 产出文件名（如 ask_0.md, intervene_1.md）
+        workspace_path: 工作区根目录路径
+
+    Returns:
+        Dict[str, str]: 文件内容，包含：
+            - name: 文件名
+            - content: 文件完整内容（Markdown格式）
+
+    Raises:
+        HTTPException: 404 - 文件不存在
+    """
     workspace = Path(workspace_path)
     exp_path = _get_experiment_path(workspace, hypothesis_id, experiment_id)
     artifact_path = exp_path / "run" / "artifacts" / artifact_name

@@ -1,6 +1,32 @@
-"""
-Base class for Router implementations in AgentSociety V2.
-This module provides the abstract interface for different routing strategies.
+"""环境路由器基类模块。
+
+本模块提供环境路由器的抽象基类 :class:`RouterBase`，用于协调智能体与环境模块之间的交互。
+
+路由器负责：
+
+- **请求路由**: 将智能体的请求路由到合适的环境模块
+- **工具管理**: 收集和过滤环境模块提供的工具
+- **LLM 调用**: 提供统一的 LLM 调用接口，支持重试和速率限制处理
+- **状态管理**: 管理仿真时间和 token 使用统计
+
+内置路由器实现：
+
+- :class:`~agentsociety2.env.ReActRouter` — ReAct 模式的路由器
+- :class:`~agentsociety2.env.PlanExecuteRouter` — 计划执行模式路由器
+- :class:`~agentsociety2.env.CodeGenRouter` — 代码生成模式路由器
+
+Example::
+
+    from agentsociety2.env import RouterBase, ReActRouter
+
+    # 创建路由器
+    router = ReActRouter(env_modules=[env1, env2])
+
+    # 初始化
+    await router.init(start_datetime)
+
+    # 执行查询
+    ctx, answer = await router.ask(ctx, "查询天气信息", readonly=True)
 """
 
 import asyncio

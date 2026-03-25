@@ -1,8 +1,46 @@
-"""
-AgentSociety 2: A modern, LLM-native agent simulation platform.
+"""AgentSociety 2 - 现代化的 LLM-native 智能体仿真平台。
 
-This package provides tools for building and simulating LLM-driven agents
-in various environments for social science research.
+本包提供构建和仿真 LLM 驱动智能体的工具，用于社会科学研究。
+
+主要组件
+--------
+
+**Agent 模块**:
+- ``AgentBase``: 智能体抽象基类
+- ``PersonAgent``: skills-first 智能体
+
+**Env 模块**:
+- ``EnvBase``: 环境模块基类
+- ``RouterBase``: 路由器基类
+- ``ReActRouter``: ReAct 范式路由器
+- ``PlanExecuteRouter``: 计划-执行路由器
+- ``CodeGenRouter``: 代码生成路由器
+- ``TwoTierReActRouter``: 两层 ReAct 路由器
+- ``TwoTierPlanExecuteRouter``: 两层计划执行路由器
+- ``SearchToolRouter``: 搜索工具路由器
+- ``tool``: 工具装饰器
+
+**Society 模块**:
+- ``AgentSocietyHelper``: 模拟编排助手
+
+**Storage 模块**:
+- ``ReplayWriter``: 回放数据写入器
+
+使用示例::
+
+    from agentsociety2 import AgentBase, PersonAgent, EnvBase, tool
+
+    # 定义自定义环境
+    class MyEnv(EnvBase):
+        @tool(readonly=True)
+        def get_status(self) -> str:
+            return "ok"
+
+    # 定义自定义智能体
+    class MyAgent(AgentBase):
+        async def step(self, tick: int, t) -> str:
+            return "done"
+        # ... 其他抽象方法
 """
 
 __version__ = "2.0.0"
