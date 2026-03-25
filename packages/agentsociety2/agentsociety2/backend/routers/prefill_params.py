@@ -47,10 +47,26 @@ async def get_prefill_params(
     workspace_path: str = Query(..., description="工作区路径"),
 ) -> Dict[str, Any]:
     """
-    获取全局预填充参数（所有类的配置）- 只读
+    获取全局预填充参数
+
+    返回工作区中所有类（Agent和环境模块）的预填充参数配置。
+
+    Args:
+        workspace_path: 工作区根目录路径
 
     Returns:
-        包含所有预填充参数的字典
+        Dict[str, Any]: 预填充参数配置，包含：
+            - success: 是否成功
+            - data: 参数数据，结构为：
+                - version: 配置版本
+                - env_modules: 环境模块预填充参数字典
+                - agents: Agent预填充参数字典
+
+    Raises:
+        HTTPException: 500 - 读取配置文件失败
+
+    Note:
+        如果配置文件不存在，返回空配置结构。
     """
     try:
         prefill_params = _load_prefill_params_file(workspace_path)
@@ -75,15 +91,29 @@ async def get_class_prefill_params(
     workspace_path: str = Query(..., description="工作区路径"),
 ) -> Dict[str, Any]:
     """
-    获取特定类的预填充参数 - 只读
+    获取特定类的预填充参数
+
+    返回指定类（Agent或环境模块）的预填充参数配置。
 
     Args:
-        workspace_path: 工作区路径
-        class_kind: 类类型（env_module 或 agent）
-        class_name: 类名
+        class_kind: 类类型，可选值：
+            - env_module: 环境模块
+            - agent: Agent类
+        class_name: 类名，如 mobility_space, basic_agent 等
+        workspace_path: 工作区根目录路径
 
     Returns:
-        包含特定类预填充参数的字典
+        Dict[str, Any]: 类的预填充参数，包含：
+            - success: 是否成功
+            - class_kind: 类类型
+            - class_name: 类名
+            - params: 该类的预填充参数字典（如无配置则为空字典）
+
+    Raises:
+        HTTPException: 500 - 读取配置文件失败
+
+    Example:
+        GET /api/v1/prefill-params/env_module/mobility_space?workspace_path=/path/to/workspace
     """
     try:
         prefill_params = _load_prefill_params_file(workspace_path)

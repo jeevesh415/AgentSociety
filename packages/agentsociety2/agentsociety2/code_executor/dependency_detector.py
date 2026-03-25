@@ -95,12 +95,31 @@ class DependencyDetector:
         "matplotlib": "matplotlib",
         "seaborn": "seaborn",
         "scipy": "scipy",
+        "statsmodels": "statsmodels",
         "pyodbc": "pyodbc",
         "requests": "requests",
         "httpx": "httpx",
         "tqdm": "tqdm",
         "json5": "json5",
         "pyyaml": "PyYAML",
+        # 网络分析
+        "networkx": "networkx",
+        "community": "python-louvain",
+        # 高级可视化
+        "plotly": "plotly",
+        "bokeh": "bokeh",
+        "altair": "altair",
+        # 地理可视化
+        "folium": "folium",
+        "geopandas": "geopandas",
+        # 机器学习
+        "xgboost": "xgboost",
+        "lightgbm": "lightgbm",
+        # 文本分析
+        "wordcloud": "wordcloud",
+        "textblob": "textblob",
+        # 缺失值分析
+        "missingno": "missingno",
     }
 
     def __init__(self):

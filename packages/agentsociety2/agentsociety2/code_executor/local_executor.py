@@ -93,7 +93,7 @@ class LocalCodeExecutor:
                         )
                         await install_process.wait()
                         if install_process.returncode != 0:
-                            logger.warning(f"依赖安装失败，但继续执行代码")
+                            logger.warning("依赖安装失败，但继续执行代码")
                     except Exception as e:
                         logger.warning(f"依赖安装出错: {e}，但继续执行代码")
 

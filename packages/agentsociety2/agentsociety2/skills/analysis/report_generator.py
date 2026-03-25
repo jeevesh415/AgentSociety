@@ -30,8 +30,12 @@ from .models import (
     FILE_README_MD,
     FILE_REPORT_HTML,
     FILE_REPORT_MD,
+    FILE_REPORT_ZH_MD,
+    FILE_REPORT_ZH_HTML,
+    FILE_REPORT_EN_MD,
+    FILE_REPORT_EN_HTML,
 )
-from .agents import InsightAgent
+from .agents import AnalysisAgent
 from .prompts import report_judgment_prompt, report_xml_instruction
 from .utils import (
     XmlParseError,
@@ -166,10 +170,10 @@ class AssetProcessor:
 class Reporter:
     """报告子智能体：将洞察与图表组装成图文并茂的 Markdown/HTML 报告。"""
 
-    def __init__(self, agent: InsightAgent, config: AnalysisConfig):
+    def __init__(self, agent: AnalysisAgent, config: AnalysisConfig):
         """
         Args:
-            agent: InsightAgent 实例（用于 LLM 生成内容）
+            agent: AnalysisAgent 实例（用于 LLM 生成内容）
             config: 分析配置（必须，用于 max_retries 等）
         """
         self.logger = get_logger()
@@ -188,6 +192,7 @@ class Reporter:
         eda_profile_path: Optional[Path] = None,
         eda_sweetviz_path: Optional[Path] = None,
         quick_stats_md: Optional[str] = None,
+        data_summary: Optional[Any] = None,
         on_progress: AnalysisProgressCallback = None,
     ) -> Tuple[Dict[str, str], bool]:
         """
@@ -196,6 +201,7 @@ class Reporter:
         eda_profile_path: 可选，ydata-profiling EDA 概览路径。
         eda_sweetviz_path: 可选，Sweetviz EDA 报告路径。
         quick_stats_md: 可选，pandas describe 统计摘要（Markdown），供 LLM 参考。
+        data_summary: 可选，DataSummary 对象，用于交叉验证洞察是否基于实际数据。
         Returns: (文件路径字典, report_complete 是否成功)
         """
 
@@ -218,6 +224,7 @@ class Reporter:
                     eda_profile_path,
                     eda_sweetviz_path,
                     quick_stats_md,
+                    data_summary,
                     previous_retry_instruction=last_retry_instruction,
                 )
                 files = {}
@@ -317,6 +324,7 @@ class Reporter:
         eda_profile_path: Optional[Path] = None,
         eda_sweetviz_path: Optional[Path] = None,
         quick_stats_md: Optional[str] = None,
+        data_summary: Optional[Any] = None,
         previous_retry_instruction: Optional[str] = None,
     ) -> ReportContent:
         """构建报告生成 prompt。"""
@@ -328,9 +336,13 @@ class Reporter:
             eda_profile_path,
             eda_sweetviz_path,
             quick_stats_md,
+            data_summary,
             previous_retry_instruction,
         )
-        skills = get_analysis_skills()
+        skills = get_analysis_skills(
+            selected_names=self.config.analysis_skill_names,
+            strict_selection=self.config.analysis_skill_strict_selection,
+        )
         system = (
             f"{skills}\n\n---\n\n"
             "You are an experiment report expert. Based on analysis context and data, **decide** layout, structure, and which charts to include. "
@@ -368,6 +380,7 @@ class Reporter:
         eda_profile_path: Optional[Path] = None,
         eda_sweetviz_path: Optional[Path] = None,
         quick_stats_md: Optional[str] = None,
+        data_summary: Optional[Any] = None,
         previous_retry_instruction: Optional[str] = None,
     ) -> str:
         status_msg = self._get_status_message(context.execution_status.value)
@@ -410,6 +423,33 @@ class Reporter:
                 f"{qs}\n\n"
             )
 
+        # 数据验证区块：确保洞察基于实际数据
+        data_validation_block = ""
+        if data_summary is not None:
+            tables = getattr(data_summary, "tables", [])
+            row_counts = getattr(data_summary, "row_counts", {})
+            total_rows = sum(row_counts.values()) if row_counts else 0
+            non_empty = (
+                [t for t in tables if row_counts.get(t, 0) > 0] if tables else []
+            )
+            empty = [t for t in tables if row_counts.get(t, 0) == 0] if tables else []
+
+            data_validation_block = f"""
+## Data Context (For Cross-Validation)
+
+**CRITICAL**: Ensure the insights below are grounded in ACTUAL data:
+- **Tables**: {tables}
+- **Non-empty tables**: {non_empty}
+- **Empty tables**: {empty}
+- **Total rows**: {total_rows}
+
+**Verification Checklist**:
+- Insights should reference tables/columns that exist in the schema
+- If tables are empty, insights should acknowledge data limitations
+- Numerical claims should match the data statistics
+
+"""
+
         return f"""## Experiment Context
 
 **Experiment ID**: {context.experiment_id}
@@ -442,8 +482,11 @@ class Reporter:
 {retry_block}{literature_block}
 {eda_block}
 {quick_stats_block}
+{data_validation_block}
 
-Based on the above content, generate a professional report. **Decide** which visualizations (if any) support your analysis and embed them where they fit. HTML must be a complete document (DOCTYPE, head, body, styles)."""
+Based on the above content, generate a professional report. **Decide** which visualizations (if any) support your analysis and embed them where they fit. HTML must be a complete document (DOCTYPE, head, body, styles).
+
+**IMPORTANT**: Cross-validate insights against the Data Context section. Do NOT reference tables/columns that don't exist."""
 
     def _format_viz_for_llm(self, processed_assets: Dict[str, Any]) -> str:
         """将图表信息提供给 LLM，仅传路径和标题以控制 prompt 长度（不传 base64）。"""
@@ -467,18 +510,18 @@ Based on the above content, generate a professional report. **Decide** which vis
         return "\n".join(lines)
 
     def _parse_content(self, content: str, context: ExperimentContext) -> ReportContent:
-        """解析 LLM 返回的 XML，获取 markdown 与 html。"""
+        """解析 LLM 返回的 XML，获取中英双语 markdown 与 html。"""
         data = parse_llm_report_response(content)
-        markdown_content = (data.get("markdown") or "").strip()
-        html_content = (data.get("html") or "").strip()
         title = f"Analysis: {context.design.hypothesis}"
         subtitle = f"Experiment {context.experiment_id}"
         return ReportContent(
             title=title,
             subtitle=subtitle,
             format_preference="both",
-            full_content_markdown=markdown_content,
-            full_content_html=html_content,
+            full_content_markdown_zh=(data.get("markdown_zh") or "").strip() or None,
+            full_content_html_zh=(data.get("html_zh") or "").strip() or None,
+            full_content_markdown_en=(data.get("markdown_en") or "").strip() or None,
+            full_content_html_en=(data.get("html_en") or "").strip() or None,
         )
 
     async def _judge_exception(
@@ -535,13 +578,11 @@ Current retry count: {retry_count}/{max_retries}
         """裁判报告生成结果。"""
         md_exists = md_path.exists() and md_path.stat().st_size > 0
         html_exists = html_path.exists() and html_path.stat().st_size > 0
-        has_markdown_content = bool(
-            content.full_content_markdown and content.full_content_markdown.strip()
-        )
-        has_html_content = bool(
-            content.full_content_html and content.full_content_html.strip()
-        )
-        html_preview = (content.full_content_html or "")[:800]
+        md_text = content.full_content_markdown or ""
+        html_text = content.full_content_html or ""
+        has_markdown_content = bool(md_text.strip())
+        has_html_content = bool(html_text.strip())
+        html_preview = html_text[:800]
         num_assets = len(processed_assets) if processed_assets else 0
 
         report_summary = f"""## Report Generation Result
@@ -597,42 +638,45 @@ Evaluate:
         content: ReportContent,
         output_dir: Path,
     ) -> Path:
-        """
-        保存 Markdown 报告。
-
-        Args:
-            content: ReportContent 对象
-            output_dir: 输出目录
-
-        Returns:
-            保存的 Markdown 文件路径
-        """
-        md_file = output_dir / FILE_REPORT_MD
-        md_content = content.full_content_markdown or ""
-        md_file.write_text(md_content, encoding="utf-8")
-        self.logger.info("保存 Markdown 报告: %s", md_file)
-        return md_file
+        """保存中英双语 Markdown 报告。返回中文版路径（主文件）。"""
+        primary_path = output_dir / FILE_REPORT_MD
+        if content.full_content_markdown_zh:
+            zh_path = output_dir / FILE_REPORT_ZH_MD
+            zh_path.write_text(content.full_content_markdown_zh, encoding="utf-8")
+            self.logger.info("保存中文 Markdown 报告: %s", zh_path)
+            # 主文件 → 中文版
+            primary_path.write_text(content.full_content_markdown_zh, encoding="utf-8")
+        if content.full_content_markdown_en:
+            en_path = output_dir / FILE_REPORT_EN_MD
+            en_path.write_text(content.full_content_markdown_en, encoding="utf-8")
+            self.logger.info("保存英文 Markdown 报告: %s", en_path)
+            if not content.full_content_markdown_zh:
+                primary_path.write_text(content.full_content_markdown_en, encoding="utf-8")
+        if not content.full_content_markdown_zh and not content.full_content_markdown_en:
+            primary_path.write_text("", encoding="utf-8")
+        return primary_path
 
     async def _save_html(
         self,
         content: ReportContent,
         output_dir: Path,
     ) -> Path:
-        """
-        保存 HTML 报告。
-
-        Args:
-            content: ReportContent 对象
-            output_dir: 输出目录
-
-        Returns:
-            保存的 HTML 文件路径
-        """
-        html_file = output_dir / FILE_REPORT_HTML
-        html_content = content.full_content_html or ""
-        html_file.write_text(html_content, encoding="utf-8")
-        self.logger.info("保存 HTML 报告: %s", html_file)
-        return html_file
+        """保存中英双语 HTML 报告。返回中文版路径（主文件）。"""
+        primary_path = output_dir / FILE_REPORT_HTML
+        if content.full_content_html_zh:
+            zh_path = output_dir / FILE_REPORT_ZH_HTML
+            zh_path.write_text(content.full_content_html_zh, encoding="utf-8")
+            self.logger.info("保存中文 HTML 报告: %s", zh_path)
+            primary_path.write_text(content.full_content_html_zh, encoding="utf-8")
+        if content.full_content_html_en:
+            en_path = output_dir / FILE_REPORT_EN_HTML
+            en_path.write_text(content.full_content_html_en, encoding="utf-8")
+            self.logger.info("保存英文 HTML 报告: %s", en_path)
+            if not content.full_content_html_zh:
+                primary_path.write_text(content.full_content_html_en, encoding="utf-8")
+        if not content.full_content_html_zh and not content.full_content_html_en:
+            primary_path.write_text("", encoding="utf-8")
+        return primary_path
 
     def _embed_charts_in_html(
         self,
@@ -744,8 +788,9 @@ Evaluate:
 
 ## Files
 
-- `report.md` - Markdown report
-- `report.html` - HTML report (unified: analysis + embedded EDA if available)
+- `report.md` / `report.html` - Default report (Chinese preferred)
+- `report_zh.md` / `report_zh.html` - Chinese report
+- `report_en.md` / `report_en.html` - English report
 - `data/analysis_summary.json` - Analysis summary
 - `data/eda_profile.html` - EDA (ydata-profiling), when generated
 - `data/eda_sweetviz.html` - EDA (Sweetviz), when generated

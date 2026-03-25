@@ -4,8 +4,6 @@
 将生成的代码保存到文件。
 """
 
-import os
-from datetime import datetime
 from pathlib import Path
 from typing import Optional
 

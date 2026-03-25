@@ -4,6 +4,7 @@ import { SearchOutlined, ReloadOutlined, PlayCircleOutlined, CheckCircleOutlined
 import { useTranslation } from 'react-i18next';
 import type { VSCodeAPI, ClassInfo, AvailableClasses, PrefillParams } from './types';
 import { MarkdownRenderer } from '../components/MarkdownRenderer';
+import { JsonViewer } from '../components/JsonViewer';
 import '../i18n';
 
 const { Title, Text, Paragraph } = Typography;
@@ -446,11 +447,14 @@ export const PrefillParamsApp: React.FC<PrefillParamsAppProps> = ({ vscode }) =>
                     showIcon
                   />
                 ) : (
-                  <Card>
-                    <pre style={{ margin: 0, whiteSpace: 'pre-wrap', wordBreak: 'break-word' }}>
-                      {JSON.stringify(selectedClass.params, null, 2)}
-                    </pre>
-                  </Card>
+                  <JsonViewer
+                    data={selectedClass.params}
+                    isDark={isDark}
+                    showCopy={true}
+                    showExpandCollapse={true}
+                    defaultExpandDepth={2}
+                    maxHeight="400px"
+                  />
                 )}
               </div>
             </div>

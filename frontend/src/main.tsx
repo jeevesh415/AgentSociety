@@ -23,6 +23,7 @@ import './i18n'
 import { useTranslation } from 'react-i18next'
 import Bill from './pages/Bill'
 import AgentTemplateForm from './pages/AgentTemplate/AgentTemplateForm'
+import Skills from './pages/Skills'
 import { WITH_AUTH } from './components/fetch'
 
 const authProvider = (children: React.ReactNode) => {
@@ -146,6 +147,14 @@ const router = createBrowserRouter([
         element: (
             authProvider(
                 <RootLayout selectedKey='/agent-templates'><AgentTemplateForm /></RootLayout>
+            )
+        ),
+    },
+    {
+        path: "/skills",
+        element: (
+            authProvider(
+                <RootLayout selectedKey='/skills'><Skills /></RootLayout>
             )
         ),
     },

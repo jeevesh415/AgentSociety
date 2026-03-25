@@ -12,6 +12,7 @@ FastAPI backend service for AI Social Scientist VSCode extension
 - @packages/agentsociety2/agentsociety2/backend/routers/replay.py - /api/v1/replay
 - @packages/agentsociety2/agentsociety2/backend/routers/custom.py - /api/v1/custom
 - @packages/agentsociety2/agentsociety2/backend/routers/modules.py - /api/v1/modules
+- @packages/agentsociety2/agentsociety2/backend/routers/agent_skills.py - /api/v1/agent-skills
 """
 
 from __future__ import annotations
@@ -25,7 +26,7 @@ from fastapi.responses import JSONResponse
 from dotenv import load_dotenv
 from pathlib import Path
 
-from agentsociety2.backend.routers import prefill_params, experiments, replay, custom, modules
+from agentsociety2.backend.routers import prefill_params, experiments, replay, custom, modules, agent_skills
 
 # 加载环境变量
 _project_root = Path(__file__).resolve().parents[2]
@@ -102,6 +103,7 @@ app.include_router(experiments.router, prefix="/api/v1")
 app.include_router(replay.router, prefix="/api/v1")
 app.include_router(custom.router)
 app.include_router(modules.router)
+app.include_router(agent_skills.router)
 
 
 @app.get("/")
@@ -117,6 +119,7 @@ async def root():
             "replay": "/api/v1/replay/{hypothesis_id}/{experiment_id}/*",
             "custom": "/api/v1/custom/*",
             "modules": "/api/v1/modules/*",
+            "agent_skills": "/api/v1/agent-skills/*",
         },
     }
 

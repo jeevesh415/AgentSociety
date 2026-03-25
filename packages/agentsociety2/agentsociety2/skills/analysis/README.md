@@ -37,12 +37,21 @@
 │  Orchestration Layer                                        │
 │  Analyzer (单实验) · Synthesizer (跨实验综合)                  │
 ├─────────────────────────────────────────────────────────────┤
-│  Cognitive & Execution Layer                                │
-│  InsightAgent (定性分析) · DataExplorer (定量分析) · AnalysisRunner │
+│  Unified Analysis Agent                                     │
+│  AnalysisAgent (数据优先分析：读取数据 → 生成洞察 → 可视化)     │
 ├─────────────────────────────────────────────────────────────┤
-│  Reporting Layer                                            │
-│  Reporter · AssetProcessor                                  │
+│  Execution Layer                                            │
+│  AnalysisRunner (沙箱执行) · Reporter (报告生成)              │
 └─────────────────────────────────────────────────────────────┘
+```
+
+### 数据优先分析流程
+
+```
+┌──────────────┐    ┌──────────────┐    ┌──────────────┐    ┌──────────────┐
+│ 读取数据结构  │ →  │ 生成洞察     │ →  │ 数据分析     │ →  │ 可视化报告    │
+│ (Schema/样本) │    │ (基于实际数据) │    │ (执行代码)   │    │ (MD/HTML)    │
+└──────────────┘    └──────────────┘    └──────────────┘    └──────────────┘
 ```
 
 ### 组件说明
@@ -51,8 +60,7 @@
 |------|------|
 | `Analyzer` | 单实验分析生命周期管理 |
 | `Synthesizer` | 跨实验综合与对比分析 |
-| `InsightAgent` | 定性分析、假设验证、报告叙事 |
-| `DataExplorer` | 定量分析、SQL 查询、Python 可视化代码生成 |
+| `AnalysisAgent` | **统一分析智能体**：数据优先的分析流程，合并洞察、策略、执行与可视化 |
 | `AnalysisRunner` | 沙箱执行 Python 代码 |
 | `Reporter` | 洞察与图表组装为 Markdown/HTML 报告 |
 | `AssetProcessor` | 静态资源管理与报告嵌入 |
@@ -64,18 +72,56 @@
 ```
 analysis/
 ├── service.py          # 编排入口 (Analyzer, Synthesizer, run_analysis, run_synthesis)
-├── agents.py           # 核心智能体 (InsightAgent, DataExplorer)
+├── agents.py           # 统一分析智能体 (AnalysisAgent)
 ├── tool_executor.py    # 执行环境 (AnalysisRunner)
 ├── report_generator.py # 报告引擎 (Reporter, AssetProcessor)
 ├── models.py           # 数据模型与配置 (Pydantic)
 ├── prompts.py          # LLM 提示模板
 ├── utils.py            # 路径管理、Schema 提取、XML 解析
-├── eda.py              # EDA 集成 (ydata-profiling, sweetviz, quick_stats)
+├── eda.py              # EDA 集成（多种工具）
 └── skills/             # 智能体能力定义
     ├── 00_xml_contract.md
+    ├── 05_subagent_workflow.md
     ├── 10_visualization_reliability.md
-    └── 20_core_skills.md
+    ├── 20_core_skills.md
+    └── 30_advanced_analysis.md
 ```
+
+### EDA 工具矩阵
+
+| 函数 | 功能 | 输出 |
+|------|------|------|
+| `generate_eda_profile()` | ydata-profiling 全面画像 | `eda_profile.html` |
+| `generate_sweetviz_profile()` | Sweetviz 相关性分析 | `eda_sweetviz.html` |
+| `generate_missingno_visualization()` | 缺失值可视化 | `eda_missingno.png` |
+| `generate_multitable_summary()` | 多表汇总图 | `eda_table_summary.png` |
+| `generate_quick_stats()` | pandas 统计摘要 | Markdown 文本 |
+| `generate_full_eda_report()` | 完整 EDA 套件 | 所有上述文件 |
+
+### 数据优先分析原则
+
+`AnalysisAgent` 遵循**数据优先**原则，确保分析基于实际数据而非假设：
+
+1. **先读数据**：分析前先读取数据库 schema、行数、样本数据
+2. **洞察接地**：洞察生成时能看到实际数据结构，避免空洞分析
+3. **性能安全**：大数据集自动采样，防止内存溢出
+4. **总结先行**：每轮工具执行后先压缩总结，再进入下一轮策略迭代（默认开启）
+
+### 可用分析库
+
+| 库 | 用途 | 场景 |
+|----|------|------|
+| `pandas` / `numpy` | 数据处理 | 基础操作 |
+| `matplotlib` / `seaborn` | 静态可视化 | 报告图表 |
+| `scipy.stats` | 统计检验 | t-test, ANOVA, chi-square |
+| `statsmodels` | 回归分析 | OLS, 时间序列 |
+| `networkx` | 网络分析 | Agent 交互图 |
+| `sklearn` | 机器学习 | 聚类、降维 |
+
+**技能选择逻辑**：
+- `required: true` 的技能始终加载（如 `xml_contract`）
+- 在严格模式下（`analysis_skill_strict_selection=true`），仅加载 `analysis_skill_names` 中列出的技能 + 必需技能
+- 性能安全规则已在代码层面（`tool_executor.py`）强制执行，不再依赖 LLM 提示
 
 ---
 
@@ -98,7 +144,7 @@ presentation/
         │   ├── analysis_summary.json   # 分析结果结构化数据（insights, findings, conclusions, recommendations）
         │   ├── eda_profile.html        # ydata-profiling EDA 概览（可选）
         │   └── eda_sweetviz.html       # Sweetviz EDA 报告（可选）
-        ├── charts/                # DataExplorer 生成的图表与中间数据
+        ├── charts/                # AnalysisAgent 生成的图表与中间数据
         │   ├── *.png              # 可视化图表（如 cooperation_by_group.png）
         │   ├── *.csv, *.json      # 分析中间数据、诊断输出
         │   └── analysis_*/       # 代码执行临时目录（可含子图）
@@ -113,7 +159,7 @@ presentation/
 | `data/analysis_summary.json` | 结构化分析结果，含 `insights`、`findings`、`conclusions`、`recommendations` |
 | `data/eda_profile.html` | ydata-profiling 生成的数据画像（表统计、分布、缺失） |
 | `data/eda_sweetviz.html` | Sweetviz 目标分析与相关性报告 |
-| `charts/` | DataExplorer 执行 Python 代码的输出目录，图表与中间数据 |
+| `charts/` | AnalysisAgent 执行 Python 代码的输出目录，图表与中间数据 |
 | `assets/` | 报告实际引用的图片，由 AssetProcessor 从 charts 与 run/artifacts 复制 |
 
 ### 跨实验综合分析产物（`synthesize` 工具）
@@ -140,19 +186,20 @@ synthesis/
 
 ### 工具入口（主 Agent 调用）
 
-通过 `agentsociety2.backend.tools` 暴露：
+通过 Claude Code skills 暴露：
 
-| 工具 | 作用 | 底层 |
+| Skill | 作用 | 底层 |
 |------|------|------|
-| `analyze` | 单实验分析 | `Analyzer.analyze()` |
-| `synthesize` | 跨实验综合 | `Synthesizer.synthesize()` |
+| `agentsociety-analysis` | 单实验分析 | `Analyzer.analyze()` |
+| `agentsociety-synthesize` | 跨实验综合 | `Synthesizer.synthesize()` |
 
 ### Python API
 
 ```python
-from agentsociety2.backend.analysis import (
+from agentsociety2.skills.analysis import (
     Analyzer,
     Synthesizer,
+    AnalysisAgent,  # 新的统一分析智能体
     run_analysis,
     run_synthesis,
     AnalysisConfig,
@@ -161,7 +208,8 @@ from agentsociety2.backend.analysis import (
 
 | 入口 | 说明 |
 |------|------|
-| `Analyzer(config).analyze(hypothesis_id, experiment_id, ...)` | 单实验分析 |
+| `Analyzer(config).analyze(hypothesis_id, experiment_id, ...)` | 单实验分析（推荐） |
+| `AnalysisAgent(config).analyze(context, db_path, output_dir, ...)` | 直接使用分析智能体 |
 | `Synthesizer(workspace_path, config).synthesize(...)` | 跨实验综合 |
 | `run_analysis(workspace_path, hypothesis_id, experiment_id, ...)` | 便捷函数 |
 | `run_synthesis(workspace_path, ...)` | 便捷函数 |
@@ -180,6 +228,8 @@ from agentsociety2.backend.analysis import (
 | `temperature` | 0.7 | LLM 温度 |
 | `llm_profile_default` | "default" | 洞察/报告/策略用 LLM 配置 |
 | `llm_profile_coder` | "coder" | 代码生成用 LLM 配置 |
+| `analysis_skill_names` | `[xml_contract, subagent_workflow, visualization_reliability, core_skills, advanced_analysis]` | 显式启用的分析提示技能名称列表（必需技能始终加载） |
+| `analysis_skill_strict_selection` | `true` | 严格模式：只注入 `analysis_skill_names` 中列出的技能（必需技能除外） |
 
 ---
 
@@ -187,7 +237,7 @@ from agentsociety2.backend.analysis import (
 
 ```python
 import asyncio
-from agentsociety2.backend.analysis import Analyzer, AnalysisConfig
+from agentsociety2.skills.analysis import Analyzer, AnalysisConfig
 
 async def main():
     config = AnalysisConfig(workspace_path="./workspace")
@@ -222,4 +272,4 @@ if __name__ == "__main__":
 
 - **错误传播**：执行失败通过 STDERR 反馈给 Reporter
 - **优雅降级**：部分图表缺失仍可生成报告
-- **自我修正**：DataExplorer 解析错误日志并重试代码生成
+- **自我修正**：AnalysisAgent 解析错误日志并重试代码生成

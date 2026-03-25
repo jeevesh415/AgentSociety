@@ -1,7 +1,6 @@
 """Literature search core module
 
 Core functions for searching academic literature using an external API.
-Refactored from designer/literature_search.py to remove environment variable dependencies.
 """
 
 from __future__ import annotations
@@ -544,7 +543,6 @@ async def filter_relevant_literature(
     literature_data: Optional[Dict[str, Any]],
     topic: str,
     router: Optional[Router] = None,
-    similarity_threshold: float = 0.2,
     output_dir: Path | None = None,
 ) -> Optional[Dict[str, Any]]:
     """
@@ -554,7 +552,6 @@ async def filter_relevant_literature(
         literature_data: 文献搜索结果字典
         topic: 实验话题
         router: LLM router实例（如果为None则使用默认router）
-        similarity_threshold: 相似度阈值（已废弃，保留以兼容接口）
         output_dir: 输出目录，如果为None则不保存
 
     Returns:

@@ -1,5 +1,5 @@
 """
-分析子智能体内部执行器：为 DataExplorer 提供内置工具与代码执行能力。
+分析子智能体内部执行器：为 AnalysisAgent 提供内置工具与代码执行能力。
 """
 
 import shutil
@@ -34,7 +34,6 @@ from .utils import (
     XmlParseError,
     extract_database_schema,
     format_database_schema_markdown,
-    collect_experiment_files,
     parse_llm_xml_to_model,
 )
 
@@ -112,7 +111,7 @@ class AnalysisRunner:
         }
 
     def discover_tools_with_schemas(self) -> Dict[str, Dict[str, Any]]:
-        """返回内置工具及其参数 schema，供 DataExplorer 调用时使用正确参数名。"""
+        """返回内置工具及其参数 schema，供 AnalysisAgent 调用时使用正确参数名。"""
         result = {}
         for name, info in self._builtin_tools.items():
             entry = {
@@ -239,6 +238,8 @@ class AnalysisRunner:
 
         files_before_execution = {p for p in work_dir.rglob("*") if p.is_file()}
 
+        db_filename = Path(db_path).name if db_path else "db.sqlite"
+
         schema_info = ""
         if db_path:
             discovered_schema = self._discover_database_schema(db_path)
@@ -248,16 +249,35 @@ class AnalysisRunner:
 
 {discovered_schema}
 
-**IMPORTANT**: 
+**CRITICAL - DATA VALIDATION REQUIREMENTS**:
 - The schema above is the ONLY source of truth. Use ONLY tables and columns listed there.
 - Do NOT assume any other table exists. If a table is not in the schema, it does not exist.
-- Your code MUST read and verify the database structure before processing. Do NOT hardcode table or column names.
+- Your code MUST start by reading and validating the database structure.
+- Do NOT hardcode table or column names without verification.
+- If a table is empty (0 rows), your code should handle this gracefully.
+
+**MANDATORY CODE PATTERN**:
+```python
+import sqlite3
+conn = sqlite3.connect('{db_filename}')
+cursor = conn.cursor()
+
+# ALWAYS verify table exists before querying
+cursor.execute("SELECT name FROM sqlite_master WHERE type='table'")
+actual_tables = {{row[0] for row in cursor.fetchall()}}
+print(f"Available tables: {{actual_tables}}")
+
+# Check row counts before processing
+for table in actual_tables:
+    cursor.execute(f"SELECT COUNT(*) FROM {{table}}")
+    count = cursor.fetchone()[0]
+    print(f"Table {{table}}: {{count}} rows")
+```
 """
                 self.logger.info(
                     "Database schema discovered and will be included in code generation prompt"
                 )
 
-        db_filename = None
         if db_path:
             src_db = Path(db_path)
             if src_db.exists() and src_db.is_file():
@@ -307,7 +327,30 @@ class AnalysisRunner:
 - **Error Handling**: Use try-except blocks for file/database operations. If the core task cannot be completed, exit with `sys.exit(1)` (and ensure `import sys` is present).
 - **Type Safety**: SQLite often stores mixed types. Use `pd.to_numeric(..., errors='coerce')` for numeric conversion.
 - **JSON Serialization**: When using json.dumps or writing JSON, convert numpy/pandas types (int64, float64) to native Python: use `int(x)` or `float(x)` for scalars, or `df.astype(object)` before to_dict.
-- **Output Files**: Save charts with plt.savefig('chart.png') in current directory, or to output directory. PNG/CSV/JSON files will be collected automatically."""
+- **Output Files**: Save charts with plt.savefig('chart.png') in current directory, or to output directory. PNG/CSV/JSON files will be collected automatically.
+
+## Available Libraries
+
+Use these libraries for analysis and visualization:
+- **pandas/numpy**: Data manipulation
+- **matplotlib/seaborn**: Static visualizations (preferred for reports)
+- **scipy.stats**: Statistical tests (t-test, ANOVA, chi-square, etc.)
+- **statsmodels**: Regression and time series analysis
+- **networkx**: Network/graph analysis for agent interactions
+- **sklearn**: Machine learning (clustering, dimensionality reduction)
+
+## Visualization Best Practices
+
+- Use seaborn for statistical plots (violin, box, swarm, heatmap)
+- Use plt.subplots() for multi-panel figures
+- Add proper labels, titles, and legends
+- Save as PNG with `plt.savefig('name.png', dpi=150, bbox_inches='tight')`
+
+## Performance & Memory Safety (MANDATORY)
+
+- **Large Dataset Sampling**: If a DataFrame has > 50,000 rows, you MUST use sampling for complex visualizations (scatter plots, pair plots, swarm plots, etc.): `df_sample = df.sample(n=min(10000, len(df)), random_state=42)`. Use the sampled data for plotting only; use full dataset for statistical aggregation.
+- **Static Plots for Large Data**: Do NOT attempt to render interactive HTML plots for datasets > 5,000 points. Always use static images (`plt.savefig()`) instead.
+- **Memory Efficiency**: For very large tables, prefer SQL aggregation over loading all data into pandas. Use `pd.read_sql_query()` with aggregation queries when possible."""
 
         max_retries = self._config.max_code_gen_retries if self._config else 5
 

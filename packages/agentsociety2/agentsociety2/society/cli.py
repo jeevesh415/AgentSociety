@@ -4,8 +4,6 @@ import argparse
 import asyncio
 import json
 import os
-import signal
-import socket
 import sqlite3
 import sys
 import yaml
@@ -204,6 +202,8 @@ class ExperimentRunner:
         env_modules = []
         env_type_map = {module_type: env_class for module_type, env_class in get_registered_env_modules()}
 
+        workspace_root = self.run_dir.resolve()
+
         for module_type in env_module_types:
             if module_type not in env_type_map:
                 raise ValueError(
@@ -214,6 +214,8 @@ class ExperimentRunner:
             env_class = env_type_map[module_type]
             module_kwargs = env_kwargs.get(module_type, {})
             env_module = env_class(**module_kwargs)
+
+            setattr(env_module, "workspace_path", str(workspace_root))
             env_modules.append(env_module)
 
         return env_modules
@@ -400,6 +402,13 @@ class ExperimentRunner:
                 replay_writer=replay_writer,
                 final_summary_enabled=config.codegen_router.final_summary_enabled,
             )
+            # Expose experiment root to helpers/skills (optional) and to agent runtimes that
+            # prefer router-level workspace hints.
+            try:
+                setattr(env_router, "workspace_path", str(self.run_dir.resolve()))
+                setattr(env_router, "run_dir", self.run_dir.resolve())
+            except Exception:
+                pass
 
             logger.info(f"Creating {len(agent_args)} agents...")
             agents = self._create_agents(agent_args, replay_writer=replay_writer)

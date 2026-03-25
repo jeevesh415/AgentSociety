@@ -269,9 +269,9 @@ Generated code:
 
         for i, error in enumerate(errors, 1):
             error_parts.append(f"Error {i}:")
-            error_parts.append(f"```")
+            error_parts.append("```")
             error_parts.append(error)
-            error_parts.append(f"```")
+            error_parts.append("```")
             error_parts.append("")
 
         error_parts.extend(

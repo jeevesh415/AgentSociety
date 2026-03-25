@@ -78,7 +78,6 @@ AgentSociety 2 使用 `ruff`_ 进行检查和格式化：
    ├── config/          # Configuration and LLM routing
    ├── contrib/         # Contributed agents and environments
    ├── custom/          # Custom module templates
-   ├── designer/        # Experiment designer (LLM-driven)
    ├── env/             # Environment modules and routers
    ├── logger/          # Enhanced logging with file support
    ├── registry/        # Module registry for custom components
@@ -98,15 +97,6 @@ AgentSociety 2 使用 `ruff`_ 进行检查和格式化：
 * **paper**: 使用 EasyPaper 生成学术论文
 * **analysis**: 数据分析和报告
 * **agent**: 智能体处理、选择、生成和过滤
-
-设计器模块
--------------------------
-
-``designer/`` 模块提供 LLM 驱动的实验设计：
-
-* **ExpDesigner**: 从假设生成实验配置
-* **ExpExecutor**: 执行设计的实验
-* **ConfigBuilder**: 构建和验证实验配置
 
 后端 API
 -------------------------

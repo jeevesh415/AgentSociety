@@ -19,6 +19,7 @@ export default {
         demoUser: 'Demo User',
         bill: 'Billing',
         profiles: 'Profiles',
+        skills: 'Agent Skills',
     },
     common: {
         name: "Name",

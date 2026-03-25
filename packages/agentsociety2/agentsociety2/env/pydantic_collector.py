@@ -6,7 +6,7 @@ from function signatures, including nested BaseModel fields.
 """
 
 import inspect
-from typing import Any, Dict, Set, Type, get_origin, get_args, Union, Optional, List
+from typing import Any, Dict, Set, Type, get_origin, get_args, Union
 from pydantic import BaseModel
 
 
@@ -79,7 +79,7 @@ class PydanticModelCollector:
                     # Extract annotation from field_info
                     field_annotation = field_info.annotation
                     self.collect_from_annotation(field_annotation)
-        except (OSError, TypeError) as e:
+        except (OSError, TypeError):
             # If we can't get source code, skip this model
             # But still try to collect nested models from fields if possible
             if hasattr(model_class, "model_fields"):

@@ -133,6 +133,56 @@
         "command": "aiSocialScientist.listCustomModules",
         "title": "AI Social Scientist: List Custom Modules",
         "icon": "$(list-tree)"
+      },
+      {
+        "command": "aiSocialScientist.scanAgentSkills",
+        "title": "AI Social Scientist: Scan Agent Skills",
+        "icon": "$(refresh)"
+      },
+      {
+        "command": "aiSocialScientist.importAgentSkill",
+        "title": "AI Social Scientist: Import Agent Skill",
+        "icon": "$(cloud-download)"
+      },
+      {
+        "command": "aiSocialScientist.toggleAgentSkill",
+        "title": "AI Social Scientist: Toggle Agent Skill",
+        "icon": "$(check)"
+      },
+      {
+        "command": "aiSocialScientist.reloadAgentSkill",
+        "title": "AI Social Scientist: Reload Agent Skill",
+        "icon": "$(refresh)"
+      },
+      {
+        "command": "aiSocialScientist.openSkillFolder",
+        "title": "AI Social Scientist: Open Skill Folder in File Manager",
+        "icon": "$(folder)"
+      },
+      {
+        "command": "aiSocialScientist.formatJsonFile",
+        "title": "AI Social Scientist: Format and View JSON",
+        "icon": "$(json)"
+      },
+      {
+        "command": "aiSocialScientist.viewLiteratureIndex",
+        "title": "AI Social Scientist: View Literature Index",
+        "icon": "$(book)"
+      },
+      {
+        "command": "aiSocialScientist.viewStepsYaml",
+        "title": "AI Social Scientist: View Steps Timeline",
+        "icon": "$(list-ordered)"
+      },
+      {
+        "command": "aiSocialScientist.viewExperimentResults",
+        "title": "AI Social Scientist: View Experiment Results",
+        "icon": "$(graph)"
+      },
+      {
+        "command": "aiSocialScientist.removeAgentSkill",
+        "title": "AI Social Scientist: Remove Custom Skill",
+        "icon": "$(trash)"
       }
     ],
     "menus": {
@@ -162,6 +212,56 @@
           "command": "aiSocialScientist.openMarkdownInEditor",
           "when": "view == projectStructureView && viewItem =~ /markdown/",
           "group": "2_actions"
+        },
+        {
+          "command": "aiSocialScientist.toggleAgentSkill",
+          "when": "view == projectStructureView && viewItem =~ /agentSkillItem.*enabled/",
+          "group": "1_actions@1"
+        },
+        {
+          "command": "aiSocialScientist.toggleAgentSkill",
+          "when": "view == projectStructureView && viewItem =~ /agentSkillItem.*disabled/",
+          "group": "1_actions@1"
+        },
+        {
+          "command": "aiSocialScientist.removeAgentSkill",
+          "when": "view == projectStructureView && viewItem =~ /agentSkillItem.*custom/",
+          "group": "1_actions@2"
+        },
+        {
+          "command": "aiSocialScientist.reloadAgentSkill",
+          "when": "view == projectStructureView && viewItem =~ /agentSkillItem/",
+          "group": "1_actions@2"
+        },
+        {
+          "command": "aiSocialScientist.openSkillFolder",
+          "when": "view == projectStructureView && viewItem =~ /agentSkillItem/",
+          "group": "2_actions"
+        },
+        {
+          "command": "aiSocialScientist.openSkillFolder",
+          "when": "view == projectStructureView && viewItem == extensionSkillItem",
+          "group": "2_actions"
+        },
+        {
+          "command": "aiSocialScientist.formatJsonFile",
+          "when": "view == projectStructureView && viewItem =~ /json/",
+          "group": "2_actions"
+        },
+        {
+          "command": "aiSocialScientist.viewLiteratureIndex",
+          "when": "view == projectStructureView && viewItem =~ /literatureIndex/",
+          "group": "1_actions"
+        },
+        {
+          "command": "aiSocialScientist.viewStepsYaml",
+          "when": "view == projectStructureView && viewItem =~ /stepsYaml/",
+          "group": "1_actions"
+        },
+        {
+          "command": "aiSocialScientist.viewExperimentResults",
+          "when": "view == projectStructureView && viewItem =~ /experimentResults/",
+          "group": "1_actions"
         }
       ]
     },
@@ -179,6 +279,16 @@
         "selector": [
           {
             "filenamePattern": "**/SIM_SETTINGS.json"
+          }
+        ],
+        "priority": "default"
+      },
+      {
+        "viewType": "aiSocialScientist.initConfig",
+        "displayName": "Init Config Editor",
+        "selector": [
+          {
+            "filenamePattern": "**/init/init_config.json"
           }
         ],
         "priority": "default"
@@ -410,6 +520,7 @@
     "test": "node ./out/test/runTest.js"
   },
   "devDependencies": {
+    "@types/js-yaml": "^4.0.9",
     "@types/node": "^20.0.0",
     "@types/react": "^18.2.0",
     "@types/react-dom": "^18.2.0",
@@ -434,6 +545,7 @@
     "@deck.gl/core": "^9.0.38",
     "@deck.gl/layers": "^9.0.38",
     "@deck.gl/react": "^9.0.38",
+    "@deck.gl/widgets": "^9.2.11",
     "antd": "^6.0.0",
     "dayjs": "^1.11.19",
     "i18next": "^23.7.0",

@@ -1,3 +1,35 @@
+"""环境模块基类。
+
+本模块提供环境模块的基类 :class:`EnvBase` 和工具注册装饰器 :func:`tool`。
+
+环境模块定义智能体可执行的操作和可观察的状态。通过 ``@tool`` 装饰器
+注册方法为可调用工具，供 Router 调用执行。
+
+工具类型
+========
+
+- **常规工具**: ``@tool(readonly=False)`` — 可修改环境状态
+- **只读工具**: ``@tool(readonly=True)`` — 仅查询，不修改状态
+- **观察工具**: ``@tool(readonly=True, kind="observe")`` — 每个 step 自动调用
+- **统计工具**: ``@tool(readonly=True, kind="statistics")`` — 统计信息
+
+Example::
+
+    from agentsociety2.env import EnvBase, tool
+
+    class MyEnv(EnvBase):
+        @tool(readonly=True, kind="observe")
+        def get_location(self, agent_id: int) -> str:
+            '''获取 Agent 当前位置'''
+            return self._locations.get(agent_id, "unknown")
+
+        @tool(readonly=False)
+        def move(self, agent_id: int, destination: str) -> str:
+            '''移动 Agent 到指定位置'''
+            self._locations[agent_id] = destination
+            return f"Moved to {destination}"
+"""
+
 import asyncio
 import functools
 import inspect
@@ -5,6 +37,7 @@ import json
 import re
 from copy import deepcopy
 from datetime import datetime
+from pathlib import Path
 from typing import TYPE_CHECKING, Any, Callable, ClassVar, Dict, Literal, Optional, Tuple, TypeVar, overload
 
 if TYPE_CHECKING:
@@ -301,15 +334,29 @@ class EnvMeta(type):
 
 
 class EnvBase(metaclass=EnvMeta):
+    """环境模块基类。
+
+    环境模块定义 Agent 可执行的操作和可观察的状态。通过 ``@tool`` 装饰器
+    注册方法为可调用工具，供 Router 调用。
+
+    工具类型：
+        - **常规工具**: ``@tool(readonly=False)`` — 可修改环境状态
+        - **只读工具**: ``@tool(readonly=True)`` — 仅查询，不修改状态
+        - **观察工具**: ``@tool(readonly=True, kind="observe")`` — 自动调用
+        - **统计工具**: ``@tool(readonly=True, kind="statistics")`` — 统计信息
+
+    子类应实现：
+        - 使用 ``@tool`` 装饰器定义可执行操作
+        - 可选：实现 ``observe()`` 方法（默认收集 kind="observe" 的工具）
+    """
+
     # 声明式状态持久化：子类覆盖以自动创建 replay 表
-    # per-agent 交互数据（表名: {prefix}_agent_state, PK: agent_id+step）
     _agent_state_columns: ClassVar[list] = []
-    # 环境全局数据（表名: {prefix}_env_state, PK: step）
     _env_state_columns: ClassVar[list] = []
 
     @classmethod
     def _state_table_prefix_from_class(cls) -> str:
-        """从类名推导表名前缀（PascalCase → snake_case，去常见后缀）"""
+        """从类名推导表名前缀（PascalCase -> snake_case，去常见后缀）"""
         name = cls.__name__
         for suffix in ("Space", "Env", "Module"):
             if name.endswith(suffix) and len(name) > len(suffix):
@@ -378,8 +425,54 @@ It contains no functions or methods.
 
         Returns:
             A string description of the environment module for MCP registration.
+
+        Format:
+            The description uses Markdown format with the following structure:
+            - Class name and brief description
+            - Detailed description section
+            - Initialization parameters (if applicable)
+            - Example config or JSON schema (if applicable)
         """
-        return f"{cls.__name__}: {cls.__doc__ or 'No description available'}"
+        # Check if this is the base class being called directly
+        if cls is EnvBase:
+            return f"""{cls.__name__}: Abstract base class for environment modules.
+
+**Description:** {cls.__doc__ or 'No description available'}
+
+**Note:** This is an abstract base class. Do not use it directly. Subclasses should override this method to provide specific descriptions, initialization parameters, and usage examples.
+"""
+        else:
+            # For subclasses that don't override this method
+            return f"""{cls.__name__}: Environment module.
+
+**Description:** {cls.__doc__ or 'No description available'}
+
+**Note:** This subclass has not provided a detailed description. Please refer to the class documentation or source code for initialization parameters and usage.
+"""
+
+    @classmethod
+    def get_agent_skills_dir(cls) -> "Path | None":
+        """返回此 env 模块附带的 agent skill 目录。
+
+        Env 模块可以在自身目录下放置 agent skill，当 PersonAgent
+        初始化时会自动扫描并注册，使 agent 在该环境中获得特定认知能力。
+
+        约定（按优先级）：
+          1. 目录型模块（如 mobility_space/）→ ``<dir>/agent_skills/``
+          2. 单文件模块（如 economy_space.py）→ ``<stem>_agent_skills/``
+
+        子类可重写此方法指定自定义路径。
+        """
+        import inspect
+        module_file = Path(inspect.getfile(cls))
+        parent = module_file.parent
+        # 单文件模块：economy_space.py → economy_space_agent_skills/
+        stem_dir = parent / f"{module_file.stem}_agent_skills"
+        if stem_dir.is_dir():
+            return stem_dir
+        # 目录型模块：mobility_space/ → mobility_space/agent_skills/
+        pkg_dir = parent / "agent_skills"
+        return pkg_dir if pkg_dir.is_dir() else None
 
     async def init(self, start_datetime: datetime):
         """

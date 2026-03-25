@@ -10,7 +10,7 @@ created by ReplayWriter.init(); they are not registered via TableSchema.
 """
 
 from dataclasses import dataclass, field
-from typing import List, Literal, Optional, Tuple
+from typing import List, Literal, Optional
 
 # SQLite column types
 ColumnType = Literal["INTEGER", "REAL", "TEXT", "BLOB", "TIMESTAMP", "JSON"]

@@ -1,6 +1,7 @@
 """分析子智能体编排：Analyzer（单实验）、Synthesizer（多实验综合）。"""
 
 import json
+import re
 import sqlite3
 from datetime import datetime
 from pathlib import Path
@@ -23,16 +24,14 @@ from .models import (
     DIR_DATA,
     DIR_HYPOTHESIS_PREFIX,
     DIR_EXPERIMENT_PREFIX,
-    DIR_RUN,
     DIR_PRESENTATION,
     FILE_SQLITE,
     FILE_PID,
     FILE_HYPOTHESIS_MD,
     FILE_EXPERIMENT_MD,
-    DIR_SYNTHESIS,
     FILE_SYNTHESIS_REPORT_PREFIX,
 )
-from .agents import InsightAgent, DataExplorer
+from .agents import AnalysisAgent
 from .report_generator import Reporter, AssetProcessor
 from .prompts import judgment_prompt, report_xml_instruction
 from .utils import (
@@ -47,7 +46,7 @@ from .utils import (
 
 
 class Analyzer:
-    """分析子智能体入口：编排 InsightAgent、DataExplorer、Reporter，产出单实验图文报告。"""
+    """分析入口：编排统一 AnalysisAgent 与 Reporter，产出单实验图文报告。"""
 
     def __init__(self, config: AnalysisConfig):
         """
@@ -62,12 +61,14 @@ class Analyzer:
         self.presentation_path = self.workspace_path / DIR_PRESENTATION
         self.presentation_path.mkdir(parents=True, exist_ok=True)
 
-        self.logger.info("分析子智能体初始化完成")
+        self.logger.info("分析智能体初始化完成")
         self.logger.info("  工作空间: %s", self.workspace_path)
         self.logger.info("  分析产物: %s", self.presentation_path)
 
-        self.agent = InsightAgent(config=config)
-        self.logger.info("InsightAgent 初始化完成，使用模型: %s", self.agent.model_name)
+        self.agent = AnalysisAgent(config=config, workspace_path=self.workspace_path)
+        self.logger.info(
+            "统一 AnalysisAgent 初始化完成，使用模型: %s", self.agent.model_name
+        )
 
         self.asset_processor = AssetProcessor(self.workspace_path)
 
@@ -92,8 +93,19 @@ class Analyzer:
     ) -> Dict[str, Any]:
         """
         分析单实验，生成图文报告。
-        literature_summary: 可选，文献调研摘要，会纳入分析与报告。
-        on_progress: 可选，进度回调。
+
+        使用统一的 AnalysisAgent 执行数据优先的分析流程：
+        1. 读取并理解数据结构
+        2. 基于实际数据生成洞察
+        3. 执行数据分析和可视化
+        4. 生成报告
+
+        Args:
+            hypothesis_id: 假设ID
+            experiment_id: 实验ID
+            custom_instructions: 可选的自定义分析指令
+            literature_summary: 可选的文献摘要
+            on_progress: 可选的进度回调
         """
         self.logger.info("开始分析实验 %s", experiment_id)
 
@@ -104,61 +116,48 @@ class Analyzer:
         await progress("Loading experiment context...")
         context = await self._load_context(hypothesis_id, experiment_id)
 
-        await progress("Running text analysis...")
-        analysis_result = await self.agent.analyze(
-            context,
-            custom_instructions=custom_instructions,
-            literature_summary=literature_summary,
-        )
-
         await progress("Discovering assets...")
         assets = self.asset_processor.discover_assets(experiment_id, hypothesis_id)
         pres = presentation_paths(self.presentation_path, hypothesis_id, experiment_id)
         pres.output_dir.mkdir(parents=True, exist_ok=True)
         pres.charts_dir.mkdir(parents=True, exist_ok=True)
         db_path = self._find_database_path(hypothesis_id, experiment_id)
-        data_analyzed = False
 
-        if db_path:
-            await progress("Starting data analysis...")
-            data_agent = DataExplorer(
-                config=self.config,
-                llm_router=self.agent.llm_router,
-                model_name=self.agent.model_name,
-                temperature=self.config.temperature,
-                workspace_path=self.workspace_path,
-            )
-            data_analysis_result = await data_agent.analyze_data(
-                context,
-                analysis_result,
-                db_path,
-                pres.charts_dir,
-                on_progress=on_progress,
-            )
-            data_analyzed = True
-            for chart_path in data_analysis_result.get("generated_charts", []):
-                asset = ReportAsset(
-                    asset_id=f"gen_{chart_path.stem}",
-                    asset_type="visualization",
-                    title=chart_path.stem.replace("_", " ").title(),
-                    file_path=str(chart_path),
-                    description=f"Autonomously generated visualization: {chart_path.name}",
-                    file_size=chart_path.stat().st_size,
-                    embedded_content=None,
-                )
-                assets.append(asset)
-            self.logger.info(
-                "数据分析完成: %s 张图表生成",
-                len(data_analysis_result.get("generated_charts", [])),
-            )
-            eda_profile_path = data_analysis_result.get("eda_profile_path")
-            eda_sweetviz_path = data_analysis_result.get("eda_sweetviz_path")
-            await data_agent.close()
-        else:
-            self.logger.info("未找到数据库; 跳过数据分析。")
-            eda_profile_path = None
-            eda_sweetviz_path = None
+        # 使用统一的 AnalysisAgent 执行完整分析
+        await progress("Running unified data-aware analysis...")
+        analysis_result, data_analysis_result = await self.agent.analyze(
+            context=context,
+            db_path=db_path,
+            output_dir=pres.charts_dir,
+            custom_instructions=custom_instructions,
+            literature_summary=literature_summary,
+            on_progress=on_progress,
+        )
 
+        data_analyzed = db_path is not None and db_path.exists()
+
+        # 收集生成的图表
+        for chart_path in data_analysis_result.get("generated_charts", []):
+            asset = ReportAsset(
+                asset_id=f"gen_{chart_path.stem}",
+                asset_type="visualization",
+                title=chart_path.stem.replace("_", " ").title(),
+                file_path=str(chart_path),
+                description=f"Autonomously generated visualization: {chart_path.name}",
+                file_size=chart_path.stat().st_size,
+                embedded_content=None,
+            )
+            assets.append(asset)
+
+        self.logger.info(
+            "数据分析完成: %s 张图表生成",
+            len(data_analysis_result.get("generated_charts", [])),
+        )
+
+        eda_profile_path = data_analysis_result.get("eda_profile_path")
+        eda_sweetviz_path = data_analysis_result.get("eda_sweetviz_path")
+
+        # 如果 EDA 未生成，尝试生成
         if db_path and (eda_profile_path is None or eda_sweetviz_path is None):
             data_dir = pres.output_dir / DIR_DATA
             data_dir.mkdir(parents=True, exist_ok=True)
@@ -177,18 +176,17 @@ class Analyzer:
                     db_path, data_dir, config=self.config
                 )
                 if eda_sweetviz_path:
-                    self.logger.info(
-                        "Sweetviz EDA 概览备选生成: %s",
-                        eda_sweetviz_path,
-                    )
+                    self.logger.info("Sweetviz EDA 概览备选生成: %s", eda_sweetviz_path)
 
         await progress("Processing assets...")
         processed_assets = self.asset_processor.process_assets(assets, pres.output_dir)
+
         quick_stats_md = None
         if db_path:
             from .eda import generate_quick_stats
 
             quick_stats_md = generate_quick_stats(db_path, config=self.config)
+
         await progress("Writing report...")
         reporter = Reporter(agent=self.agent, config=self.config)
         generated_files, report_complete = await reporter.generate(
@@ -200,12 +198,15 @@ class Analyzer:
             eda_profile_path=eda_profile_path,
             eda_sweetviz_path=eda_sweetviz_path,
             quick_stats_md=quick_stats_md,
+            data_summary=data_analysis_result.get("data_summary"),
             on_progress=on_progress,
         )
+
         if eda_profile_path:
             generated_files["eda_profile"] = str(eda_profile_path)
         if eda_sweetviz_path:
             generated_files["eda_sweetviz"] = str(eda_sweetviz_path)
+
         return {
             "success": True,
             "experiment_id": experiment_id,
@@ -388,11 +389,64 @@ class Analyzer:
             conn.close()
         except sqlite3.Error as e:
             errors.append(f"Database read error: {e}")
+
+        # 补充采集 run/artifacts 与 output.log 中的失败信号，使分析上下文更贴近真实实验运行结果。
+        runtime_errors = self._collect_runtime_failures(run_path)
+        for msg in runtime_errors:
+            if msg not in errors:
+                errors.append(msg)
+        if runtime_errors and status == ExperimentStatus.SUCCESSFUL:
+            status = ExperimentStatus.PARTIAL_SUCCESS
+
         return status, completion, errors
+
+    def _collect_runtime_failures(self, run_path: Path) -> List[str]:
+        """从 run 目录中提取运行期失败信号（ask artifacts / output.log）。"""
+        failures: List[str] = []
+
+        artifacts_dir = run_path / "artifacts"
+        if artifacts_dir.exists():
+            for md_path in artifacts_dir.glob("*.md"):
+                try:
+                    txt = md_path.read_text(encoding="utf-8")
+                except OSError:
+                    continue
+                lowered = txt.lower()
+                if "planning failed" in lowered or "invalid json response" in lowered:
+                    failures.append(
+                        f"Artifact failure in {md_path.name}: planning failed or invalid JSON response"
+                    )
+
+        log_path = run_path / "output.log"
+        if log_path.exists():
+            try:
+                tail = log_path.read_text(encoding="utf-8", errors="ignore")[-8000:]
+            except OSError:
+                tail = ""
+            tail_lower = tail.lower()
+            if "traceback" in tail_lower:
+                failures.append("Runtime log contains traceback")
+            # Prefer structured error patterns over broad substring matching to avoid false positives.
+            error_lines = [
+                ln.strip()
+                for ln in tail.splitlines()
+                if re.search(r"\bERROR\b|\bCRITICAL\b", ln)
+            ]
+            non_ignorable = [
+                ln
+                for ln in error_lines
+                if "litellm" not in ln.lower() and "deprecation" not in ln.lower()
+            ]
+            if non_ignorable:
+                failures.append(
+                    "Runtime log contains structured ERROR/CRITICAL entries"
+                )
+
+        return failures
 
 
 class Synthesizer:
-    """综合子智能体：对多实验/多假设先逐条分析再分析子智能体综合，产出综合报告。"""
+    """综合子智能体：对多实验/多假设先逐条分析再综合，产出综合报告。"""
 
     def __init__(
         self,
@@ -407,8 +461,11 @@ class Synthesizer:
         self.llm_router, self.model_name = get_llm_router_and_model(
             self.config.llm_profile_default
         )
-        self.agent = InsightAgent(
-            config=self.config, llm_router=self.llm_router, model_name=self.model_name
+        self.agent = AnalysisAgent(
+            config=self.config,
+            llm_router=self.llm_router,
+            model_name=self.model_name,
+            workspace_path=self.workspace_path,
         )
 
     def _discover_ids_by_prefix(self, base_path: Path, prefix: str) -> List[str]:
@@ -480,13 +537,34 @@ class Synthesizer:
                 await on_progress(
                     f"Analyzing hypothesis {hypothesis_id} experiment {exp_id} ({idx + 1}/{total})..."
                 )
-            result = await service.analyze(
-                hypothesis_id=hypothesis_id,
-                experiment_id=exp_id,
-                custom_instructions=custom_instructions,
-                literature_summary=literature_summary,
-                on_progress=on_progress,
-            )
+            try:
+                result = await service.analyze(
+                    hypothesis_id=hypothesis_id,
+                    experiment_id=exp_id,
+                    custom_instructions=custom_instructions,
+                    literature_summary=literature_summary,
+                    on_progress=on_progress,
+                )
+            except Exception as e:
+                msg = f"analysis exception: {e}"
+                self.logger.warning(
+                    "实验分析异常，已记录并继续: hypothesis=%s, experiment=%s, error=%s",
+                    hypothesis_id,
+                    exp_id,
+                    e,
+                )
+                experiment_results.append(
+                    {
+                        "experiment_id": exp_id,
+                        "success": False,
+                        "error": msg,
+                    }
+                )
+                if on_progress:
+                    await on_progress(
+                        f"Experiment {exp_id} failed but synthesis will continue: {e}"
+                    )
+                continue
 
             if not result.get("success"):
                 experiment_results.append(
@@ -910,10 +988,12 @@ Use CDATA to wrap content. HTML must be a complete, well-styled document. If cha
                     return report_md
                 last_feedback = str(e)
                 continue
-            md_content = (data.get("markdown") or "").strip()
-            html_content = (data.get("html") or "").strip()
+            # 双语解析：优先取中文，fallback 到通用字段
+            md_content = (data.get("markdown_zh") or data.get("markdown") or "").strip()
+            html_content = (data.get("html_zh") or data.get("html") or "").strip()
+            md_content_en = (data.get("markdown_en") or "").strip()
+            html_content_en = (data.get("html_en") or "").strip()
 
-            # 硬性校验：内容过短视为空，强制重试
             MIN_CONTENT_LEN = 150
             is_too_short = (
                 len(md_content) < MIN_CONTENT_LEN
@@ -962,6 +1042,13 @@ Use CDATA to wrap content. HTML must be a complete, well-styled document. If cha
                         report_html, output_dir, chart_paths
                     )
                     synthesis.synthesis_report_html_path = str(report_html)
+                # 保存英文版（如存在且与中文不同）
+                if md_content_en and md_content_en != md_content:
+                    en_md = output_dir / f"{FILE_SYNTHESIS_REPORT_PREFIX}{sid}_en.md"
+                    en_md.write_text(md_content_en, encoding="utf-8")
+                if html_content_en and html_content_en != html_content:
+                    en_html = output_dir / f"{FILE_SYNTHESIS_REPORT_PREFIX}{sid}_en.html"
+                    en_html.write_text(html_content_en, encoding="utf-8")
 
             judgment = await self._judge_synthesis_report(
                 md_content, html_content, len(chart_paths), synthesis

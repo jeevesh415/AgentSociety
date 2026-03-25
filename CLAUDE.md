@@ -178,11 +178,21 @@ graph TB
 
 #### Agent System (`agentsociety2/agent/`)
 - **AgentBase**: Abstract base class for all agents
-- **PersonAgent**: Concrete person agent implementation
-- **DoNothingAgent**: No-op agent for testing
+- **PersonAgent**: Skills-based agent — a lightweight orchestrator whose capabilities are provided by a pluggable skill pipeline
 - Agents use LLM via `litellm` router with configurable models (nano/coder/embedding)
 - Each agent has: `id`, `profile`, `name`, `replay_writer`
-- Key methods: `ask()`, `intervene()`, `set_env()`
+- Key methods: `ask()`, `step()`, `init()`, `close()`
+
+#### Agent Skills Architecture (`agentsociety2/agent/skills/`)
+PersonAgent follows a **metadata-first, selected-only** model:
+- Skills are self-contained directories under `agent/skills/`
+- Each skill has `SKILL.md` (YAML frontmatter + behavior docs) and `scripts/<name>.py`
+- Built-in skills: `observation`, `memory`, `needs`, `cognition`, `plan`
+- **Selection Stage**: LLM reads skill metadata (name/description/priority/requires/provides)
+- **Execution Stage**: Only LLM-selected skills are loaded and run
+- Unselected skills are NOT loaded or executed (lazy loading)
+- Custom skills can be placed in `workspace/custom/skills/` and hot-loaded at runtime
+- Skill state management via `set_skill_state()`, `get_skill_state()`, `has_skill_state()`
 
 #### Environment Router (`agentsociety2/env/`)
 - **RouterBase**: Abstract router for environment modules
@@ -205,11 +215,6 @@ graph TB
 - **paper**: Academic paper generation with EasyPaper
 - **analysis**: Data analysis and reporting
 - **agent**: Agent processing, selection, generation, and filtering
-
-#### Designer (`agentsociety2/designer/`)
-- **ExpDesigner**: LLM-driven experiment design pipeline
-- **ExpExecutor**: Executes designed experiments
-- **ConfigBuilder**: Configuration building and validation
 
 #### Backend API (`agentsociety2/backend/`)
 - **FastAPI**-based REST API for external integrations
@@ -237,6 +242,14 @@ graph TB
 - **AgentSociety**: Main simulation orchestrator
 - **AgentSocietyHelper**: Plan-and-Execute helper for external questions/interventions
 - **Models**: InitConfig, StepsConfig, ExperimentConfig
+
+#### Module Registry (`agentsociety2/registry/`)
+- **ModuleRegistry**: Singleton registry for agent classes and environment modules
+- Supports lazy loading - modules are only discovered when first accessed
+- **Built-in modules**: Discovered from `agentsociety2.contrib/`
+- **Custom modules**: Discovered from `custom/` directory
+- Key functions: `get_registry()`, `list_all_modules()`, `get_env_module_class()`, `get_agent_module_class()`
+- Custom modules are marked with `_is_custom = True` attribute
 
 ### Configuration
 
@@ -300,7 +313,15 @@ graph TD
     subgraph "agent/"
         A1[AgentBase]
         A2[PersonAgent]
-        A3[DoNothingAgent]
+        A3[skills/]
+    end
+
+    subgraph "agent/skills/"
+        AS1[observation/]
+        AS2[memory/]
+        AS3[needs/]
+        AS4[cognition/]
+        AS5[plan/]
     end
 
     subgraph "env/"
@@ -338,6 +359,11 @@ graph TD
     A --> A1
     A --> A2
     A --> A3
+    A3 --> AS1
+    A3 --> AS2
+    A3 --> AS3
+    A3 --> AS4
+    A3 --> AS5
     E --> E1
     E --> E2
     E --> E3
@@ -436,6 +462,39 @@ flowchart TD
 - Implement `observe()` method (returns state string for agents)
 - Tools registered automatically via metaclass
 
+### Agent Skills Pipeline
+PersonAgent executes skills in a pipeline on each `step()`:
+1. **Skill Selection**: LLM selects skills based on metadata only
+2. **On-demand Loading**: Only selected skills are loaded
+3. **Priority Execution**: Skills run in priority order
+4. **State Management**: Skills can store state via `agent.set_skill_state()`
+
+```mermaid
+graph TD
+    subgraph "Skill Pipeline"
+        Step[agent.step] --> Select[LLM Skill Selection]
+        Select --> Load[Load Selected Skills]
+        Load --> Run[Run Skills by Priority]
+        Run --> Check{More Skills?}
+        Check -->|Yes| Run
+        Check -->|No| Return[Return Result]
+    end
+
+    subgraph "Built-in Skills"
+        Obs[observation<br/>priority: 10]
+        Mem[memory<br/>priority: 20]
+        Need[needs<br/>priority: 30]
+        Cog[cognition<br/>priority: 40]
+        Pln[plan<br/>priority: 50]
+    end
+```
+
+### Memory Architecture
+PersonAgent maintains three types of memory:
+- **Short-term memory**: Recent N interactions (configurable via `short_memory_window_size`)
+- **Long-term memory**: Persistent storage via mem0 (ChromaDB backend)
+- **Cognition memory**: Temporary buffer for cognitive processes, flushed to long-term memory on `close()`
+
 ### Agent-Environment Interaction
 - Agents call `await env_router.ask(question, readonly=False)`
 - Environment routes questions to appropriate module tools
@@ -459,3 +518,5 @@ flowchart TD
 - **Testing**: pytest configuration in `packages/agentsociety2/`
 - **No ray.io dependency in agentsociety2** (simplified from v1)
 - **Research skills**: The skills/ module provides LLM-native research workflows for literature search, hypothesis generation, experiment design, and paper writing.
+- **Agent Skills**: PersonAgent uses a metadata-first skill selection model. Skills are loaded on-demand, not pre-loaded. Custom skills go in `custom/skills/`.
+- **Module Registry**: Use `get_registry()` to access the singleton ModuleRegistry for discovering agents and environment modules.

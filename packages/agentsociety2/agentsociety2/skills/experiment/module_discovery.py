@@ -8,13 +8,11 @@ available modules for validation and selection guidance.
 from __future__ import annotations
 
 from typing import Dict, List, Tuple, Any, Optional
-from pathlib import Path
 
 from agentsociety2.logger import get_logger
 from agentsociety2.registry import (
     get_registered_env_modules,
     get_registered_agent_modules,
-    get_registry,
 )
 
 logger = get_logger()
