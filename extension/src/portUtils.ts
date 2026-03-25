@@ -48,7 +48,7 @@ export async function findAvailablePort(
 ): Promise<number> {
   // Generate a random starting port within the range
   const range = maxPort - minPort + 1;
-  let startPort = minPort + Math.floor(Math.random() * range);
+  const startPort = minPort + Math.floor(Math.random() * range);
 
   for (let i = 0; i < Math.min(range, MAX_RETRIES); i++) {
     const port = minPort + ((startPort + i - minPort) % range);

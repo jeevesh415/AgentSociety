@@ -211,35 +211,35 @@ export class BackendManager {
     env.WORKSPACE_PATH = workspaceFolder.uri.fsPath;
 
     // LLM 配置
-    if (envConfig.llmApiKey) env.AGENTSOCIETY_LLM_API_KEY = envConfig.llmApiKey;
-    if (envConfig.llmApiBase) env.AGENTSOCIETY_LLM_API_BASE = envConfig.llmApiBase;
-    if (envConfig.llmModel) env.AGENTSOCIETY_LLM_MODEL = envConfig.llmModel;
+    if (envConfig.llmApiKey) {env.AGENTSOCIETY_LLM_API_KEY = envConfig.llmApiKey;}
+    if (envConfig.llmApiBase) {env.AGENTSOCIETY_LLM_API_BASE = envConfig.llmApiBase;}
+    if (envConfig.llmModel) {env.AGENTSOCIETY_LLM_MODEL = envConfig.llmModel;}
 
     // Coder LLM 配置
-    if (envConfig.coderLlmApiKey) env.AGENTSOCIETY_CODER_LLM_API_KEY = envConfig.coderLlmApiKey;
-    if (envConfig.coderLlmApiBase) env.AGENTSOCIETY_CODER_LLM_API_BASE = envConfig.coderLlmApiBase;
-    if (envConfig.coderLlmModel) env.AGENTSOCIETY_CODER_LLM_MODEL = envConfig.coderLlmModel;
+    if (envConfig.coderLlmApiKey) {env.AGENTSOCIETY_CODER_LLM_API_KEY = envConfig.coderLlmApiKey;}
+    if (envConfig.coderLlmApiBase) {env.AGENTSOCIETY_CODER_LLM_API_BASE = envConfig.coderLlmApiBase;}
+    if (envConfig.coderLlmModel) {env.AGENTSOCIETY_CODER_LLM_MODEL = envConfig.coderLlmModel;}
 
     // Nano LLM 配置
-    if (envConfig.nanoLlmApiKey) env.AGENTSOCIETY_NANO_LLM_API_KEY = envConfig.nanoLlmApiKey;
-    if (envConfig.nanoLlmApiBase) env.AGENTSOCIETY_NANO_LLM_API_BASE = envConfig.nanoLlmApiBase;
-    if (envConfig.nanoLlmModel) env.AGENTSOCIETY_NANO_LLM_MODEL = envConfig.nanoLlmModel;
+    if (envConfig.nanoLlmApiKey) {env.AGENTSOCIETY_NANO_LLM_API_KEY = envConfig.nanoLlmApiKey;}
+    if (envConfig.nanoLlmApiBase) {env.AGENTSOCIETY_NANO_LLM_API_BASE = envConfig.nanoLlmApiBase;}
+    if (envConfig.nanoLlmModel) {env.AGENTSOCIETY_NANO_LLM_MODEL = envConfig.nanoLlmModel;}
 
     // Embedding 配置
-    if (envConfig.embeddingApiKey) env.AGENTSOCIETY_EMBEDDING_API_KEY = envConfig.embeddingApiKey;
-    if (envConfig.embeddingApiBase) env.AGENTSOCIETY_EMBEDDING_API_BASE = envConfig.embeddingApiBase;
-    if (envConfig.embeddingModel) env.AGENTSOCIETY_EMBEDDING_MODEL = envConfig.embeddingModel;
-    if (envConfig.embeddingDims) env.AGENTSOCIETY_EMBEDDING_DIMS = String(envConfig.embeddingDims);
+    if (envConfig.embeddingApiKey) {env.AGENTSOCIETY_EMBEDDING_API_KEY = envConfig.embeddingApiKey;}
+    if (envConfig.embeddingApiBase) {env.AGENTSOCIETY_EMBEDDING_API_BASE = envConfig.embeddingApiBase;}
+    if (envConfig.embeddingModel) {env.AGENTSOCIETY_EMBEDDING_MODEL = envConfig.embeddingModel;}
+    if (envConfig.embeddingDims) {env.AGENTSOCIETY_EMBEDDING_DIMS = String(envConfig.embeddingDims);}
 
     // Web Search 配置
-    if (envConfig.webSearchApiUrl) env.WEB_SEARCH_API_URL = envConfig.webSearchApiUrl;
-    if (envConfig.webSearchApiToken) env.WEB_SEARCH_API_TOKEN = envConfig.webSearchApiToken;
-    if (envConfig.miroflowDefaultLlm) env.MIROFLOW_DEFAULT_LLM = envConfig.miroflowDefaultLlm;
-    if (envConfig.miroflowDefaultAgent) env.MIROFLOW_DEFAULT_AGENT = envConfig.miroflowDefaultAgent;
+    if (envConfig.webSearchApiUrl) {env.WEB_SEARCH_API_URL = envConfig.webSearchApiUrl;}
+    if (envConfig.webSearchApiToken) {env.WEB_SEARCH_API_TOKEN = envConfig.webSearchApiToken;}
+    if (envConfig.miroflowDefaultLlm) {env.MIROFLOW_DEFAULT_LLM = envConfig.miroflowDefaultLlm;}
+    if (envConfig.miroflowDefaultAgent) {env.MIROFLOW_DEFAULT_AGENT = envConfig.miroflowDefaultAgent;}
 
     // EasyPaper (for generate_paper tool)
-    if (envConfig.easypaperApiUrl) env.EASYPAPER_API_URL = envConfig.easypaperApiUrl;
-    if (envConfig.literatureSearchApiUrl) env.LITERATURE_SEARCH_API_URL = envConfig.literatureSearchApiUrl;
+    if (envConfig.easypaperApiUrl) {env.EASYPAPER_API_URL = envConfig.easypaperApiUrl;}
+    if (envConfig.literatureSearchApiUrl) {env.LITERATURE_SEARCH_API_URL = envConfig.literatureSearchApiUrl;}
 
     return {
       pythonPath,
