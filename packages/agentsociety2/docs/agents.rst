@@ -9,7 +9,7 @@
 PersonAgent
 ~~~~~~~~~~~
 
-``PersonAgent`` 是一个 **skills-based** 智能体实现。它本身是一个轻量编排器，所有认知能力（感知、记忆、需求、思考、规划）通过独立的 Skill 模块提供：
+``PersonAgent`` 是一个 **skills-first / tool-using** 智能体实现。它本身是一个轻量编排器，核心行为是“对标 Claude Code 的工具循环”：在每个 step 内注入身份与技能目录，然后由主模型逐轮选择并执行工具（包括技能激活与技能执行）。
 
 .. code-block:: python
 
@@ -28,7 +28,7 @@ PersonAgent
 内置 Skills
 ^^^^^^^^^^^
 
-每个 simulation tick，PersonAgent 都会执行同一套“先选后跑”的流程：
+每个 simulation tick，PersonAgent 都会执行同一套“工具循环”的流程：
 
 .. list-table::
      :widths: 28 72
@@ -36,14 +36,14 @@ PersonAgent
 
      * - 阶段
          - 说明
-     * - 选择阶段
-         - 主 LLM 只读取技能元数据（name/description/requires），决定本步 ``selected_skills``。
-     * - 执行阶段
-         - 仅加载并执行 ``selected_skills``；未选中的技能不加载、不执行。
-     * - 依赖修正
-         - 若所选技能缺少依赖，系统先让 LLM 修正一次；若仍不合法，裁剪不满足依赖的技能。
-     * - 记忆收尾
-         - ``memory`` 技能被选中时会 flush 认知缓冲；未选中时缓冲保留到后续 step，``close()`` 时兜底 flush。
+     * - 注入上下文
+         - system prompt 注入身份信息、技能目录、工具表。
+     * - 激活技能
+         - 需要某个技能时，先用 `activate_skill` 加载该技能完整说明（通常来自 ``SKILL.md``）。
+     * - 执行技能/工具
+         - 用 `execute_skill` 执行技能，或直接调用 `bash`/`grep`/`glob`/`codegen` 等工具。
+     * - 结束条件
+         - 当主模型输出 `done=true` 时结束本 step。
 
 常见内置技能包括 ``observation``、``needs``、``cognition``、``plan``、``memory``。
 它们都不再属于固定“必须执行层”，而是由 LLM 按上下文按需选择。
@@ -231,23 +231,11 @@ step() 方法
 智能体记忆
 ------------
 
-AgentSociety 2 集成了 `mem0ai`_ 用于记忆管理：
+在当前版本中，记忆能力推荐通过 **Agent Skills** 来实现（例如 `memory` 技能）。
 
-.. code-block:: python
+也就是说：
 
-   # Enable memory for an agent
-   from agentsociety2 import PersonAgent
+1. `PersonAgent` 提供独立工作目录与工具能力（读写文件、执行技能等）。
+2. 是否写入记忆、写入什么、以及持久化方式，由 `memory` 技能的 `SKILL.md` 与其脚本实现决定。
 
-   agent = PersonAgent(
-       id=1,
-       profile={"name": "Alice"},
-       enable_memory=True  # Enable memory
-   )
-
-启用记忆后，智能体可以：
-
-* 记住过去的互动
-* 回忆相关信息
-* 随着时间建立上下文
-
-.. _mem0ai: https://github.com/mem0ai/mem0
+如果你想替换/扩展记忆策略，优先做法是新增/替换 skill，而不是修改 `PersonAgent` 本体。

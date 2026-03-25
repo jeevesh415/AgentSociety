@@ -40,7 +40,13 @@ class MyAgent(AgentBase):
 
 ### PersonAgent
 
-`PersonAgent` is a sophisticated agent with memory, needs, emotions, and planning capabilities. It uses a **skills-based architecture** where capabilities are provided by pluggable skill modules.
+`PersonAgent` 是默认的 **skills-first** 智能体：它本身是一个轻量的“工具调度器”，通过 **技能目录（skill catalog）+ 工具调用** 在每个 step 内自主完成任务。
+
+关键特性：
+
+- 每个 Person 是 **独立会话线程 + 独立工作目录**（agent workspace），避免多 agent 互相污染
+- **渐进式披露**：默认只暴露少量核心技能（`core_skills`），其余技能需要显式启用/激活
+- 技能作者只需写 `SKILL.md`（以及可选脚本），无需了解 `PersonAgent` 内部实现
 
 ```python
 from agentsociety2 import PersonAgent
@@ -58,7 +64,11 @@ agent = PersonAgent(
 
 ## Agent Skills Architecture
 
-PersonAgent follows a **metadata-first, selected-only** model. Skills are self-contained modules that provide specific capabilities.
+PersonAgent 的技能体系遵循 “先看到目录 → 再激活技能说明 → 再执行” 的工作流：
+
+1. **目录（catalog）**：system prompt 中包含可见技能的名称与简述
+2. **激活（activate）**：用 `activate_skill` 加载某个 skill 的完整说明
+3. **执行（execute）**：用 `execute_skill` 运行技能入口逻辑
 
 ### Built-in Skills
 
@@ -76,14 +86,6 @@ agent/skills/
 Each skill has:
 - `SKILL.md` — YAML frontmatter (name, description, priority, requires/provides) + behavior docs
 - `scripts/<name>.py` — exports `async def run(agent, ctx)`
-
-### Skill Selection Process
-
-Skills follow metadata-first selection:
-
-1. **Selection Stage**: LLM reads compact metadata (name/description/priority/requires/provides)
-2. **Execution Stage**: Only LLM-selected skills are loaded and run
-3. **Unselected Skills**: Not loaded, not executed
 
 ### Custom Skills
 
@@ -166,38 +168,15 @@ async def run(agent, ctx):
 
 ### Enabling/Disabling Skills
 
-```python
-# Enable only specific skills
-agent = PersonAgent(
-    id=1,
-    profile={"name": "Alice"},
-    skill_names=["observation", "memory", "plan"]  # Only these skills
-)
+当前版本不推荐通过 `PersonAgent` 暴露“直接改技能列表”的 Python 方法（避免业务逻辑耦合到 agent 内部）。
+推荐做法：
 
-# Dynamically add/remove skills at runtime
-agent.add_skill("needs")
-agent.remove_skill("plan")
-
-# Reload all skills
-agent.reload_skills()
-```
+- 在创建 agent 时通过 `core_skills` 控制默认可见的核心技能集合
+- 运行过程中通过工具调用（如 `enable_skill` / `disable_skill` / `activate_skill`）完成技能启用与说明加载
 
 ## Memory Integration
 
-PersonAgent automatically uses mem0ai for persistent memory. Configuration is managed via `Config.get_mem0_config()`.
-
-The agent maintains:
-- **Short-term memory**: Recent N interactions (configurable via `short_memory_window_size`)
-- **Long-term memory**: Persistent storage via mem0
-- **Cognition memory**: Temporary buffer for cognitive processes, flushed to long-term memory
-
-```python
-# Memory is automatically initialized
-agent = PersonAgent(id=1, profile={"name": "Alice"})
-
-# Access memory directly if needed
-memories = await agent.memory.search("query", user_id=agent._memory_user_id, limit=10)
-```
+当前版本的记忆属于 skill（例如 `memory`），由技能自行定义“写什么、何时写、写到哪里”。`PersonAgent` 只负责提供工作目录与工具能力，并不绑定某个第三方记忆库实现。
 
 ## Creating Custom Agents
 

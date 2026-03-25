@@ -562,6 +562,12 @@ async def init_workspace(target_dir: Path, topic: str = "", components: list[str
             (target_dir / ".agentsociety" / "agent_classes").mkdir(parents=True, exist_ok=True)
             (target_dir / ".agentsociety" / "env_modules").mkdir(parents=True, exist_ok=True)
             (target_dir / ".agentsociety" / "data").mkdir(parents=True, exist_ok=True)
+            (
+                target_dir
+                / ".agentsociety"
+                / "custom_env_skill"
+                / "runs"
+            ).mkdir(parents=True, exist_ok=True)
 
             # 下载地图文件
             download_result = await download_map_file(target_dir)

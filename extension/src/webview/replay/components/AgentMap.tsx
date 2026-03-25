@@ -185,7 +185,7 @@ interface AgentMapProps {
 export const AgentMap: React.FC<AgentMapProps> = ({ mapboxToken = MAPBOX_ACCESS_TOKEN }) => {
   const { t } = useTranslation();
   const { state, actions } = useReplay();
-  const { agentProfiles, agentStatuses, selectedAgentId, selectedAgentTrajectory, socialNetwork, socialActivityAtStep, layoutMode } = state;
+  const { agentProfiles, agentStatuses, selectedAgentId, socialNetwork, socialActivityAtStep, layoutMode } = state;
   const [geoViewState, setGeoViewState] = React.useState(INITIAL_VIEW_STATE);
   const [orthoViewState, setOrthoViewState] = React.useState(INITIAL_ORTHO_VIEW_STATE);
   const [hovering, setHovering] = React.useState(false);
@@ -193,10 +193,10 @@ export const AgentMap: React.FC<AgentMapProps> = ({ mapboxToken = MAPBOX_ACCESS_
   const [mapError, setMapError] = React.useState<string | null>(null);
   const [blinkPhase, setBlinkPhase] = React.useState(0);
 
-  // Blink animation for "received DM" avatar outline (描边闪烁)
-  const hasReceivedDm = (socialActivityAtStep?.receivedDmAgentIds?.length ?? 0) > 0;
+  // Blink animation for agents highlighted by social interactions at this step.
+  const hasSocialHighlights = (socialActivityAtStep?.highlightedAgentIds?.length ?? 0) > 0;
   React.useEffect(() => {
-    if (!hasReceivedDm) return;
+    if (!hasSocialHighlights) return;
     let raf = 0;
     const start = performance.now();
     const tick = () => {
@@ -206,7 +206,7 @@ export const AgentMap: React.FC<AgentMapProps> = ({ mapboxToken = MAPBOX_ACCESS_
     };
     raf = requestAnimationFrame(tick);
     return () => cancelAnimationFrame(raf);
-  }, [hasReceivedDm]);
+  }, [hasSocialHighlights]);
 
   // Memoize layouts
   const randomLayout = React.useMemo(() => {
@@ -383,14 +383,14 @@ export const AgentMap: React.FC<AgentMapProps> = ({ mapboxToken = MAPBOX_ACCESS_
             depthTest: false,
           },
         }));
-        // Received-DM reminder: avatar outline blink (本步收到私信 - 头像描边闪烁)
-        if (socialActivityAtStep?.receivedDmAgentIds?.length) {
-          const receivedDmData = agentList.filter(a => socialActivityAtStep.receivedDmAgentIds.includes(a.id));
-          if (receivedDmData.length > 0) {
+        // Highlight agents that were targeted by social interactions at this step.
+        if (socialActivityAtStep?.highlightedAgentIds?.length) {
+          const highlightedAgents = agentList.filter(a => socialActivityAtStep.highlightedAgentIds.includes(a.id));
+          if (highlightedAgents.length > 0) {
             const outlineAlpha = Math.round(100 + 155 * (0.5 + 0.5 * Math.sin(blinkPhase)));
             result.push(new ScatterplotLayer({
-              id: 'social-received-dm',
-              data: receivedDmData.map(a => ({ id: a.id, position: [a.lng, a.lat] })),
+              id: 'social-highlighted-agents',
+              data: highlightedAgents.map(a => ({ id: a.id, position: [a.lng, a.lat] })),
               pickable: false,
               getPosition: (d: any) => d.position,
               getRadius: isCartesian ? 20 : 8,
@@ -431,13 +431,13 @@ export const AgentMap: React.FC<AgentMapProps> = ({ mapboxToken = MAPBOX_ACCESS_
           radiusMinPixels: 12,
           radiusMaxPixels: 24,
         }));
-        // Received-DM reminder (no icons branch)
-        if (socialActivityAtStep?.receivedDmAgentIds?.length) {
-          const receivedDmData = agentList.filter(a => socialActivityAtStep.receivedDmAgentIds.includes(a.id));
-          if (receivedDmData.length > 0) {
+        // Highlight agents that were targeted by social interactions at this step.
+        if (socialActivityAtStep?.highlightedAgentIds?.length) {
+          const highlightedAgents = agentList.filter(a => socialActivityAtStep.highlightedAgentIds.includes(a.id));
+          if (highlightedAgents.length > 0) {
             result.push(new ScatterplotLayer({
-              id: 'social-received-dm',
-              data: receivedDmData.map(a => ({ id: a.id, position: [a.lng, a.lat] })),
+              id: 'social-highlighted-agents',
+              data: highlightedAgents.map(a => ({ id: a.id, position: [a.lng, a.lat] })),
               pickable: false,
               getPosition: (d: any) => d.position,
               getRadius: isCartesian ? 22 : 10,

@@ -58,7 +58,7 @@
 演示创建自定义环境模块：
 
 * 使用 @tool 装饰器定义自定义环境
-* 实现 observe()、step() 和工具方法
+* 实现 step() 和工具方法，并按需提供 ``kind="observe"`` 的只读工具
 * 向 CodeGenRouter 注册模块
 
 **回放系统** (``basics/03_replay_system.py``)

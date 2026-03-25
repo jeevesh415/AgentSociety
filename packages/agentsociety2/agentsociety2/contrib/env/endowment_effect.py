@@ -4,11 +4,12 @@ Environment for Endowment Effect experiment based on V2 framework
 """
 import asyncio
 from datetime import datetime
-from typing import Dict, List, Optional
+from typing import ClassVar, Dict, List
 
 from pydantic import BaseModel, Field
 
 from agentsociety2.env import EnvBase, tool
+from agentsociety2.storage import ColumnDef
 
 
 # Response models for tool functions
@@ -38,6 +39,10 @@ class EndowmentEffectEnv(EnvBase):
 
     # Valid items for the experiment
     VALID_ITEMS = ["pen", "plate", "glass", "doll"]
+    _agent_state_columns: ClassVar[list[ColumnDef]] = [
+        ColumnDef("evaluations", "JSON", nullable=False),
+        ColumnDef("completed_items", "INTEGER", nullable=False),
+    ]
 
     def __init__(self, agent_ids: List[int]):
         """
@@ -57,6 +62,7 @@ class EndowmentEffectEnv(EnvBase):
         }
 
         self._lock = asyncio.Lock()
+        self._step_counter: int = 0
 
     @classmethod
     def mcp_description(cls) -> str:
@@ -230,6 +236,9 @@ You need to evaluate 4 items: pen, plate, glass, and doll. For each item, you ne
         Initialize the environment module.
         """
         await super().init(start_datetime)
+        async with self._lock:
+            self._evaluations = {agent_id: {} for agent_id in self.agent_ids}
+            self._step_counter = 0
 
     async def step(self, tick: int, t: datetime):
         """
@@ -241,6 +250,24 @@ You need to evaluate 4 items: pen, plate, glass, and doll. For each item, you ne
         """
         async with self._lock:
             self.current_datetime = t
+            records = [
+                {
+                    "agent_id": agent_id,
+                    "evaluations": {
+                        item: eval_data.copy()
+                        for item, eval_data in self._evaluations[agent_id].items()
+                    },
+                    "completed_items": len(self._evaluations[agent_id]),
+                }
+                for agent_id in self.agent_ids
+            ]
+
+        await self._write_agent_state_batch(
+            step=self._step_counter,
+            t=t,
+            records=records,
+        )
+        self._step_counter += 1
 
     def get_results(self) -> Dict[int, Dict[str, Dict[str, float]]]:
         """
@@ -260,6 +287,7 @@ You need to evaluate 4 items: pen, plate, glass, and doll. For each item, you ne
             "agent_ids": self.agent_ids,
             "num_agents": self.num_agents,
             "evaluations": self._evaluations,
+            "step_counter": self._step_counter,
         }
 
     def _load_state(self, state: dict):
@@ -267,7 +295,7 @@ You need to evaluate 4 items: pen, plate, glass, and doll. For each item, you ne
         self.agent_ids = state.get("agent_ids", [])
         self.num_agents = state.get("num_agents", len(self.agent_ids))
         self._evaluations = state.get("evaluations", {})
+        self._step_counter = state.get("step_counter", 0)
 
 
 __all__ = ["EndowmentEffectEnv"]
-

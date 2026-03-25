@@ -12,8 +12,7 @@ import type {
   SocialUser,
   SocialPost,
   SocialComment,
-  SocialDirectMessage,
-  SocialGroupMessage,
+  SocialEvent,
   SocialNetwork,
   SocialActivityAtStep,
   LayoutMode,
@@ -48,10 +47,9 @@ export interface ReplayState {
   selectedAgentTrajectory: PositionPoint[];
   socialProfile: SocialUser | null;
   socialPosts: SocialPost[];
-  socialDirectMessages: SocialDirectMessage[];
-  socialGroupMessages: SocialGroupMessage[];
+  socialEvents: SocialEvent[];
   socialNetwork: SocialNetwork | null;
-  /** Per-step social activity: who received/sent DMs, sent group messages (for avatar reminder) */
+  /** Per-step social activity derived from social replay events. */
   socialActivityAtStep: SocialActivityAtStep | null;
   /** All posts up to current step (timeline); for 帖子 panel */
   allPosts: SocialPost[];
@@ -86,8 +84,7 @@ export interface ReplayActions {
   setSelectedAgentTrajectory: (trajectory: PositionPoint[]) => void;
   setSocialProfile: (profile: SocialUser | null) => void;
   setSocialPosts: (posts: SocialPost[]) => void;
-  setSocialDirectMessages: (messages: SocialDirectMessage[]) => void;
-  setSocialGroupMessages: (messages: SocialGroupMessage[]) => void;
+  setSocialEvents: (events: SocialEvent[]) => void;
   setSocialNetwork: (network: SocialNetwork | null) => void;
   setSocialActivityAtStep: (activity: SocialActivityAtStep | null) => void;
   setAllPosts: (posts: SocialPost[]) => void;
@@ -135,8 +132,7 @@ const initialState: ReplayState = {
   selectedAgentTrajectory: [],
   socialProfile: null,
   socialPosts: [],
-  socialDirectMessages: [],
-  socialGroupMessages: [],
+  socialEvents: [],
   socialNetwork: null,
   socialActivityAtStep: null,
   allPosts: [],
@@ -212,8 +208,7 @@ export const ReplayProvider: React.FC<ReplayProviderProps> = ({ children, vscode
         selectedAgentTrajectory: [],
         socialProfile: null,
         socialPosts: [],
-        socialDirectMessages: [],
-        socialGroupMessages: [],
+        socialEvents: [],
       }));
     },
 
@@ -225,9 +220,7 @@ export const ReplayProvider: React.FC<ReplayProviderProps> = ({ children, vscode
 
     setSocialPosts: (posts) => setState((s) => ({ ...s, socialPosts: posts })),
 
-    setSocialDirectMessages: (messages) => setState((s) => ({ ...s, socialDirectMessages: messages })),
-
-    setSocialGroupMessages: (messages) => setState((s) => ({ ...s, socialGroupMessages: messages })),
+    setSocialEvents: (events) => setState((s) => ({ ...s, socialEvents: events })),
 
     setSocialNetwork: (network) => setState((s) => ({ ...s, socialNetwork: network })),
 

@@ -2,20 +2,18 @@
 
 ## 快速了解
 
-1. 默认不预加载任何 skill。
-2. 每个 step 只运行 LLM 选中的 skill。
-3. 选择阶段只看元数据，不看 SKILL.md 全文。
-4. 依赖不自动补选，缺依赖先让 LLM 修正，再裁剪非法项。
-5. memory 没被选中时不会 flush，但缓冲会跨 step 保留。
-6. Agent close 时会兜底 flush，避免静默丢记忆。
+1. `PersonAgent` 是 **skills-first / tool-using** agent：通过工具调用来激活与执行技能。
+2. 默认只暴露少量 `core_skills`（渐进式披露），其余技能需显式启用/激活。
+3. 技能说明来自 `SKILL.md`；执行入口由 skill 自己提供（通常是脚本/子流程）。
+4. 自定义技能可从 `custom/skills` 或环境模块（`env:*`）扫描进入可用目录。
 
 ## 0. 一句话先讲清楚
 
-当前 Agent Skills 的原则 “原始人模式-用啥学啥”：
+当前 Agent Skills 的原则是“像 Claude Code 一样用工具”：
 
-1. 默认不预加载技能。
-2. 每一步只运行主 LLM 选中的技能。
-3. 没被选中就不运行，全凭 LLM 自身能力。
+1. 先看到技能目录（catalog），再按需激活技能说明。
+2. 激活后严格按 `SKILL.md` 指导去执行技能。
+3. 执行结果回写到 thread 与工作目录文件，形成可复现的轨迹。
 
 ---
 
@@ -32,21 +30,34 @@
 ```mermaid
 flowchart TD
     start([开始 step]) --> prepare[准备上下文 ctx]
-    prepare --> metadata[收集候选 skill 元数据]
-    metadata --> choose[主 LLM 选择启用的技能]
-
-    choose --> dep_ok{依赖完整?}
-    dep_ok -- 是 --> sort[按优先级排序]
-    dep_ok -- 否 --> repair[让 LLM 修正一次]
-    repair --> repaired_ok{修正后完整?}
-    repaired_ok -- 是 --> sort
-    repaired_ok -- 否 --> prune[裁剪非法技能]
-    prune --> sort
-
-    sort --> execute[按需加载并执行]
-    execute --> record[记录 step 结果]
+    prepare --> catalog[注入身份 + 技能目录 + 工具表到 system prompt]
+    catalog --> loop[主 LLM 逐轮选择一个工具调用]
+    loop --> execute[执行工具/技能并回写结果]
+    execute --> done{done?}
+    done -- 否 --> loop
+    done -- 是 --> record[记录 step 结果]
     record --> finish([结束])
 ```
+
+### 2.1 关键入口函数（对齐源码）
+
+以 `packages/agentsociety2/agentsociety2/agent/person.py` 为准，关键链路是：
+
+- `PersonAgent.step(tick, t)`: 一步的主入口（内部驱动工具循环）
+- `PersonAgent.get_system_prompt(tick, t)`: **每轮**注入身份信息 + Skill Catalog + Tools 表
+- `PersonAgent._tool_loop(tick, t)`: 多轮循环（生成 ToolDecision -> 执行工具 -> 回写 thread）
+- `PersonAgent._append_tool_result_to_thread(...)`: 把工具执行结果写为 `TOOL_RESULT_JSON:` 供下一轮参考
+- `PersonAgent._compact_thread_if_needed(...)`: thread 过长时做滑动摘要（保留最近 N 条）
+
+### 2.2 ToolDecision 输出契约（主模型必须输出的 JSON）
+
+`ToolDecision`（Pydantic）字段：
+
+- `tool_name`:  
+  `activate_skill | read_skill | execute_skill | workspace_read | workspace_write | workspace_list | enable_skill | disable_skill | bash | glob | grep | codegen | done`
+- `arguments`: 工具参数 dict（各工具参数见 system prompt 的 Tools 表）
+- `done`: 是否结束当前 step
+- `summary`: 对当前 step 的简短总结（用于日志/UI）
 
 ---
 
@@ -57,10 +68,12 @@ flowchart TD
 ```mermaid
 flowchart TB
     subgraph runtime[运行链路]
-        caller[用户/实验脚本] --> agent[PersonAgent 主流程]
-        agent --> registry[SkillRegistry 注册与加载]
-        registry --> skill_meta[读取 SKILL.md 元数据]
-        registry --> skill_entry[加载 scripts/run 入口]
+        caller[用户/实验脚本] --> agent[PersonAgent.step]
+        agent --> prompt[PersonAgent.get_system_prompt]
+        prompt --> llm[主模型 ToolDecision]
+        llm --> builtin[内置工具: bash/grep/glob/workspace_*]
+        llm --> skill_tools[skill 工具: activate/read/execute]
+        skill_tools --> registry[SkillRegistry]
     end
 
     subgraph management[管理链路]
@@ -69,7 +82,7 @@ flowchart TB
     end
 
     custom_dir -. 扫描后进入可选池 .-> registry
-    agent -. 需要管理时调用 .-> api
+    agent -. init 时扫描 custom/env .-> registry
 ```
 
 ### 3.1 核心代码结构
@@ -77,8 +90,7 @@ flowchart TB
 ```text
 packages/agentsociety2/agentsociety2/
 ├── agent/
-│   ├── person.py                      # Step 主流程 + 选择 + 执行
-│   ├── models.py                      # SkillMetaSelection 等结构化模型
+│   ├── person.py                      # Claude-like tool loop + skills runtime
 │   └── skills/
 │       ├── __init__.py                # SkillRegistry（扫描/加载/依赖解析）
 │       ├── observation/
@@ -102,85 +114,75 @@ extension/
 <skill-name>/
 ├── SKILL.md
 └── scripts/
-    └── <entry>.py
+    └── <entry>.py            # 可选：子进程执行脚本（由 frontmatter.script 指定）
 ```
 
 约定：
 
-1. `SKILL.md` 放 frontmatter 元数据和行为说明。
-2. 入口脚本必须导出 `async def run(agent, ctx)`。
+1. `SKILL.md` 放 frontmatter 元数据（name/description/requires/script/executor/...）和行为说明。
+2. `execute_skill` 默认以 **子进程**方式执行 `script`（见 `SkillRegistry.execute`），不是 import `run(agent, ctx)`。
 
 ---
 
 ## 4. 加载机制（Loading）
 
-### 4.1 初始化：不预加载
+### 4.1 初始化：创建技能目录快照
 
-`PersonAgent.__init__` 的行为：
+`PersonAgent.__init__` 默认只暴露 `core_skills`（渐进式披露）。对应关键字段：
 
-1. `_loaded_skills` 初始化为空。
-2. 只刷新可选技能池。
-3. 不预加载任何 skill 代码。
+- `_core_skill_names`: 核心可见技能集合（默认 observation/needs/cognition/plan/memory）
+- `_skill_visibility_overrides`: 显式隐藏/显示覆写（`disable_skill/enable_skill` 写入）
+- `_selectable_skill_names`: 结合 enabled + overrides + core_skills 后的最终“可见技能集合”
 
-### 4.2 执行期：按需加载
+### 4.2 init：扫描 custom 与 env skills
 
-`_get_or_load_skill(name)`：
+`PersonAgent.init(env)` 会在运行时扫描：
 
-1. 命中缓存就复用。
-2. 否则调用 `SkillRegistry.load_single(name, load_dependencies=False)`。
-3. 成功后写入缓存。
+1. `custom/skills`（来自 workspace）
+2. 环境模块提供的 skills（`env:*`），并默认加入核心可见集合（对该环境下的 agent 默认可见）
 
-### 4.3 可选池刷新：显式触发
+对应关键实现：
 
-不会每个 step 自动刷新。常见刷新入口：
-
-1. `reload_skills()`。
-2. `init()` 扫描到 env 附带技能之后。
-3. `add_skill()` / `remove_skill()`。
-4. 前端执行“扫描 Skills”或导入流程后刷新。
+- `SkillRegistry.scan_custom(workspace_path)`
+- `SkillRegistry.scan_env_skills(skills_dir, env_name)`
+- `PersonAgent._refresh_selectable_skills()`
 
 ---
 
 ## 5. 选择机制（Selection）
 
-### 5.1 选择阶段只看元数据
+当前版本仍然有一个非常轻量的 “L0 catalog”：
 
-`list_selection_metadata(...)` 导出的字段：
+- `SkillRegistry.list_selection_metadata(...)`：仅返回 `name/description/requires`
+- `AgentSkillRuntime.skill_list(names)`：返回该 L0 catalog（供 `get_system_prompt()` 注入）
 
-1. `name`
-2. `description`
-3. `priority`
-4. `requires`
-5. `provides`
-6. `provides_state`
-7. `source`
+工具循环中的用法是：
 
-不会读取 `SKILL.md` 全文，不触发代码导入。
-
-### 5.2 结构化输出，避免自由文本歧义
-
-`SkillMetaSelection`：
-
-1. `selected_skills`
-2. `reasoning`
-3. `rationale_by_skill`
+1. 先看 L0 catalog（决定是否需要某个技能）
+2. 需要时调用 `activate_skill(skill_name)` 加载完整 `SKILL.md`（全文指令）
+3. 需要执行时调用 `execute_skill(skill_name, args)` 运行脚本并产生 artifacts
 
 ---
 
 ## 6. 依赖策略
 
-1. 对已选技能做依赖检查。
-2. 缺依赖时，给主 LLM 一次修正机会，可加依赖或删依赖方。
-3. 仍不合法则裁剪非法技能。
+依赖由 `SKILL.md frontmatter.requires` 声明，运行时由 `PersonAgent._ensure_requires_activated()` 辅助处理：
+
+- 在 `activate_skill/execute_skill` 前自动尝试激活 requires（若依赖可见但未激活）
+- 若 requires 里有“不在可见集合”的依赖，会返回 `missing` 并写回 `TOOL_RESULT_JSON`
 
 ---
 
 ## 7. memory 行为
 
-1. cognition/needs 等技能会把内容写入 `_cognition_memory` 缓冲区。
-2. 如果当步选中了 `memory`，就会 flush 到长期记忆。
-3. 如果当步没选中 `memory`，缓冲不会清空，会保留到后续 step。
-4. `close()` 时会做一次兜底 flush，避免静默丢数据。
+记忆属于 skill 语义的一部分：由 `memory` 技能决定何时写入、写入什么文件/存储，以及与其他技能（如 `cognition`）的配合方式。
+
+与“可复现/可审计”直接相关的是 agent workspace 的标准日志文件（由 `AgentSkillRuntime` 维护）：
+
+- `run_dir/agents/agent_XXXX/thread_messages.jsonl`
+- `run_dir/agents/agent_XXXX/tool_calls.jsonl`
+- `run_dir/agents/agent_XXXX/step_replay.jsonl`
+- `run_dir/agents/agent_XXXX/session_state.json`、`session_state_history.jsonl`
 
 ---
 
@@ -224,7 +226,7 @@ flowchart TD
 
 1. 做环境观测。
 2. 若环境返回 `in_progress`，可短路当前 step。
-3. `priority: 0`，通常最先运行。
+3. 是否“优先运行”由主模型在工具循环里决定；当前 L0 catalog 只提供 `name/description/requires`，不会强制按 priority 排序执行。
 
 ### 9.2 needs
 
@@ -234,9 +236,7 @@ flowchart TD
 
 ### 9.3 cognition
 
-1. 合并更新情绪、思考、意图。
-2. 产出 `cognition_ran=True`。
-3. 会向 `_cognition_memory` 写入缓冲内容。
+负责“思考/情绪/意图”等认知产物的生成与落盘（具体由该技能的 `SKILL.md` 定义）。
 
 ### 9.4 plan
 
@@ -246,18 +246,16 @@ flowchart TD
 
 ### 9.5 memory
 
-1. 把 `_cognition_memory` 缓冲刷入长期记忆。
-2. 按条件触发 `_query_current_intention()`。
-3. 未被选中时不会运行，但缓冲会保留待后续 flush。
+负责记忆的写入/检索/压缩（具体由该技能的 `SKILL.md` 定义）。
 
 ---
 
 ## 10. 开发建议
 
-1. 新 Skill 至少提供：`name/description/priority`。
+1. 新 Skill 至少提供：`name/description`（以及必要时的 `requires/script/executor`）。
 2. `description` 写“什么时候该选我”，不要只写“我能做什么”。
 3. `requires` 只写硬依赖，避免过度约束。
-4. 入口脚本外的 helper 文件，需要在入口里显式 import 才会生效。
+4. `script` 指向的入口文件会以子进程方式执行；helper 文件需要被入口脚本显式 import 才会生效。
 5. 上传新 skill 后，记得触发 scan/import 刷新，不要等每步自动发现。
 
 ---
@@ -266,39 +264,30 @@ flowchart TD
 
 把一个 step 想成“点菜 + 下单 + 做菜”：
 
-1. Agent 先看菜单（技能元数据）。
-2. 主模型决定这步要用哪些技能。
-3. 如果依赖不完整，先修一次；还不行就删掉有问题的技能。
-4. 按优先级从高到低，逐个加载并执行技能。
-5. 把本步日志和结果打包返回。
+1. Agent 把“技能目录 + 工具表”塞进 system prompt。
+2. 主模型每轮只做一件事：输出一个 `ToolDecision`（JSON）。
+3. Agent 执行该工具，把结果写回 thread（`TOOL_RESULT_JSON`）。
+4. 重复直到 `done=true` 或达到 `max_tool_rounds`。
 
 ```mermaid
 sequenceDiagram
     participant 调用方
     participant Agent as PersonAgent
-    participant 注册中心 as SkillRegistry
     participant 主模型
-    participant 技能
+    participant 工具/技能
 
     调用方->>Agent: 开始 step
-    Agent->>注册中心: 取技能元数据
-    注册中心-->>Agent: 返回可选技能列表
-    Agent->>主模型: 让你选这步要用哪些技能
-    主模型-->>Agent: 返回已选技能
-
-    Agent->>Agent: 依赖检查（不完整则修正/裁剪）
-
-    loop 按优先级逐个执行
-        Agent->>注册中心: 按需加载技能
-        注册中心-->>Agent: 返回技能对象
-        Agent->>技能: 执行 run(agent, ctx)
-        技能-->>Agent: 回写日志/状态
+    Agent->>主模型: 注入技能目录与工具表
+    loop 多轮工具调用
+        主模型-->>Agent: 选择一个工具调用（JSON）
+        Agent->>工具/技能: 执行
+        工具/技能-->>Agent: 返回结果
     end
 
     Agent-->>调用方: 返回本步结果
 ```
 
-一句话记忆：先选技能，再修依赖，最后按优先级执行。
+一句话记忆：像 Claude Code 一样，多轮工具调用，直到 done。
 
 ---
 
@@ -306,23 +295,20 @@ sequenceDiagram
 
 ```mermaid
 stateDiagram-v2
-    [*] --> Discovered: 扫描 builtin/custom/env
-    Discovered --> Enabled: 启用技能
-    Enabled --> Candidate: 刷新可选池
-    Candidate --> Selected: 本步被 LLM 选中
-    Candidate --> Candidate: 本步未被选中
-    Selected --> Loaded: 按需加载
-    Loaded --> Executed: 执行 run(agent, ctx)
-    Executed --> Candidate: 进入下一步
-    Enabled --> Disabled: 禁用技能
-    Disabled --> Enabled: 重新启用
+    [*] --> Discovered: scan_builtin/custom/env
+    Discovered --> Visible: core_skills / enable_skill
+    Visible --> Hidden: disable_skill
+    Hidden --> Visible: enable_skill
+    Visible --> Activated: activate_skill (loads SKILL.md)
+    Activated --> Executed: execute_skill (subprocess script)
+    Executed --> Visible: 下一轮/下一步继续
 ```
 
 ---
 
 ## 13. 最小实操示例
 
-下面给一个最小可运行的自定义 skill 示例，方便快速验证导入链路。
+下面给一个最小可运行的自定义 skill 示例，验证 `activate_skill -> execute_skill` 子进程链路。
 
 目录：
 
@@ -338,12 +324,10 @@ SKILL.md：
 ```yaml
 ---
 name: hello-memory
-description: 在需要记录简短日志时可启用，向 cognition memory 写入一条调试信息。
-priority: 65
+description: 写入一条 hello_memory.txt 到 agent workspace，用于验证 execute_skill 子进程链路。
+script: scripts/hello_memory.py
 requires:
     - observation
-provides:
-    - debug_memory
 ---
 
 # Hello Memory
@@ -355,22 +339,53 @@ scripts/hello_memory.py：
 
 ```python
 from __future__ import annotations
-from typing import Any
+import argparse
+import json
+import os
+from pathlib import Path
 
 
-async def run(agent: Any, ctx: dict[str, Any]) -> None:
-    agent._add_cognition_memory(
-        "hello-memory executed",
-        memory_type="debug",
+def main() -> int:
+    parser = argparse.ArgumentParser()
+    parser.add_argument("--args-json", required=True)
+    ns = parser.parse_args()
+    args = json.loads(ns.args_json)
+
+    agent_work_dir = Path(os.environ["AGENT_WORK_DIR"])
+    (agent_work_dir / "hello_memory.txt").write_text(
+        f"hello-memory executed. args={json.dumps(args, ensure_ascii=False)}\n",
+        encoding="utf-8",
     )
-    ctx["step_log"].append("hello-memory:ok")
+    print("ok: wrote hello_memory.txt")
+    return 0
+
+
+if __name__ == "__main__":
+    raise SystemExit(main())
 ```
 
-验证步骤：
+在工具循环中使用：
+
+1. `activate_skill` 读取 `SKILL.md`（让主模型知道怎么用）
+2. `execute_skill` 传入 `args`（会变成脚本的 `--args-json`）
+
+示例 `ToolDecision`：
+
+```json
+{"tool_name":"execute_skill","arguments":{"skill_name":"hello-memory","args":{"foo":"bar"}},"done":false,"summary":""}
+```
+
+执行后的可观测结果：
+
+- `TOOL_RESULT_JSON` 中会出现 `exit_code/stdout/stderr/artifacts`
+- `hello_memory.txt` 会作为 artifact 出现在结果里（由 `SkillRegistry.execute` 的 before/after diff 计算）
+
+验证步骤（端到端）：
 
 1. 在扩展中执行导入（本地目录或 Git URL）。
 2. 执行扫描技能。
 3. 查看技能列表确认出现 hello-memory。
-4. 跑一个 step，检查日志中是否出现 hello-memory:ok。
+4. 让 agent 执行 `execute_skill`。
+5. 在对应 agent workspace 下检查 `hello_memory.txt` 是否生成。
 
 ---

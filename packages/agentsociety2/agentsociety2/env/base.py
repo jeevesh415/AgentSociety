@@ -30,13 +30,15 @@ Example::
             return f"Moved to {destination}"
 """
 
+import asyncio
 import functools
 import inspect
 import json
+import re
 from copy import deepcopy
 from datetime import datetime
 from pathlib import Path
-from typing import TYPE_CHECKING, Any, Callable, Dict, Literal, Optional, TypeVar, overload
+from typing import TYPE_CHECKING, Any, Callable, ClassVar, Dict, Literal, Optional, Tuple, TypeVar, overload
 
 if TYPE_CHECKING:
     from agentsociety2.storage import ReplayWriter
@@ -346,26 +348,21 @@ class EnvBase(metaclass=EnvMeta):
     子类应实现：
         - 使用 ``@tool`` 装饰器定义可执行操作
         - 可选：实现 ``observe()`` 方法（默认收集 kind="observe" 的工具）
-
-    Example::
-
-        class MyEnv(EnvBase):
-            @tool(readonly=True, kind="observe")
-            def get_location(self, agent_id: int) -> str:
-                '''获取 Agent 当前位置'''
-                return self._locations.get(agent_id, "unknown")
-
-            @tool(readonly=False)
-            def move(self, agent_id: int, destination: str) -> str:
-                '''移动 Agent 到指定位置'''
-                self._locations[agent_id] = destination
-                return f"Moved to {destination}"
-
-    Attributes:
-        t: 当前模拟时间
-        _replay_writer: 回放写入器
-        _tool_call_history: 工具调用历史
     """
+
+    # 声明式状态持久化：子类覆盖以自动创建 replay 表
+    _agent_state_columns: ClassVar[list] = []
+    _env_state_columns: ClassVar[list] = []
+
+    @classmethod
+    def _state_table_prefix_from_class(cls) -> str:
+        """从类名推导表名前缀（PascalCase -> snake_case，去常见后缀）"""
+        name = cls.__name__
+        for suffix in ("Space", "Env", "Module"):
+            if name.endswith(suffix) and len(name) > len(suffix):
+                name = name[:-len(suffix)]
+                break
+        return re.sub(r"(?<=[a-z0-9])(?=[A-Z])", "_", name).lower()
 
     def __init__(self):
         self.t = datetime.now()
@@ -375,6 +372,7 @@ class EnvBase(metaclass=EnvMeta):
 
         # Replay writer for storing simulation state
         self._replay_writer: Optional["ReplayWriter"] = None
+        self._state_tables_registered: bool = False
 
         tools = list(getattr(self.__class__, "_registered_tools", {}).values())
         self._tool_manager = ToolManager(tools=tools)
@@ -572,3 +570,122 @@ It contains no functions or methods.
             writer: The ReplayWriter instance to use for storing replay data.
         """
         self._replay_writer = writer
+        if writer is not None and (self._agent_state_columns or self._env_state_columns):
+            try:
+                loop = asyncio.get_running_loop()
+                task = loop.create_task(self._register_state_tables())
+                task.add_done_callback(self._on_register_state_tables_done)
+            except RuntimeError:
+                # 没有运行中的事件循环，首次写入时惰性注册
+                pass
+
+    @staticmethod
+    def _on_register_state_tables_done(task: "asyncio.Task[None]") -> None:
+        """Callback for _register_state_tables task to log exceptions."""
+        if task.cancelled():
+            return
+        exc = task.exception()
+        if exc is not None:
+            import logging
+
+            logging.getLogger(__name__).error(
+                "Failed to register state tables: %s", exc, exc_info=exc
+            )
+
+    @property
+    def _state_table_prefix(self) -> str:
+        """从类名推导表名前缀（PascalCase → snake_case，去常见后缀）"""
+        return type(self)._state_table_prefix_from_class()
+
+    async def _register_state_tables(self) -> None:
+        """根据 _agent_state_columns / _env_state_columns 声明自动注册 replay 表"""
+        if self._replay_writer is None or self._state_tables_registered:
+            return
+
+        from agentsociety2.storage import ColumnDef, TableSchema
+
+        prefix = self._state_table_prefix
+
+        if self._agent_state_columns:
+            schema = TableSchema(
+                name=f"{prefix}_agent_state",
+                columns=[
+                    ColumnDef("agent_id", "INTEGER", nullable=False),
+                    ColumnDef("step", "INTEGER", nullable=False),
+                    ColumnDef("t", "TIMESTAMP", nullable=False),
+                    *self._agent_state_columns,
+                ],
+                primary_key=["agent_id", "step"],
+                indexes=[["step"], ["t"]],
+            )
+            await self._replay_writer.register_table(schema)
+
+        if self._env_state_columns:
+            schema = TableSchema(
+                name=f"{prefix}_env_state",
+                columns=[
+                    ColumnDef("step", "INTEGER", nullable=False),
+                    ColumnDef("t", "TIMESTAMP", nullable=False),
+                    *self._env_state_columns,
+                ],
+                primary_key=["step"],
+                indexes=[["t"]],
+            )
+            await self._replay_writer.register_table(schema)
+
+        self._state_tables_registered = True
+
+    async def _write_agent_state(
+        self, agent_id: int, step: int, t: datetime, **data: Any
+    ) -> None:
+        """写入 per-agent 交互状态到 {prefix}_agent_state 表
+
+        Args:
+            agent_id: Agent ID
+            step: 当前步数
+            t: 当前模拟时间
+            **data: 模块自定义字段（需与 _agent_state_columns 声明匹配）
+        """
+        if self._replay_writer is None:
+            return
+        if not self._state_tables_registered:
+            await self._register_state_tables()
+        table_name = f"{self._state_table_prefix}_agent_state"
+        await self._replay_writer.write(
+            table_name, {"agent_id": agent_id, "step": step, "t": t, **data}
+        )
+
+    async def _write_agent_state_batch(
+        self, step: int, t: datetime, records: list[dict[str, Any]]
+    ) -> None:
+        """批量写入 per-agent 交互状态
+
+        Args:
+            step: 当前步数
+            t: 当前模拟时间
+            records: 记录列表，每条需包含 agent_id 和模块自定义字段
+        """
+        if self._replay_writer is None or not records:
+            return
+        if not self._state_tables_registered:
+            await self._register_state_tables()
+        table_name = f"{self._state_table_prefix}_agent_state"
+        rows = [{"step": step, "t": t, **rec} for rec in records]
+        await self._replay_writer.write_batch(table_name, rows)
+
+    async def _write_env_state(self, step: int, t: datetime, **data: Any) -> None:
+        """写入环境全局状态到 {prefix}_env_state 表
+
+        Args:
+            step: 当前步数
+            t: 当前模拟时间
+            **data: 模块自定义字段（需与 _env_state_columns 声明匹配）
+        """
+        if self._replay_writer is None:
+            return
+        if not self._state_tables_registered:
+            await self._register_state_tables()
+        table_name = f"{self._state_table_prefix}_env_state"
+        await self._replay_writer.write(
+            table_name, {"step": step, "t": t, **data}
+        )

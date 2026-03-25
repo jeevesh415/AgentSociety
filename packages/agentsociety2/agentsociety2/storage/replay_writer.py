@@ -4,14 +4,14 @@ Architecture:
 - Framework tables (agent_profile, agent_status, agent_dialog): defined in models.py
   as SQLModel classes; created in init() via SQLModel.metadata.create_all; written via
   write_agent_profile, write_agent_status, write_agent_dialog (and batch variants).
-- Dynamic tables (e.g. agent_position, social_*): each environment module owns its
-  schema and data. The module calls register_table(TableSchema) during init() to
-  create the table, and write(table_name, row) to persist rows. Query-only
-  SQLAlchemy Table definitions for the replay API live in each module's
-  replay_tables.py (e.g. contrib/env/mobility_space/replay_tables.py).
+- Dynamic tables (e.g. mobility_agent_state, social_*): each environment module owns
+  its schema and data. The module calls register_table(TableSchema) during init() to
+  create the table, and write(table_name, row) to persist rows. The replay API
+  discovers these tables at query time via SQLAlchemy table reflection — no
+  module-specific schema definitions are needed on the query side.
 Extensibility: new env modules can add replay tables by defining a TableSchema,
-calling register_table() and write(), and exposing a Table in replay_tables.py for
-the replay router to use.
+calling register_table() and write(). The replay router will automatically discover
+and query them via database reflection.
 """
 
 import asyncio

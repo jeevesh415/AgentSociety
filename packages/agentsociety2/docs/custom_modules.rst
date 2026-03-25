@@ -14,6 +14,7 @@ AgentSociety 2 支持创建和注册自定义智能体和环境模块，
 * 通过 API 自动发现和注册模块
 * 使用自动生成的测试脚本测试自定义模块
 * 与现有 AgentSociety 框架无缝集成
+* 通过 Progressive Disclosure workflow 持久化需求、设计和验证产物
 
 目录结构
 -------------------
@@ -28,7 +29,9 @@ AgentSociety 2 支持创建和注册自定义智能体和环境模块，
    │       └── my_env.py
    └── .agentsociety/             # Auto-generated configuration
        ├── agent_classes/
-       └── env_modules/
+       ├── env_modules/
+       └── custom_env_skill/
+           └── runs/
 
 创建自定义智能体
 -------------------------
@@ -127,6 +130,20 @@ AgentSociety 2 支持创建和注册自定义智能体和环境模块，
            """Environment step"""
            self.t = t
 
+现实兼容约束
+~~~~~~~~~~~~~~~~~~~
+
+生成的自定义环境模块仍然必须遵循当前仓库的真实兼容约束：
+
+* 文件必须位于 ``custom/envs/*.py``
+* 类定义必须直接位于该文件中，不能只做 re-export
+* 注册 key 继续使用 ``class_name``
+* 至少存在一个合法 ``@tool``
+* ``step()`` 必须存在
+* 默认应支持无参实例化 ``cls()``
+* 若模块需要观察能力，应提供 readonly ``kind="observe"`` 工具
+* 应提供可调用且信息完整的 ``mcp_description()``
+
 @tool 装饰器
 ~~~~~~~~~~~~~~~~~~~
 
@@ -175,6 +192,22 @@ AgentSociety 2 支持创建和注册自定义智能体和环境模块，
      -H "Content-Type: application/json" \
      -d '{"workspace_path": "/path/to/workspace"}'
 
+**创建或恢复 workflow run**
+
+.. code-block:: bash
+
+   curl -X POST http://localhost:8001/api/v1/custom/workflow/runs \
+     -H "Content-Type: application/json" \
+     -d '{"workspace_path": "/path/to/workspace", "user_request": "create a resource env"}'
+
+**验证 workflow run**
+
+.. code-block:: bash
+
+   curl -X POST http://localhost:8001/api/v1/custom/workflow/runs/<run_id>/validate \
+     -H "Content-Type: application/json" \
+     -d '{"module_path": "custom/envs/my_env.py", "class_name": "MyEnv"}'
+
 API 端点
 ~~~~~~~~~~~~~
 
@@ -199,6 +232,12 @@ API 端点
    * - ``/api/v1/custom/status``
      - GET
      - 获取模块状态概述
+   * - ``/api/v1/custom/workflow/runs``
+     - POST
+     - 创建或恢复自定义环境 workflow run
+   * - ``/api/v1/custom/workflow/runs/{run_id}/validate``
+     - POST
+     - 执行 scanner/tester/registry 的端到端校验
 
 示例
 --------
@@ -255,3 +294,4 @@ API 端点
 * 对只读观察使用 ``kind="observe"``
 * 对聚合数据使用 ``kind="statistics"``
 * 对操作使用 ``kind=None`` 和 ``readonly=False``
+* 生成后优先通过 workflow 产物中的 ``validation_report.json`` 定位失败原因

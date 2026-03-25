@@ -396,6 +396,7 @@ class ExperimentRunner:
             env_router = CodeGenRouter(
                 env_modules=env_modules,
                 replay_writer=replay_writer,
+                final_summary_enabled=config.codegen_router.final_summary_enabled,
             )
 
             logger.info(f"Creating {len(agent_args)} agents...")

@@ -185,20 +185,6 @@ class MyCustomModule(EnvBase):
         self._param1 = value
         return f"State set to {value}"
 
-    def observe(self) -> str:
-        """Return overall module state."""
-        return f"MyCustomModule: {self._param1}"
-
-    @classmethod
-    def mcp_description(cls) -> str:
-        """Return description for VSCode extension."""
-        return """MyCustomModule - A custom environment module.
-
-Provides tools for X functionality.
-
-Parameters:
-    param1 (str): Description of parameter
-"""
 ```
 
 ## Custom Module Directory Structure
@@ -328,7 +314,27 @@ GET /api/v1/modules
 
 ## Module Information
 
-Get detailed information about a module:
+### Agent Validation
+
+Agents are validated for:
+
+1. **Base class**: Must inherit from `AgentBase`
+2. **Required methods**: Must have `ask()` method
+3. **MCP description**: Must have `mcp_description()` classmethod
+4. **Type hints**: Parameters should have type hints
+5. **Docstrings**: Should have descriptive docstrings
+
+### Module Validation
+
+Modules are validated for:
+
+1. **Base class**: Must inherit from `EnvBase`
+2. **Tools**: Must have at least one `@tool` decorated method
+3. **Observation capability**: Expose observation through readonly `kind="observe"` tools when needed
+4. **Type hints**: Tool parameters should have type hints
+5. **Docstrings**: Tools should have descriptive docstrings
+
+## Error Handling
 
 ```python
 registry = get_registry()

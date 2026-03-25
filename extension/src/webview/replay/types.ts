@@ -2,8 +2,6 @@
  * Type definitions for the Replay Webview
  */
 
-import type { Dayjs } from 'dayjs';
-
 /** VSCode API type */
 export interface VSCodeAPI {
   postMessage: (message: any) => void;
@@ -76,7 +74,7 @@ export interface ExperimentInfo {
   start_time: string | null;
   end_time: string | null;
   agent_count: number;
-  /** Whether the experiment has social module (social_user table). When false, do not request social APIs or show social panel. */
+  /** Whether the experiment has social replay data. When false, do not request social APIs or show social panel. */
   has_social?: boolean;
 }
 
@@ -97,7 +95,7 @@ export interface SocialUser {
 /** Social media post */
 export interface SocialPost {
   post_id: number;
-  author_id?: number; // optional for backward compat
+  author_id: number;
   content: string;
   post_type: string;
   parent_id?: number | null;
@@ -122,24 +120,21 @@ export interface SocialComment {
   likes_count?: number;
 }
 
-/** Social media direct message */
-export interface SocialDirectMessage {
-  message_id: number;
-  from_user_id: number;
-  to_user_id: number;
-  content: string;
-  created_at?: string | null;
-  read: boolean;
-}
-
-/** Social media group message */
-export interface SocialGroupMessage {
-  message_id: number;
-  group_id: number;
-  group_name?: string | null;
-  from_user_id: number;
-  content: string;
-  created_at?: string | null;
+/** Social media event */
+export interface SocialEvent {
+  event_id: number;
+  step: number;
+  t?: string | null;
+  sender_id: number;
+  sender_name: string;
+  action: string;
+  content?: string | null;
+  receiver_id?: number | null;
+  receiver_name?: string | null;
+  target_id?: number | null;
+  target_author_id?: number | null;
+  target_author_name?: string | null;
+  summary: string;
 }
 
 /** Social network graph */
@@ -197,12 +192,10 @@ export interface TableContent {
   total: number;
 }
 
-/** Per-step social activity: which agents received/sent DMs or sent group messages */
+/** Per-step social activity derived from social replay events */
 export interface SocialActivityAtStep {
   step: number;
-  receivedDmAgentIds: number[];
-  sentDmAgentIds: number[];
-  sentGroupMessageAgentIds: number[];
+  highlightedAgentIds: number[];
 }
 
 /** Message types from extension to webview */
@@ -216,8 +209,7 @@ export type ExtensionMessage =
   | { type: 'agentDialogs'; data: AgentDialog[] }
   | { type: 'socialProfile'; data: SocialUser }
   | { type: 'socialPosts'; data: SocialPost[] }
-  | { type: 'socialDirectMessages'; data: SocialDirectMessage[] }
-  | { type: 'socialGroupMessages'; data: SocialGroupMessage[] }
+  | { type: 'socialEvents'; data: SocialEvent[] }
   | { type: 'socialNetwork'; data: SocialNetwork }
   | { type: 'socialActivity'; data: SocialActivityAtStep }
   | { type: 'allPosts'; data: SocialPost[] }
@@ -246,8 +238,7 @@ export type WebviewMessage =
   | { command: 'fetchAgentDialogs'; agentId: number; dialogType?: DialogType }
   | { command: 'fetchSocialProfile'; agentId: number }
   | { command: 'fetchSocialPosts'; agentId: number }
-  | { command: 'fetchSocialDirectMessages'; agentId: number; step?: number }
-  | { command: 'fetchSocialGroupMessages'; agentId: number; step?: number }
+  | { command: 'fetchSocialEvents'; agentId: number; step?: number }
   | { command: 'fetchSocialNetwork' }
   | { command: 'fetchSocialActivity'; step: number }
   | { command: 'fetchAllPosts'; step?: number }
