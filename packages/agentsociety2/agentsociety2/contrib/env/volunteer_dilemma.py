@@ -4,11 +4,12 @@ Environment for Volunteer's Dilemma game based on V2 framework
 """
 import asyncio
 from datetime import datetime
-from typing import Dict, List, Optional
+from typing import ClassVar, Dict, List, Optional
 
 from pydantic import BaseModel, Field
 
 from agentsociety2.env import EnvBase, tool
+from agentsociety2.storage import ColumnDef
 
 
 # Response models
@@ -22,6 +23,15 @@ class SubmitChoiceResponse(BaseModel):
 
 class VolunteerDilemmaEnv(EnvBase):
     """Environment for Volunteer's Dilemma game based on V2 framework"""
+
+    _env_state_columns: ClassVar[list[ColumnDef]] = [
+        ColumnDef("round_number", "INTEGER", nullable=False),
+        ColumnDef("last_round", "JSON"),
+        ColumnDef("pending_choices", "JSON", nullable=False),
+        ColumnDef("num_agents", "INTEGER", nullable=False),
+        ColumnDef("benefit_b", "INTEGER", nullable=False),
+        ColumnDef("cost_c", "INTEGER", nullable=False),
+    ]
 
     def __init__(
         self,
@@ -49,6 +59,7 @@ class VolunteerDilemmaEnv(EnvBase):
         self._pending_choices: Dict[str, str] = {}
         
         self._lock = asyncio.Lock()
+        self._step_counter: int = 0
 
     @classmethod
     def mcp_description(cls) -> str:
@@ -164,6 +175,10 @@ class VolunteerDilemmaEnv(EnvBase):
     async def init(self, start_datetime: datetime):
         """Initialize the environment"""
         await super().init(start_datetime)
+        self.round_number = 0
+        self.round_history.clear()
+        self._pending_choices.clear()
+        self._step_counter = 0
 
     async def step(self, tick: int, t: datetime):
         """
@@ -177,10 +192,7 @@ class VolunteerDilemmaEnv(EnvBase):
         """
         async with self._lock:
             self.t = t
-            
-            # 调试：打印待处理的选择
-            import sys
-            print(f"[ENV DEBUG STEP] Pending choices: {self._pending_choices}", file=sys.stderr)
+            last_round = self.round_history[-1] if self.round_history else None
             
             # Check if we have enough submissions to execute a round
             if len(self._pending_choices) >= self.num_agents:
@@ -219,9 +231,25 @@ class VolunteerDilemmaEnv(EnvBase):
                 }
 
                 self.round_history.append(round_summary)
+                last_round = round_summary
 
                 # Clear pending choices for next round
                 self._pending_choices.clear()
+
+            round_number = self.round_number
+            pending_choices = self._pending_choices.copy()
+
+        await self._write_env_state(
+            step=self._step_counter,
+            t=t,
+            round_number=round_number,
+            last_round=last_round,
+            pending_choices=pending_choices,
+            num_agents=self.num_agents,
+            benefit_b=self.benefit_b,
+            cost_c=self.cost_c,
+        )
+        self._step_counter += 1
 
     def _dump_state(self) -> dict:
         """Serialize state"""
@@ -232,6 +260,7 @@ class VolunteerDilemmaEnv(EnvBase):
             "round_number": self.round_number,
             "round_history": self.round_history,
             "pending_choices": self._pending_choices,
+            "step_counter": self._step_counter,
         }
 
     def _load_state(self, state: dict):
@@ -242,6 +271,7 @@ class VolunteerDilemmaEnv(EnvBase):
         self.round_number = state.get("round_number", 0)
         self.round_history = state.get("round_history", [])
         self._pending_choices = state.get("pending_choices", {})
+        self._step_counter = state.get("step_counter", 0)
 
 
 __all__ = ["VolunteerDilemmaEnv"]

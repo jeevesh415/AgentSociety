@@ -4,11 +4,12 @@ Environment for Prisoner's Dilemma game based on V2 framework
 """
 import asyncio
 from datetime import datetime
-from typing import Dict, List, Optional, Tuple
+from typing import ClassVar, Dict, List, Optional, Tuple
 
 from pydantic import BaseModel, Field
 
 from agentsociety2.env import EnvBase, tool
+from agentsociety2.storage import ColumnDef
 
 
 # Response models
@@ -31,6 +32,16 @@ class GetPayoffMatrixResponse(BaseModel):
 
 class PrisonersDilemmaEnv(EnvBase):
     """Environment for Prisoner's Dilemma game based on V2 framework"""
+
+    _env_state_columns: ClassVar[list[ColumnDef]] = [
+        ColumnDef("round_number", "INTEGER", nullable=False),
+        ColumnDef("last_round", "JSON"),
+        ColumnDef("pending_actions", "JSON", nullable=False),
+        ColumnDef("payoff_cc", "INTEGER", nullable=False),
+        ColumnDef("payoff_cd", "INTEGER", nullable=False),
+        ColumnDef("payoff_dc", "INTEGER", nullable=False),
+        ColumnDef("payoff_dd", "INTEGER", nullable=False),
+    ]
 
     def __init__(
         self,
@@ -61,6 +72,7 @@ class PrisonersDilemmaEnv(EnvBase):
         self._pending_actions: Dict[str, str] = {}
         
         self._lock = asyncio.Lock()
+        self._step_counter: int = 0
 
     @classmethod
     def mcp_description(cls) -> str:
@@ -202,6 +214,10 @@ If you don't submit, the round execution is delayed.
     async def init(self, start_datetime: datetime):
         """Initialize the environment"""
         await super().init(start_datetime)
+        self.round_number = 0
+        self.round_history.clear()
+        self._pending_actions.clear()
+        self._step_counter = 0
 
     async def step(self, tick: int, t: datetime):
         """
@@ -216,6 +232,7 @@ If you don't submit, the round execution is delayed.
         """
         async with self._lock:
             self.t = t
+            last_round = self.round_history[-1] if self.round_history else None
             
             # Check if we have at least one agent's action to execute a round
             # (Other agents default to 'No' if they haven't submitted)
@@ -258,9 +275,26 @@ If you don't submit, the round execution is delayed.
                     }
 
                     self.round_history.append(round_summary)
+                    last_round = round_summary
 
                     # Clear pending actions for next round
                     self._pending_actions.clear()
+
+            round_number = self.round_number
+            pending_actions = self._pending_actions.copy()
+
+        await self._write_env_state(
+            step=self._step_counter,
+            t=t,
+            round_number=round_number,
+            last_round=last_round,
+            pending_actions=pending_actions,
+            payoff_cc=self.payoff_cc,
+            payoff_cd=self.payoff_cd,
+            payoff_dc=self.payoff_dc,
+            payoff_dd=self.payoff_dd,
+        )
+        self._step_counter += 1
 
     def _dump_state(self) -> dict:
         """Serialize state"""
@@ -272,6 +306,7 @@ If you don't submit, the round execution is delayed.
             "round_number": self.round_number,
             "round_history": self.round_history,
             "pending_actions": self._pending_actions,
+            "step_counter": self._step_counter,
         }
 
     def _load_state(self, state: dict):
@@ -283,6 +318,7 @@ If you don't submit, the round execution is delayed.
         self.round_number = state.get("round_number", 0)
         self.round_history = state.get("round_history", [])
         self._pending_actions = state.get("pending_actions", {})
+        self._step_counter = state.get("step_counter", 0)
 
 
 __all__ = ["PrisonersDilemmaEnv"]

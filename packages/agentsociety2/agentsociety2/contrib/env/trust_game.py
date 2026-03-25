@@ -4,11 +4,12 @@ Environment for Trust Game based on V2 framework
 """
 import asyncio
 from datetime import datetime
-from typing import Dict, List, Optional
+from typing import ClassVar, Dict, List, Optional
 
 from pydantic import BaseModel, Field
 
 from agentsociety2.env import EnvBase, tool
+from agentsociety2.storage import ColumnDef
 
 
 # Response models
@@ -51,6 +52,17 @@ class GetPendingInvestmentResponse(BaseModel):
 class TrustGameEnv(EnvBase):
     """Environment for Trust Game based on V2 framework"""
 
+    _env_state_columns: ClassVar[list[ColumnDef]] = [
+        ColumnDef("round_number", "INTEGER", nullable=False),
+        ColumnDef("last_round", "JSON"),
+        ColumnDef("pending_investments", "JSON", nullable=False),
+        ColumnDef("pending_returns", "JSON", nullable=False),
+        ColumnDef("partner_mapping", "JSON", nullable=False),
+        ColumnDef("num_pairs", "INTEGER", nullable=False),
+        ColumnDef("initial_funds", "INTEGER", nullable=False),
+        ColumnDef("multiplication_factor", "INTEGER", nullable=False),
+    ]
+
     def __init__(
         self,
         num_pairs: int = 4,
@@ -79,6 +91,7 @@ class TrustGameEnv(EnvBase):
         self._pending_returns: Dict[str, int] = {}  # trustee_name -> return_amount
         
         self._lock = asyncio.Lock()
+        self._step_counter: int = 0
 
     @classmethod
     def mcp_description(cls) -> str:
@@ -369,6 +382,11 @@ class TrustGameEnv(EnvBase):
     async def init(self, start_datetime: datetime):
         """Initialize the environment"""
         await super().init(start_datetime)
+        self.round_number = 0
+        self.round_history.clear()
+        self._pending_investments.clear()
+        self._pending_returns.clear()
+        self._step_counter = 0
 
     async def step(self, tick: int, t: datetime):
         """
@@ -382,6 +400,7 @@ class TrustGameEnv(EnvBase):
         """
         async with self._lock:
             self.t = t
+            last_round = self.round_history[-1] if self.round_history else None
             
             # Check if we have enough submissions to execute a round
             # Need all trustors' investments; if trustees haven't submitted returns yet, default to 0
@@ -438,10 +457,30 @@ class TrustGameEnv(EnvBase):
                 }
 
                 self.round_history.append(round_summary)
+                last_round = round_summary
 
                 # Clear pending decisions for next round
                 self._pending_investments.clear()
                 self._pending_returns.clear()
+
+            round_number = self.round_number
+            pending_investments = self._pending_investments.copy()
+            pending_returns = self._pending_returns.copy()
+            partner_mapping = self.partner_mapping.copy()
+
+        await self._write_env_state(
+            step=self._step_counter,
+            t=t,
+            round_number=round_number,
+            last_round=last_round,
+            pending_investments=pending_investments,
+            pending_returns=pending_returns,
+            partner_mapping=partner_mapping,
+            num_pairs=self.num_pairs,
+            initial_funds=self.initial_funds,
+            multiplication_factor=self.multiplication_factor,
+        )
+        self._step_counter += 1
 
     def _dump_state(self) -> dict:
         """Serialize state"""
@@ -454,6 +493,7 @@ class TrustGameEnv(EnvBase):
             "partner_mapping": self.partner_mapping,
             "pending_investments": self._pending_investments,
             "pending_returns": self._pending_returns,
+            "step_counter": self._step_counter,
         }
 
     def _load_state(self, state: dict):
@@ -466,6 +506,7 @@ class TrustGameEnv(EnvBase):
         self.partner_mapping = state.get("partner_mapping", {})
         self._pending_investments = state.get("pending_investments", {})
         self._pending_returns = state.get("pending_returns", {})
+        self._step_counter = state.get("step_counter", 0)
 
 
 __all__ = ["TrustGameEnv"]
