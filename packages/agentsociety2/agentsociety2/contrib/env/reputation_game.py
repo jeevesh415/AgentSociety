@@ -10,7 +10,7 @@ import json
 import random
 from datetime import datetime
 from enum import Enum
-from typing import Dict, List, Optional
+from typing import ClassVar, Dict, List, Optional
 
 from pydantic import BaseModel, Field, field_validator
 
@@ -18,6 +18,7 @@ from agentsociety2.env import (
     EnvBase,
     tool,
 )
+from agentsociety2.storage import ColumnDef
 
 
 # Enums for better type safety
@@ -208,6 +209,25 @@ class ReputationGameEnv(EnvBase):
     - Better error handling
     """
 
+    _agent_state_columns: ClassVar[list[ColumnDef]] = [
+        ColumnDef("reputation", "TEXT", nullable=False),
+        ColumnDef("payoff", "REAL", nullable=False),
+    ]
+    _env_state_columns: ClassVar[list[ColumnDef]] = [
+        ColumnDef("total_interactions", "INTEGER", nullable=False),
+        ColumnDef("cooperation_count", "INTEGER", nullable=False),
+        ColumnDef("defection_count", "INTEGER", nullable=False),
+        ColumnDef("cooperation_rate", "REAL", nullable=False),
+        ColumnDef("good_count", "INTEGER", nullable=False),
+        ColumnDef("bad_count", "INTEGER", nullable=False),
+        ColumnDef("good_ratio", "REAL", nullable=False),
+        ColumnDef("latest_action", "JSON"),
+        ColumnDef("norm_type", "TEXT", nullable=False),
+        ColumnDef("benefit", "INTEGER", nullable=False),
+        ColumnDef("cost", "INTEGER", nullable=False),
+        ColumnDef("population_size", "INTEGER", nullable=False),
+    ]
+
     def __init__(
         self,
         config: Optional[ReputationGameConfig | Dict] = None,
@@ -235,6 +255,7 @@ class ReputationGameEnv(EnvBase):
 
         # Thread safety
         self._lock = asyncio.Lock()
+        self._step_counter: int = 0
 
         # Initialize state
         self._init_state()
@@ -784,6 +805,12 @@ Your task is to use the available functions to manage agent reputations, payoffs
     async def init(self, start_datetime: datetime):
         """Initialize the environment."""
         await super().init(start_datetime)
+        async with self._lock:
+            self._reputations.clear()
+            self._payoffs.clear()
+            self._action_log.clear()
+            self._init_state()
+            self._step_counter = 0
 
     async def step(self, tick: int, t: datetime):
         """
@@ -796,6 +823,56 @@ Your task is to use the available functions to manage agent reputations, payoffs
         async with self._lock:
             self.t = t
             # Environment does not perform automatic operations, waits for Agent to call tools
+            total_interactions = len(self._action_log)
+            cooperation_count = sum(
+                1 for log in self._action_log if log.action == Action.COOPERATE.value
+            )
+            defection_count = total_interactions - cooperation_count
+            cooperation_rate = (
+                cooperation_count / total_interactions if total_interactions > 0 else 0.0
+            )
+            good_count = sum(
+                1 for reputation in self._reputations.values() if reputation == Reputation.GOOD
+            )
+            bad_count = sum(
+                1 for reputation in self._reputations.values() if reputation == Reputation.BAD
+            )
+            population_size = len(self._reputations)
+            good_ratio = good_count / population_size if population_size > 0 else 0.0
+            latest_action = (
+                self._action_log[-1].model_dump() if self._action_log else None
+            )
+            agent_rows = [
+                {
+                    "agent_id": agent_id,
+                    "reputation": self._reputation_to_str(reputation),
+                    "payoff": self._payoffs.get(agent_id, 0.0),
+                }
+                for agent_id, reputation in sorted(self._reputations.items())
+            ]
+
+        await self._write_agent_state_batch(
+            step=self._step_counter,
+            t=t,
+            records=agent_rows,
+        )
+        await self._write_env_state(
+            step=self._step_counter,
+            t=t,
+            total_interactions=total_interactions,
+            cooperation_count=cooperation_count,
+            defection_count=defection_count,
+            cooperation_rate=cooperation_rate,
+            good_count=good_count,
+            bad_count=bad_count,
+            good_ratio=good_ratio,
+            latest_action=latest_action,
+            norm_type=self._config.norm_type.value,
+            benefit=self._config.BENEFIT,
+            cost=self._config.COST,
+            population_size=self._config.Z,
+        )
+        self._step_counter += 1
 
     def _dump_state(self) -> dict:
         """Serialize state (for save/restore)."""
@@ -804,6 +881,7 @@ Your task is to use the available functions to manage agent reputations, payoffs
             "reputations": {k: v.value for k, v in self._reputations.items()},
             "payoffs": self._payoffs,
             "action_log": [log.model_dump() for log in self._action_log[-100:]],  # Only save last 100 entries
+            "step_counter": self._step_counter,
         }
 
     def _load_state(self, state: dict):
@@ -817,7 +895,7 @@ Your task is to use the available functions to manage agent reputations, payoffs
         # Load action log entries
         action_log_data = state.get("action_log", [])
         self._action_log = [ActionLogEntry(**entry) for entry in action_log_data]
+        self._step_counter = state.get("step_counter", 0)
 
 
 __all__ = ["ReputationGameEnv", "ReputationGameConfig", "Reputation", "Action", "NormType"]
-

@@ -4,11 +4,12 @@ Environment for Public Goods Game based on V2 framework
 """
 import asyncio
 from datetime import datetime
-from typing import Dict, List, Optional
+from typing import ClassVar, Dict, List, Optional
 
 from pydantic import BaseModel, Field
 
 from agentsociety2.env import EnvBase, tool
+from agentsociety2.storage import ColumnDef
 
 
 # Response models
@@ -33,6 +34,16 @@ class GetRoundResultResponse(BaseModel):
 
 class PublicGoodsEnv(EnvBase):
     """Environment for Public Goods Game based on V2 framework"""
+
+    _env_state_columns: ClassVar[list[ColumnDef]] = [
+        ColumnDef("round_number", "INTEGER", nullable=False),
+        ColumnDef("last_round", "JSON"),
+        ColumnDef("pending_contributions", "JSON", nullable=False),
+        ColumnDef("submitted_agents", "JSON", nullable=False),
+        ColumnDef("num_agents", "INTEGER", nullable=False),
+        ColumnDef("initial_endowment", "INTEGER", nullable=False),
+        ColumnDef("public_pool_multiplier", "REAL", nullable=False),
+    ]
 
     def __init__(
         self,
@@ -63,6 +74,7 @@ class PublicGoodsEnv(EnvBase):
         self._agents_submitted_in_current_round: set = set()
         
         self._lock = asyncio.Lock()
+        self._step_counter: int = 0
 
     @classmethod
     def mcp_description(cls) -> str:
@@ -198,6 +210,7 @@ Submissions are final - cannot change contribution after submitting.
         self.round_history.clear()
         self._pending_contributions.clear()
         self._agents_submitted_in_current_round.clear()
+        self._step_counter = 0
 
     async def step(self, tick: int, t: datetime):
         """
@@ -213,6 +226,7 @@ Submissions are final - cannot change contribution after submitting.
         """
         async with self._lock:
             self.t = t
+            last_round = self.round_history[-1] if self.round_history else None
             
             # Execute the round if all agents have submitted
             if len(self._agents_submitted_in_current_round) >= self.num_agents:
@@ -241,10 +255,28 @@ Submissions are final - cannot change contribution after submitting.
                 }
 
                 self.round_history.append(round_summary)
+                last_round = round_summary
 
                 # Clear pending contributions for next round
                 self._pending_contributions.clear()
                 self._agents_submitted_in_current_round.clear()
+
+            round_number = self.round_number
+            pending_contributions = self._pending_contributions.copy()
+            submitted_agents = sorted(self._agents_submitted_in_current_round)
+
+        await self._write_env_state(
+            step=self._step_counter,
+            t=t,
+            round_number=round_number,
+            last_round=last_round,
+            pending_contributions=pending_contributions,
+            submitted_agents=submitted_agents,
+            num_agents=self.num_agents,
+            initial_endowment=self.initial_endowment,
+            public_pool_multiplier=self.public_pool_multiplier,
+        )
+        self._step_counter += 1
 
     def _dump_state(self) -> dict:
         """Serialize state"""
@@ -256,6 +288,7 @@ Submissions are final - cannot change contribution after submitting.
             "round_history": self.round_history,
             "pending_contributions": self._pending_contributions,
             "agents_submitted_in_current_round": list(self._agents_submitted_in_current_round),
+            "step_counter": self._step_counter,
         }
 
     def _load_state(self, state: dict):
@@ -267,6 +300,7 @@ Submissions are final - cannot change contribution after submitting.
         self.round_history = state.get("round_history", [])
         self._pending_contributions = state.get("pending_contributions", {})
         self._agents_submitted_in_current_round = set(state.get("agents_submitted_in_current_round", []))
+        self._step_counter = state.get("step_counter", 0)
 
 
 __all__ = ["PublicGoodsEnv"]
