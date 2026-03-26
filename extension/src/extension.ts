@@ -482,7 +482,9 @@ export function activate(context: vscode.ExtensionContext) {
         } else {
           vscode.window.showErrorMessage('Failed to start backend service. Check the output panel for details.');
         }
+        return started;
       }
+      return false;
     }
   );
 
@@ -506,7 +508,9 @@ export function activate(context: vscode.ExtensionContext) {
         } else {
           vscode.window.showErrorMessage('Failed to restart backend service. Check the output panel for details.');
         }
+        return restarted;
       }
+      return false;
     }
   );
 

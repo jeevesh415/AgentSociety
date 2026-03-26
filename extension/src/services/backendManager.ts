@@ -81,6 +81,11 @@ export class BackendManager {
     this.checkAndCleanupOrphanedProcess();
   }
 
+  private reloadConfig(reason: string): void {
+    this.config = this.loadConfig();
+    this.log(`Configuration reloaded: ${reason}`);
+  }
+
   /**
    * 检查并清理孤立的后端进程
    * 如果.env中记录的PID对应的进程不存在，则清理记录
@@ -348,6 +353,8 @@ export class BackendManager {
       this.log('Backend is already starting...', 'warn');
       return false;
     }
+
+    this.reloadConfig('before start');
 
     if (await this.isRunning()) {
       this.log('Backend is already running', 'warn');
