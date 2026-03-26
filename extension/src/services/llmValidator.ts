@@ -155,6 +155,32 @@ export class LLMValidator {
  */
 export class PythonValidator {
   private outputChannel: vscode.OutputChannel;
+  private static readonly AGENTSOCIETY2_CHECK_SCRIPT = `
+import importlib.util
+import json
+import sys
+
+try:
+    from importlib.metadata import PackageNotFoundError, version
+except ImportError:
+    from importlib_metadata import PackageNotFoundError, version
+
+spec = importlib.util.find_spec("agentsociety2")
+if spec is None:
+    print(json.dumps({"installed": False}))
+    raise SystemExit(1)
+
+try:
+    package_version = version("agentsociety2")
+except PackageNotFoundError:
+    package_version = None
+
+print(json.dumps({
+    "installed": True,
+    "version": package_version,
+    "location": spec.origin,
+}))
+`.trim();
 
   constructor() {
     this.outputChannel = vscode.window.createOutputChannel('Python Validator');
@@ -197,7 +223,7 @@ export class PythonValidator {
       const importResult = await this.execCommand(
         pythonCmd,
         '-c',
-        'import agentsociety2; print(agentsociety2.__version__)'
+        PythonValidator.AGENTSOCIETY2_CHECK_SCRIPT
       );
 
       if (!importResult.success) {
@@ -212,8 +238,11 @@ export class PythonValidator {
         };
       }
 
-      const version = this.getCommandOutput(importResult);
+      const packageInfo = this.parsePackageCheckResult(importResult.stdout);
+      const version = packageInfo?.version || 'unknown';
+      const location = packageInfo?.location || 'unknown';
       this.log(`agentsociety2 version: ${version}`);
+      this.log(`agentsociety2 location: ${location}`);
 
       return {
         success: true,
@@ -258,6 +287,20 @@ export class PythonValidator {
 
   private getCommandOutput(result: { stdout: string; stderr: string }): string {
     return (result.stdout || result.stderr || '').trim();
+  }
+
+  private parsePackageCheckResult(stdout: string): { installed: boolean; version?: string | null; location?: string | null } | null {
+    const trimmed = stdout.trim();
+    if (!trimmed) {
+      return null;
+    }
+
+    try {
+      return JSON.parse(trimmed) as { installed: boolean; version?: string | null; location?: string | null };
+    } catch {
+      this.log(`Failed to parse package check result: ${trimmed}`);
+      return null;
+    }
   }
 
   dispose(): void {
