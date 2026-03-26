@@ -95,7 +95,14 @@ class PersonAgent(AgentBase):
 
     @staticmethod
     def _coerce_llm_dict(raw: Any) -> dict[str, Any]:
-        """LLM/配置里可能把对象写成 JSON 字符串；直接 dict(str) 会按字符迭代并报错。"""
+        """把「应为 dict」的字段归一成 dict（用于 ToolDecision.arguments、codegen.ctx、execute_skill.args 等）。
+
+        - ``None`` → ``{}``；``Mapping`` → 浅拷贝 ``dict``。
+        - ``str`` → ``json_repair.loads``；解析结果必须是 JSON object，否则 ``{}``。
+        - 其它类型 → ``{}``。
+
+        禁止对字符串做 ``dict(s)``（会按字符迭代，触发 ``ValueError: dictionary update sequence...``）。
+        """
         if raw is None:
             return {}
         if isinstance(raw, Mapping):
@@ -130,7 +137,9 @@ class PersonAgent(AgentBase):
             f"{json.dumps(agent_identity, ensure_ascii=False)}\n\n"
             "# You Are an Autonomous Tool-Using Agent\n"
             "Call tools one at a time. "
-            "Respond ONLY with valid JSON: {tool_name, arguments, done, summary}.\n\n"
+            "Respond ONLY with valid JSON: {tool_name, arguments, done, summary}.\n"
+            "For execute_skill use arguments.args as a JSON object; for codegen use arguments.ctx as a JSON object "
+            "(prefer objects over stringified JSON; the runtime parses strings with json_repair).\n\n"
             "# Skills\n"
             "The catalog below lists available skills (name + description). "
             "Use `activate_skill` to load a skill's full instructions, then follow them.\n\n"
