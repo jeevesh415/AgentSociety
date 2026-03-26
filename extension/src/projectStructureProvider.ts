@@ -1960,7 +1960,8 @@ export class ProjectStructureProvider implements vscode.TreeDataProvider<Project
       'custom/agents',
       'custom/envs',
       '.agentsociety',
-      '.claude'
+      '.claude',
+      '.claude/skills'
     ];
 
     // 必需的文件

@@ -6,7 +6,7 @@
  * 关联文件：
  * - @extension/src/projectStructureProvider.ts - 树视图调用WorkspaceManager初始化工作区
  * - @extension/src/extension.ts - 主入口，创建WorkspaceManager实例
- * - @extension/skills/ - AgentSociety 内置 skills（插件侧只读展示）
+ * - @extension/skills/ - AgentSociety 内置 skills（插件侧只读展示，同时同步到 workspace/.claude/skills）
  */
 
 import * as vscode from 'vscode';
@@ -27,10 +27,11 @@ export interface WorkspaceInitResult {
 
 export class WorkspaceManager {
   private outputChannel: vscode.OutputChannel;
+  private skillsSourcePath: string;
 
   constructor(context: vscode.ExtensionContext) {
     this.outputChannel = vscode.window.createOutputChannel('Workspace Manager');
-    void context;
+    this.skillsSourcePath = path.join(context.extensionPath, 'skills');
   }
 
   private log(message: string): void {
@@ -205,6 +206,21 @@ export class WorkspaceManager {
         }
       }
 
+      reportProgress('正在同步 Claude Code 资源...');
+
+      const syncResult = this.syncClaudeCodeResources(workspacePath);
+      if (!syncResult.success) {
+        this.log(`Failed to sync Claude Code resources: ${syncResult.message}`);
+        return {
+          success: false,
+          message: `初始化工作区失败：${syncResult.message}`,
+          filesCreated,
+        };
+      }
+      if (syncResult.created.length > 0) {
+        filesCreated.push(...syncResult.created);
+      }
+
       reportProgress('正在完成初始化...');
 
       return {
@@ -304,6 +320,115 @@ export class WorkspaceManager {
     }
 
     return { agents, envs };
+  }
+
+  /**
+   * Sync extension-bundled Claude Code resources into the workspace.
+   *
+   * The extension keeps a read-only copy of AgentSociety skills under
+   * `extension/skills/` for UI browsing, but Claude Code discovers them from
+   * the workspace-local `.claude/skills/` directory.
+   */
+  private syncClaudeCodeResources(
+    workspacePath: string
+  ): { success: boolean; message: string; created: string[] } {
+    if (!fs.existsSync(this.skillsSourcePath) || !fs.statSync(this.skillsSourcePath).isDirectory()) {
+      return {
+        success: false,
+        message: `扩展技能目录不存在: ${this.skillsSourcePath}`,
+        created: [],
+      };
+    }
+
+    const claudeDir = path.join(workspacePath, '.claude');
+    const targetDir = path.join(claudeDir, 'skills');
+    const created: string[] = [];
+
+    if (!fs.existsSync(claudeDir)) {
+      fs.mkdirSync(claudeDir, { recursive: true });
+      created.push('.claude/');
+      this.log(`Created: ${claudeDir}`);
+    }
+
+    if (fs.existsSync(targetDir)) {
+      for (const item of fs.readdirSync(targetDir)) {
+        const itemPath = path.join(targetDir, item);
+        try {
+          fs.rmSync(itemPath, { recursive: true, force: true });
+        } catch (error) {
+          this.log(`Failed to remove existing Claude resource ${itemPath}: ${error}`);
+          return {
+            success: false,
+            message: `无法清理旧的 Claude Code 资源: ${itemPath}`,
+            created,
+          };
+        }
+      }
+    } else {
+      fs.mkdirSync(targetDir, { recursive: true });
+      created.push('.claude/skills/');
+      this.log(`Created: ${targetDir}`);
+    }
+
+    const copied: string[] = [];
+    for (const item of fs.readdirSync(this.skillsSourcePath)) {
+      const sourcePath = path.join(this.skillsSourcePath, item);
+      const targetPath = path.join(targetDir, item);
+
+      try {
+        const stat = fs.statSync(sourcePath);
+        if (stat.isDirectory()) {
+          this.copyDirectoryRecursive(sourcePath, targetPath);
+        } else if (stat.isFile()) {
+          fs.copyFileSync(sourcePath, targetPath);
+        } else {
+          continue;
+        }
+        copied.push(item);
+      } catch (error) {
+        this.log(`Failed to copy Claude resource ${sourcePath}: ${error}`);
+        return {
+          success: false,
+          message: `无法同步 Claude Code 资源: ${sourcePath}`,
+          created,
+        };
+      }
+    }
+
+    if (copied.length === 0) {
+      return {
+        success: false,
+        message: '扩展技能目录为空，未同步任何 Claude Code 资源',
+        created,
+      };
+    }
+
+    return {
+      success: true,
+      message: `已同步 ${copied.length} 个 Claude Code 资源`,
+      created,
+    };
+  }
+
+  /**
+   * Recursively copy a directory tree.
+   */
+  private copyDirectoryRecursive(source: string, target: string): void {
+    if (!fs.existsSync(target)) {
+      fs.mkdirSync(target, { recursive: true });
+    }
+
+    for (const item of fs.readdirSync(source)) {
+      const sourcePath = path.join(source, item);
+      const targetPath = path.join(target, item);
+      const stat = fs.statSync(sourcePath);
+
+      if (stat.isDirectory()) {
+        this.copyDirectoryRecursive(sourcePath, targetPath);
+      } else if (stat.isFile()) {
+        fs.copyFileSync(sourcePath, targetPath);
+      }
+    }
   }
 
   /**
@@ -522,6 +647,8 @@ Follow this sequence for social science research:
 ├── TOPIC.md              # Research topic and goals
 ├── CLAUDE.md             # This file - technical guidance
 ├── AGENTS.md             # Symlink to CLAUDE.md
+├── .claude/              # Claude Code workspace resources
+│   └── skills/           # Synced AgentSociety skills for Claude Code
 ├── .env                  # Environment configuration (API keys, PYTHON_PATH, etc)
 ├── papers/               # Literature storage
 │   ├── literature_index.json  # Literature catalog
@@ -614,6 +741,7 @@ When interacting with users:
 - Use the VSCode extension tree view to browse:
   - **Agent Skills** (backend-managed, supports import/reload)
   - **AgentSociety Skills** (extension bundled, read-only)
+- Claude Code loads the synced workspace-local skill bundle from \`.claude/skills/\`
 `;
   }
 
