@@ -5,6 +5,8 @@ from datetime import datetime
 from pathlib import Path
 from typing import Any, Awaitable, Callable
 
+import json_repair
+
 from agentsociety2.agent.skills import SkillRegistry
 
 
@@ -167,14 +169,11 @@ class AgentSkillRuntime:
             f.write(json.dumps(record, ensure_ascii=False) + "\n")
 
     def read_json(self, relative_path: str, default: Any) -> Any:
-        """读取工作目录中的 JSON 文件，失败返回 default。"""
-        try:
-            raw = self.workspace_read(relative_path)
-            if not raw:
-                return default
-            return json.loads(raw)
-        except Exception:
+        """读取工作目录中的 JSON 文件；空内容返回 default。"""
+        raw = self.workspace_read(relative_path)
+        if not raw:
             return default
+        return json_repair.loads(raw)
 
     def read_recent_tool_logs(self, limit: int = 20) -> list[dict[str, Any]]:
         """读取最近 N 条工具调用日志。"""
@@ -183,18 +182,9 @@ class AgentSkillRuntime:
         path = self._agent_work_dir / "tool_calls.jsonl"
         if not path.exists():
             return []
-        try:
-            lines = path.read_text(encoding="utf-8").splitlines()
-        except Exception:
-            return []
+        lines = path.read_text(encoding="utf-8").splitlines()
         recent = lines[-limit:] if limit > 0 else lines
-        result: list[dict[str, Any]] = []
-        for line in recent:
-            try:
-                result.append(json.loads(line))
-            except Exception:
-                continue
-        return result
+        return [json_repair.loads(line) for line in recent if line.strip()]
 
     def append_thread_message(self, role: str, content: str, tick: int, t: datetime) -> None:
         if self._agent_work_dir is None:
@@ -215,17 +205,13 @@ class AgentSkillRuntime:
         path = self._agent_work_dir / "thread_messages.jsonl"
         if not path.exists():
             return []
-        try:
-            lines = path.read_text(encoding="utf-8").splitlines()
-        except Exception:
-            return []
+        lines = path.read_text(encoding="utf-8").splitlines()
         recent = lines[-limit:] if limit > 0 else lines
         messages: list[dict[str, str]] = []
         for line in recent:
-            try:
-                obj = json.loads(line)
-            except Exception:
+            if not line.strip():
                 continue
+            obj = json_repair.loads(line)
             role = str(obj.get("role", "")).strip()
             content = str(obj.get("content", ""))
             if role in {"user", "assistant"} and content:

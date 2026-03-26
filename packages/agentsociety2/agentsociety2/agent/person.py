@@ -1,7 +1,7 @@
 """PersonAgent — 每个 Person 就是一个独立的 Claude-like tool-using agent。
 
 每个 agent 拥有独立工作区、独立会话线程，通过 skill catalog + 工具调用自主完成任务。
-skill 作者只需要写 SKILL.md（+ 可选 subprocess 脚本），无需了解 PersonAgent 内部。
+skill 作者只需要写 SKILL.md（+ 可选脚本），无需了解 PersonAgent 内部。
 """
 
 from __future__ import annotations
@@ -9,10 +9,12 @@ from __future__ import annotations
 import asyncio
 import copy
 import json
+from collections.abc import Mapping
 import re
 from datetime import datetime
 from typing import TYPE_CHECKING, Any, Optional
 
+import json_repair
 from pydantic import BaseModel, Field
 
 from agentsociety2.agent.base import AgentBase
@@ -58,7 +60,7 @@ class PersonAgent(AgentBase):
         **capability_kwargs: Any,
     ):
         super().__init__(id=id, profile=profile, name=name, replay_writer=replay_writer)
-        self._agent_state: dict[str, Any] = dict(init_state or {})
+        self._agent_state: dict[str, Any] = self._coerce_llm_dict(init_state)
         self._capability_kwargs: dict[str, Any] = dict(capability_kwargs)
 
         # 每个 agent 拿全局 registry 的深拷贝快照，避免 scan_env_skills 互相污染。
@@ -90,6 +92,21 @@ class PersonAgent(AgentBase):
         if len(text) <= max_len:
             return text
         return text[:max_len] + "...<truncated>"
+
+    @staticmethod
+    def _coerce_llm_dict(raw: Any) -> dict[str, Any]:
+        """LLM/配置里可能把对象写成 JSON 字符串；直接 dict(str) 会按字符迭代并报错。"""
+        if raw is None:
+            return {}
+        if isinstance(raw, Mapping):
+            return dict(raw)
+        if isinstance(raw, str):
+            s = raw.strip()
+            if not s:
+                return {}
+            parsed = json_repair.loads(s)
+            return dict(parsed) if isinstance(parsed, dict) else {}
+        return {}
 
     # ── System Prompt ──────────────────────────────────────────────────────────
 
@@ -480,7 +497,7 @@ class PersonAgent(AgentBase):
                 break
 
             action = decision.tool_name.strip()
-            args = dict(decision.arguments or {})
+            args = self._coerce_llm_dict(decision.arguments)
             skill_name = str(args.get("skill_name", "")).strip()
 
             if decision.done or action == "done":
@@ -629,7 +646,7 @@ class PersonAgent(AgentBase):
                     logs.append(f"execute:{skill_name}:blocked_requires")
                     continue
 
-                payload = dict(args.get("args", {}) or {})
+                payload = self._coerce_llm_dict(args.get("args", {}))
                 payload.setdefault("tick", tick)
                 payload.setdefault("time", t.isoformat())
                 out = await self.execute(skill_name, payload)
@@ -782,7 +799,7 @@ class PersonAgent(AgentBase):
             # ── codegen ──
             if action == "codegen":
                 instruction = str(args.get("instruction", ""))
-                ctx = dict(args.get("ctx", {}))
+                ctx = self._coerce_llm_dict(args.get("ctx", {}))
                 template_mode = bool(args.get("template_mode", False))
                 out = await self._run_codegen(
                     instruction=instruction, ctx=ctx, template_mode=template_mode,
@@ -834,7 +851,7 @@ class PersonAgent(AgentBase):
         self._last_selected_skills = set(self._selectable_skill_names)
         logs, tool_history = await self._tool_loop(tick=tick, t=t)
 
-        # 使用 tool loop 结束后的最终技能状态（可能因 enable/disable 有变化）
+        # 使用 tool loop 结束后的最终技能状态
         self._skill_runtime.persist_session_state(
             tick=tick,
             t=t,

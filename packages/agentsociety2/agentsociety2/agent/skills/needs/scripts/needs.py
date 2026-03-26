@@ -10,6 +10,8 @@ import argparse
 import json
 from pathlib import Path
 
+import json_repair
+
 
 def _clamp(v: float) -> float:
     return max(0.0, min(1.0, v))
@@ -18,10 +20,8 @@ def _clamp(v: float) -> float:
 def _load_or_init_needs(path: Path) -> dict[str, float]:
     if not path.exists():
         return {"satiety": 0.8, "energy": 0.8, "safety": 0.8, "social": 0.8}
-    try:
-        data = json.loads(path.read_text(encoding="utf-8"))
-    except Exception:
-        return {"satiety": 0.8, "energy": 0.8, "safety": 0.8, "social": 0.8}
+    text = path.read_text(encoding="utf-8")
+    data = json_repair.loads(text)
     return {
         "satiety": float(data.get("satiety", 0.8)),
         "energy": float(data.get("energy", 0.8)),
@@ -34,7 +34,8 @@ def main() -> int:
     parser = argparse.ArgumentParser()
     parser.add_argument("--args-json", default="{}")
     ns = parser.parse_args()
-    args = json.loads(ns.args_json or "{}")
+    raw = ns.args_json or "{}"
+    args = json_repair.loads(raw)
 
     cwd = Path.cwd()
     needs_path = cwd / "needs.json"
