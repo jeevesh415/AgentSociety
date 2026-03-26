@@ -19,6 +19,7 @@ from agentsociety2.agent.base import AgentBase
 from agentsociety2.agent.skills import SkillRegistry, get_skill_registry
 from agentsociety2.agent.skills.runtime import AgentSkillRuntime
 from agentsociety2.env import RouterBase
+from agentsociety2.storage import ColumnDef, TableSchema
 
 if TYPE_CHECKING:
     from agentsociety2.storage import ReplayWriter
@@ -40,6 +41,57 @@ class PersonAgent(AgentBase):
 
     每步：system prompt 注入身份+技能目录+工具表 → LLM 逐轮选工具 → 结果回写 thread → done 结束。
     """
+
+    _ANALYSIS_RUN_SCHEMA = TableSchema(
+        name="agent_skill_run",
+        columns=[
+            ColumnDef("agent_id", "INTEGER", nullable=False),
+            ColumnDef("agent_name", "TEXT", nullable=False),
+            ColumnDef("agent_type", "TEXT", nullable=False),
+            ColumnDef("started_at", "TIMESTAMP", nullable=False),
+            ColumnDef("ended_at", "TIMESTAMP"),
+            ColumnDef("workspace_dir", "TEXT", nullable=False),
+            ColumnDef("profile_json", "JSON", nullable=False),
+            ColumnDef("capabilities_json", "JSON", nullable=False),
+            ColumnDef("core_skills_json", "JSON", nullable=False),
+            ColumnDef("initial_state_json", "JSON", nullable=False),
+        ],
+        primary_key=["agent_id"],
+        indexes=[["started_at"]],
+    )
+    _ANALYSIS_STEP_SCHEMA = TableSchema(
+        name="agent_skill_step",
+        columns=[
+            ColumnDef("agent_id", "INTEGER", nullable=False),
+            ColumnDef("step", "INTEGER", nullable=False),
+            ColumnDef("t", "TIMESTAMP", nullable=False),
+            ColumnDef("selected_skills_json", "JSON", nullable=False),
+            ColumnDef("activated_skills_json", "JSON", nullable=False),
+            ColumnDef("current_goal", "TEXT"),
+            ColumnDef("current_plan_summary", "TEXT"),
+            ColumnDef("last_decision_summary", "TEXT"),
+            ColumnDef("step_result", "TEXT", nullable=False),
+            ColumnDef("tool_round_count", "INTEGER", nullable=False),
+            ColumnDef("workspace_change_summary_json", "JSON", nullable=False),
+            ColumnDef("state_json", "JSON", nullable=False),
+        ],
+        primary_key=["agent_id", "step"],
+        indexes=[["step"], ["t"]],
+    )
+    _ANALYSIS_EVENT_SCHEMA = TableSchema(
+        name="agent_skill_event",
+        columns=[
+            ColumnDef("agent_id", "INTEGER", nullable=False),
+            ColumnDef("event_order", "INTEGER", nullable=False),
+            ColumnDef("step", "INTEGER"),
+            ColumnDef("t", "TIMESTAMP", nullable=False),
+            ColumnDef("event_type", "TEXT", nullable=False),
+            ColumnDef("summary", "TEXT", nullable=False),
+            ColumnDef("payload_json", "JSON", nullable=False),
+        ],
+        primary_key=["agent_id", "event_order"],
+        indexes=[["step"], ["t"], ["event_type"]],
+    )
 
     @classmethod
     def mcp_description(cls) -> str:
@@ -81,6 +133,10 @@ class PersonAgent(AgentBase):
         self._step_count = 0
         self._last_selected_skills: set[str] = set()
         self._max_tool_rounds = max(1, int(self._capability_kwargs.get("max_tool_rounds", 24)))
+        self._analysis_started_at: datetime | None = None
+        self._analysis_tables_registered = False
+        self._analysis_run_written = False
+        self._analysis_event_order = 0
 
     def _all_visible_skill_names(self) -> set[str]:
         return set(self._selectable_skill_names)
@@ -344,11 +400,182 @@ class PersonAgent(AgentBase):
             ),
         )
 
+    async def _ensure_analysis_tables_registered(self) -> None:
+        if self._replay_writer is None or self._analysis_tables_registered:
+            return
+        await self._replay_writer.register_table(self._ANALYSIS_RUN_SCHEMA)
+        await self._replay_writer.register_table(self._ANALYSIS_STEP_SCHEMA)
+        await self._replay_writer.register_table(self._ANALYSIS_EVENT_SCHEMA)
+        self._analysis_tables_registered = True
+
+    def _analysis_workspace_dir(self) -> str:
+        try:
+            return str(self._skill_runtime.workspace_root())
+        except Exception:
+            return ""
+
+    def _resolve_agent_state_field(self, *candidates: str) -> Optional[str]:
+        for key in candidates:
+            value = self._agent_state.get(key)
+            if value is None:
+                continue
+            text = str(value).strip()
+            if text:
+                return text
+        return None
+
+    async def _write_analysis_run(self, ended_at: datetime | None = None) -> None:
+        if self._replay_writer is None:
+            return
+        await self._ensure_analysis_tables_registered()
+        started_at = self._analysis_started_at or datetime.now()
+        await self._replay_writer.write(
+            self._ANALYSIS_RUN_SCHEMA.name,
+            {
+                "agent_id": self.id,
+                "agent_name": self._name,
+                "agent_type": type(self).__name__,
+                "started_at": started_at,
+                "ended_at": ended_at,
+                "workspace_dir": self._analysis_workspace_dir(),
+                "profile_json": self.get_profile(),
+                "capabilities_json": self._capability_kwargs,
+                "core_skills_json": sorted(self._core_skill_names),
+                "initial_state_json": self._agent_state,
+            },
+        )
+        self._analysis_run_written = True
+
+    async def _ensure_analysis_run_written(self) -> None:
+        if self._analysis_run_written:
+            return
+        await self._write_analysis_run()
+        await self._emit_analysis_event(
+            event_type="lifecycle.init",
+            step=None,
+            t=self._analysis_started_at or datetime.now(),
+            summary="agent initialized for analysis export",
+            payload={
+                "workspace_dir": self._analysis_workspace_dir(),
+                "core_skills": sorted(self._core_skill_names),
+            },
+        )
+
+    async def _emit_analysis_event(
+        self,
+        event_type: str,
+        step: Optional[int],
+        t: datetime,
+        summary: str,
+        payload: dict[str, Any],
+    ) -> None:
+        if self._replay_writer is None:
+            return
+        await self._ensure_analysis_tables_registered()
+        self._analysis_event_order += 1
+        await self._replay_writer.write(
+            self._ANALYSIS_EVENT_SCHEMA.name,
+            {
+                "agent_id": self.id,
+                "event_order": self._analysis_event_order,
+                "step": step,
+                "t": t,
+                "event_type": event_type,
+                "summary": summary,
+                "payload_json": payload,
+            },
+        )
+
+    def _summarize_workspace_changes(self, tool_history: list[dict[str, Any]]) -> dict[str, Any]:
+        writes: list[dict[str, Any]] = []
+        action_counts: dict[str, int] = {}
+        for item in tool_history:
+            action = str(item.get("action", "")).strip()
+            if action:
+                action_counts[action] = action_counts.get(action, 0) + 1
+            if action == "workspace_write" and item.get("ok"):
+                writes.append(
+                    {
+                        "path": str(item.get("path", "")),
+                        "size": int(item.get("size", 0) or 0),
+                    }
+                )
+        return {
+            "write_count": len(writes),
+            "written_paths": [w["path"] for w in writes],
+            "written_files": writes,
+            "action_counts": action_counts,
+        }
+
+    def _extract_done_summary(self, logs: list[str]) -> Optional[str]:
+        for entry in reversed(logs):
+            if entry.startswith("done:"):
+                summary = entry.split(":", 1)[1].strip()
+                return summary or None
+        return None
+
+    async def _write_analysis_step(
+        self,
+        t: datetime,
+        logs: list[str],
+        tool_history: list[dict[str, Any]],
+    ) -> None:
+        if self._replay_writer is None:
+            return
+        await self._ensure_analysis_run_written()
+
+        workspace_change_summary = self._summarize_workspace_changes(tool_history)
+        done_summary = self._extract_done_summary(logs)
+        step_result = "no-action" if not logs else " | ".join(logs)
+        state_json = {
+            "step_count": self._step_count,
+            "selected_skills": sorted(self._selectable_skill_names),
+            "activated_skills": sorted(self._activated_skills),
+            "last_selected_skills": sorted(self._last_selected_skills),
+            "skill_overrides": self._skill_visibility_overrides,
+            "core_skills": sorted(self._core_skill_names),
+            "agent_state": self._agent_state,
+            "tool_actions": [str(item.get("action", "")) for item in tool_history if item.get("action")],
+            "logs": logs,
+            "workspace_change_summary": workspace_change_summary,
+        }
+        await self._replay_writer.write(
+            self._ANALYSIS_STEP_SCHEMA.name,
+            {
+                "agent_id": self.id,
+                "step": self._step_count,
+                "t": t,
+                "selected_skills_json": sorted(self._selectable_skill_names),
+                "activated_skills_json": sorted(self._activated_skills),
+                "current_goal": self._resolve_agent_state_field("current_goal", "goal"),
+                "current_plan_summary": self._resolve_agent_state_field("current_plan_summary", "plan_summary"),
+                "last_decision_summary": done_summary or self._resolve_agent_state_field("last_decision_summary"),
+                "step_result": step_result,
+                "tool_round_count": len(tool_history),
+                "workspace_change_summary_json": workspace_change_summary,
+                "state_json": state_json,
+            },
+        )
+        event_type = "step.error" if any(log.startswith("tool_loop_error:") for log in logs) else "step.summary"
+        await self._emit_analysis_event(
+            event_type=event_type,
+            step=self._step_count,
+            t=t,
+            summary=done_summary or step_result,
+            payload={
+                "tool_round_count": len(tool_history),
+                "selected_skills": sorted(self._selectable_skill_names),
+                "activated_skills": sorted(self._activated_skills),
+                "workspace_change_summary": workspace_change_summary,
+            },
+        )
+
     # ── Lifecycle ─────────────────────────────────────────────────────────────
 
     async def init(self, env: RouterBase):
         await super().init(env=env)
         self._skill_runtime.ensure_agent_work_dir(self._env)
+        self._analysis_started_at = datetime.now()
         existing_cfg = self._skill_runtime.read_json("agent_config.json", {})
         if isinstance(existing_cfg, dict):
             raw = existing_cfg.get("skill_overrides", {})
@@ -377,6 +604,8 @@ class PersonAgent(AgentBase):
                 # 环境 skill 
                 self._core_skill_names.update(added)
         self._refresh_selectable_skills()
+        if self._replay_writer is not None:
+            await self._ensure_analysis_run_written()
 
     # ── Context Compaction (sliding summary) ─────────────────────────────────
 
@@ -847,6 +1076,7 @@ class PersonAgent(AgentBase):
             selected_skills=self._selectable_skill_names,
             tool_history=tool_history,
         )
+        await self._write_analysis_step(t=t, logs=logs, tool_history=tool_history)
         if not logs:
             return "no-action"
         return " | ".join(logs)
@@ -869,3 +1099,16 @@ class PersonAgent(AgentBase):
     async def load(self, dump_data: dict):
         self._step_count = int(dump_data.get("step_count", 0))
         self._last_selected_skills = set(dump_data.get("last_selected_skills", []))
+
+    async def close(self):
+        if self._replay_writer is not None:
+            await self._ensure_analysis_run_written()
+            closed_at = datetime.now()
+            await self._write_analysis_run(ended_at=closed_at)
+            await self._emit_analysis_event(
+                event_type="lifecycle.close",
+                step=self._step_count or None,
+                t=closed_at,
+                summary="agent closed",
+                payload={"step_count": self._step_count},
+            )
