@@ -2,7 +2,6 @@
 Volunteer's Dilemma Game Agent
 Agent for Volunteer's Dilemma game based on V2 framework
 """
-import json
 import re
 from datetime import datetime
 from typing import Any
@@ -55,8 +54,16 @@ Players aim to maximize cumulative coins while balancing personal gain and colle
 """
         return description
 
-    def __init__(self, id: int, name: str, num_rounds: int = 10, num_agents: int = 4,
-                 benefit_b: int = 100, cost_c: int = 40):
+    def __init__(
+        self,
+        id: int,
+        name: str,
+        num_rounds: int = 10,
+        num_agents: int = 4,
+        benefit_b: int = 100,
+        cost_c: int = 40,
+        replay_writer=None,
+    ):
         """Initialize VolunteerDilemmaAgent
         
         Args:
@@ -66,9 +73,10 @@ Players aim to maximize cumulative coins while balancing personal gain and colle
             num_agents: Number of agents in the game (default: 4)
             benefit_b: Benefit for everyone if someone volunteers (default: 100)
             cost_c: Cost for a volunteer (default: 40)
+            replay_writer: Optional replay writer injected by CLI
         """
         profile = {"name": name}
-        super().__init__(id=id, profile=profile)
+        super().__init__(id=id, profile=profile, replay_writer=replay_writer)
         self._name = name
         self.history = []  # Store history records
         self.decision_options = ["Volunteer", "Stand by"]  # Possible choices
@@ -123,16 +131,16 @@ Players aim to maximize cumulative coins while balancing personal gain and colle
         
         try:
             # Step 1: Get round history from environment
-            ctx = {}
-            ctx, history_response = await self.ask_env(
-                ctx,
+            history_result, history_response = await self.ask_env(
+                {},
                 "Please call get_round_history() to get the round history.",
-                readonly=True
+                readonly=True,
+                template_mode=True,
             )
             self._logger.debug(f"[{self.name}] History response: {history_response}")
             
             # Parse and update local history
-            round_history = self._parse_round_history(history_response)
+            round_history = self._parse_round_history(history_result, history_response)
             self._sync_history(round_history)
             
             # Determine current round number (next round = len(history) + 1)
@@ -147,11 +155,18 @@ Players aim to maximize cumulative coins while balancing personal gain and colle
             )
             
             # Step 3: Submit choice to environment
-            ctx, submit_response = await self.ask_env(
-                ctx,
-                f"Please call submit_choice(agent_name='{self.name}', choice='{choice}') to submit my choice decision.",
-                readonly=False
+            submit_result, submit_response = await self.ask_env(
+                {
+                    "variables": {
+                        "agent_name": self.name,
+                        "choice": choice,
+                    }
+                },
+                "Please call submit_choice() using agent_name and choice from ctx['variables'] to submit my choice decision.",
+                readonly=False,
+                template_mode=True,
             )
+            _ = submit_result, submit_response
             self._logger.info(
                 f"[{self.name}] Round {current_round}: Submitted choice={choice}, "
                 f"explanation={explanation[:50]}..."
@@ -248,18 +263,10 @@ Players aim to maximize cumulative coins while balancing personal gain and colle
         self._logger.debug(f"[{self.name}] [DEBUG] Final selection: {choice}")
         return choice, explanation
 
-    def _parse_round_history(self, response: str) -> list:
+    def _parse_round_history(self, env_result: Any, response: str) -> list:
         """Parse round history from environment response"""
-        try:
-            # Try to extract JSON array from response
-            json_match = re.search(r'\[.*\]', response, re.DOTALL)
-            if json_match:
-                rounds = json.loads(json_match.group(0))
-                if isinstance(rounds, list):
-                    return rounds
-        except Exception as e:
-            self._logger.warning(f"[{self.name}] Failed to parse round history: {e}")
-        return []
+        rounds = self._extract_env_list_result(env_result, response, "round_history")
+        return [round_data for round_data in rounds if isinstance(round_data, dict)]
 
     def _sync_history(self, round_history: list):
         """Sync local history with environment round history"""
@@ -360,13 +367,12 @@ Players aim to maximize cumulative coins while balancing personal gain and colle
                 f"{name} gained {payoffs.get(name, 0):.2f} coins"
                 for name in all_agent_names
             ]
-            history_lines.append(f"  " + ", ".join(payoff_details) + ".")
+            history_lines.append("  " + ", ".join(payoff_details) + ".")
 
             cumulative_details = [
                 f"{name} has {cumulative_payoffs[name]:.2f} coins total"
                 for name in all_agent_names
             ]
-            history_lines.append(f"  Cumulative: " + ", ".join(cumulative_details) + ".")
+            history_lines.append("  Cumulative: " + ", ".join(cumulative_details) + ".")
 
         return "\n".join(history_lines)
-

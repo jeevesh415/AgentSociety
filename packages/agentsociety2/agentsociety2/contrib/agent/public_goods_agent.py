@@ -2,7 +2,6 @@
 Public Goods Game Agent
 Agent for Public Goods Game based on V2 framework
 """
-import json
 import re
 from datetime import datetime
 from typing import Any
@@ -48,8 +47,16 @@ This agent participates in a multi-round Public Goods Game. Each round, players 
 """
         return description
 
-    def __init__(self, id: int, name: str, num_rounds: int = 10, num_agents: int = 4, 
-                 initial_endowment: int = 20, public_pool_multiplier: float = 1.6):
+    def __init__(
+        self,
+        id: int,
+        name: str,
+        num_rounds: int = 10,
+        num_agents: int = 4,
+        initial_endowment: int = 20,
+        public_pool_multiplier: float = 1.6,
+        replay_writer=None,
+    ):
         """Initialize PublicGoodsAgent
         
         Args:
@@ -59,9 +66,10 @@ This agent participates in a multi-round Public Goods Game. Each round, players 
             num_agents: Number of agents in the game (default: 4)
             initial_endowment: Initial coins per agent per round (default: 20)
             public_pool_multiplier: Multiplier for public pool contributions (default: 1.6)
+            replay_writer: Optional replay writer injected by CLI
         """
         profile = {"name": name}
-        super().__init__(id=id, profile=profile)
+        super().__init__(id=id, profile=profile, replay_writer=replay_writer)
         self._name = name
         self.history = []  # Store history records
         self.num_rounds = num_rounds
@@ -117,16 +125,16 @@ This agent participates in a multi-round Public Goods Game. Each round, players 
         
         try:
             # Step 1: Get round history from environment
-            ctx = {}
-            ctx, history_response = await self.ask_env(
-                ctx,
+            history_result, history_response = await self.ask_env(
+                {},
                 "Please call get_round_history() to get the round history.",
-                readonly=True
+                readonly=True,
+                template_mode=True,
             )
             self._logger.debug(f"[{self.name}] History response: {history_response}")
             
             # Parse and update local history
-            round_history = self._parse_round_history(history_response)
+            round_history = self._parse_round_history(history_result, history_response)
             self._sync_history(round_history)
             
             # Determine current round number (next round = len(history) + 1)
@@ -141,11 +149,18 @@ This agent participates in a multi-round Public Goods Game. Each round, players 
             )
             
             # Step 3: Submit contribution to environment
-            ctx, submit_response = await self.ask_env(
-                ctx,
-                f"Please call submit_contribution(agent_name='{self.name}', contribution={contribution}) to submit my contribution decision.",
-                readonly=False
+            submit_result, submit_response = await self.ask_env(
+                {
+                    "variables": {
+                        "agent_name": self.name,
+                        "contribution": contribution,
+                    }
+                },
+                "Please call submit_contribution() using agent_name and contribution from ctx['variables'] to submit my contribution decision.",
+                readonly=False,
+                template_mode=True,
             )
+            _ = submit_result, submit_response
             self._logger.info(
                 f"[{self.name}] Round {current_round}: Submitted contribution={contribution}, "
                 f"explanation={explanation[:50]}..."
@@ -281,13 +296,13 @@ This agent participates in a multi-round Public Goods Game. Each round, players 
                 f"{name} gained {payoffs.get(name, 0):.2f} coins"
                 for name in all_agent_names
             ]
-            history_lines.append(f"  " + ", ".join(payoff_details) + ".")
+            history_lines.append("  " + ", ".join(payoff_details) + ".")
 
             cumulative_details = [
                 f"{name} has {cumulative_payoffs[name]:.2f} coins total"
                 for name in all_agent_names
             ]
-            history_lines.append(f"  Cumulative: " + ", ".join(cumulative_details) + ".")
+            history_lines.append("  Cumulative: " + ", ".join(cumulative_details) + ".")
 
         return "\n".join(history_lines)
 
@@ -314,20 +329,10 @@ This agent participates in a multi-round Public Goods Game. Each round, players 
             f"- Your total gain: {per_player_gain} coins (vs. {self.initial_endowment} coins if everyone free-rides)"
         )
 
-    def _parse_round_history(self, response: str) -> list:
+    def _parse_round_history(self, env_result: Any, response: str) -> list:
         """Parse round history from environment response"""
-        try:
-            # Try to parse as JSON array
-            json_match = re.search(r'\[.*\]', response, re.DOTALL)
-            if json_match:
-                data = json.loads(json_match.group(0))
-                if isinstance(data, list):
-                    return data
-        except (json.JSONDecodeError, ValueError, KeyError):
-            pass
-        
-        # Return empty list if parsing fails
-        return []
+        rounds = self._extract_env_list_result(env_result, response, "round_history")
+        return [round_data for round_data in rounds if isinstance(round_data, dict)]
 
     def _sync_history(self, round_history: list):
         """Sync local history with environment history"""
@@ -351,4 +356,3 @@ This agent participates in a multi-round Public Goods Game. Each round, players 
             return [f"Agent {chr(65 + i)}" for i in range(self.num_agents)]
         
         return sorted(list(agent_names))
-

@@ -147,6 +147,13 @@ class PersonAgent(AgentBase):
             return text
         return text[:max_len] + "...<truncated>"
 
+    @staticmethod
+    def _should_enable_template_mode(instruction: str, ctx: dict[str, Any]) -> bool:
+        variables = ctx.get("variables")
+        if isinstance(variables, dict) and variables:
+            return True
+        return bool(re.search(r"\{[a-zA-Z_][a-zA-Z0-9_]*\}", instruction))
+
     # ── System Prompt ──────────────────────────────────────────────────────────
 
     def get_system_prompt(self, tick: int, t: datetime) -> str:
@@ -180,7 +187,7 @@ class PersonAgent(AgentBase):
             "| read_skill | skill_name, path | Read a file inside a skill directory |\n"
             "| execute_skill | skill_name, args | Run a skill's subprocess script |\n"
             "| bash | command, timeout_sec | Shell command in workspace |\n"
-            "| codegen | instruction, ctx | Send instruction to the environment |\n"
+            "| codegen | instruction, ctx, template_mode | Send instruction to the environment; use template_mode=true for repeatable calls |\n"
             "| workspace_read | path | Read file |\n"
             "| workspace_write | path, content | Write file |\n"
             "| workspace_list | path | List files |\n"
@@ -189,6 +196,8 @@ class PersonAgent(AgentBase):
             "| enable_skill | skill_name | Reveal a hidden skill |\n"
             "| disable_skill | skill_name | Hide a skill |\n"
             "| done | (done=true, summary) | Finish this step |\n\n"
+            "For repeatable environment calls, keep `instruction` stable, put changing values in "
+            "`ctx.variables`, and set `template_mode=true` on `codegen` so the router can reuse cached code.\n\n"
             f"# Skill Catalog\n{json.dumps(catalog, ensure_ascii=False, indent=1)}\n\n"
             f"# Activated Skills\n{json.dumps(sorted(self._activated_skills), ensure_ascii=False)}"
         )
@@ -1012,7 +1021,11 @@ class PersonAgent(AgentBase):
             if action == "codegen":
                 instruction = str(args.get("instruction", ""))
                 ctx = dict(args.get("ctx", {}))
-                template_mode = bool(args.get("template_mode", False))
+                template_mode_arg = args.get("template_mode")
+                if template_mode_arg is None:
+                    template_mode = self._should_enable_template_mode(instruction, ctx)
+                else:
+                    template_mode = bool(template_mode_arg)
                 out = await self._run_codegen(
                     instruction=instruction, ctx=ctx, template_mode=template_mode,
                 )
@@ -1020,6 +1033,7 @@ class PersonAgent(AgentBase):
                 result_obj: dict[str, Any] = {
                     "action": action,
                     "ok": ok,
+                    "template_mode": template_mode,
                     "stdout": self._truncate_text(str(out.get("stdout", "")), max_len=5000),
                     "stderr": self._truncate_text(str(out.get("stderr", "")), max_len=2000),
                 }

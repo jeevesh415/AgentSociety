@@ -5,6 +5,7 @@ Agent for Tragedy of the Commons game based on V2 framework
 import json
 import re
 from datetime import datetime
+from typing import Any
 
 from agentsociety2.agent.base import AgentBase
 
@@ -39,15 +40,16 @@ This agent participates in a 10-round Tragedy of the Commons game where multiple
 """
         return description
 
-    def __init__(self, id: int, name: str):
+    def __init__(self, id: int, name: str, replay_writer=None):
         """Initialize CommonsTragedyAgent
         
         Args:
             id: Agent ID
             name: Agent name
+            replay_writer: Optional replay writer injected by CLI
         """
         profile = {"name": name}
-        super().__init__(id=id, profile=profile)
+        super().__init__(id=id, profile=profile, replay_writer=replay_writer)
         self._name = name
         self.history = []  # Store history records
         self.max_extraction = 10  # Maximum extraction amount
@@ -99,11 +101,11 @@ This agent participates in a 10-round Tragedy of the Commons game where multiple
         
         try:
             # Step 1: Get current pool resources from environment
-            ctx = {}
-            ctx, pool_response = await self.ask_env(
-                ctx, 
+            pool_result, pool_response = await self.ask_env(
+                {}, 
                 "Please call get_pool_resources() to get the current pool resources.",
-                readonly=True
+                readonly=True,
+                template_mode=True,
             )
             self._logger.debug(f"[{self.name}] Pool resources response: {pool_response}")
             
@@ -111,15 +113,16 @@ This agent participates in a 10-round Tragedy of the Commons game where multiple
             current_pool_resources = self._parse_pool_resources(pool_response)
             
             # Step 2: Get round history from environment
-            ctx, history_response = await self.ask_env(
-                ctx,
+            history_result, history_response = await self.ask_env(
+                {},
                 "Please call get_round_history() to get the round history.",
-                readonly=True
+                readonly=True,
+                template_mode=True,
             )
             self._logger.debug(f"[{self.name}] History response: {history_response}")
             
             # Parse and update local history
-            round_history = self._parse_round_history(history_response)
+            round_history = self._parse_round_history(history_result, history_response)
             self._sync_history(round_history)
             
             # Determine current round number (next round = len(history) + 1)
@@ -134,11 +137,18 @@ This agent participates in a 10-round Tragedy of the Commons game where multiple
             )
             
             # Step 4: Submit extraction to environment
-            ctx, submit_response = await self.ask_env(
-                ctx,
-                f"Please call submit_extraction(agent_name='{self.name}', requested_extraction={extraction}) to submit my extraction decision.",
-                readonly=False
+            submit_result, submit_response = await self.ask_env(
+                {
+                    "variables": {
+                        "agent_name": self.name,
+                        "requested_extraction": extraction,
+                    }
+                },
+                "Please call submit_extraction() using agent_name and requested_extraction from ctx['variables'] to submit my extraction decision.",
+                readonly=False,
+                template_mode=True,
             )
+            _ = pool_result, submit_result, submit_response
             self._logger.info(
                 f"[{self.name}] Round {current_round}: Submitted extraction={extraction}, "
                 f"explanation={explanation[:50]}..."
@@ -244,20 +254,10 @@ This agent participates in a 10-round Tragedy of the Commons game where multiple
         # Default fallback
         return 100
 
-    def _parse_round_history(self, response: str) -> list:
+    def _parse_round_history(self, env_result: Any, response: str) -> list:
         """Parse round history from environment response"""
-        try:
-            # Try to parse as JSON array
-            json_match = re.search(r'\[.*\]', response, re.DOTALL)
-            if json_match:
-                data = json.loads(json_match.group(0))
-                if isinstance(data, list):
-                    return data
-        except (json.JSONDecodeError, ValueError, KeyError):
-            pass
-        
-        # Return empty list if parsing fails
-        return []
+        rounds = self._extract_env_list_result(env_result, response, "round_history")
+        return [round_data for round_data in rounds if isinstance(round_data, dict)]
 
     def _sync_history(self, round_history: list):
         """Sync local history with environment history"""
@@ -412,4 +412,3 @@ This agent participates in a 10-round Tragedy of the Commons game where multiple
 
         self._logger.debug(f"[{self.name}] [DEBUG] Final selection: {extraction}")
         return extraction, explanation
-

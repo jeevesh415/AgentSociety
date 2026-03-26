@@ -2,7 +2,6 @@
 Prisoner's Dilemma Game Agent
 Agent for Prisoner's Dilemma game based on V2 framework
 """
-import json
 import re
 from datetime import datetime
 from typing import Any
@@ -43,15 +42,16 @@ This agent participates in a 10-round Prisoner's Dilemma game where two players 
 """
         return description
 
-    def __init__(self, id: int, name: str):
+    def __init__(self, id: int, name: str, replay_writer=None):
         """Initialize PrisonersDilemmaAgent
         
         Args:
             id: Agent ID
             name: Agent name
+            replay_writer: Optional replay writer injected by CLI
         """
         profile = {"name": name}
-        super().__init__(id=id, profile=profile)
+        super().__init__(id=id, profile=profile, replay_writer=replay_writer)
         self._name = name
         self.history = []  # Store history records
 
@@ -101,16 +101,16 @@ This agent participates in a 10-round Prisoner's Dilemma game where two players 
         
         try:
             # Step 1: Get round history from environment
-            ctx = {}
-            ctx, history_response = await self.ask_env(
-                ctx,
+            history_result, history_response = await self.ask_env(
+                {},
                 "Please call get_round_history() to get the round history.",
-                readonly=True
+                readonly=True,
+                template_mode=True,
             )
             self._logger.debug(f"[{self.name}] History response: {history_response}")
             
             # Parse and update local history
-            round_history = self._parse_round_history(history_response)
+            round_history = self._parse_round_history(history_result, history_response)
             self._sync_history(round_history)
             
             # Determine current round number (next round = len(history) + 1)
@@ -125,11 +125,18 @@ This agent participates in a 10-round Prisoner's Dilemma game where two players 
             )
             
             # Step 3: Submit action to environment
-            ctx, submit_response = await self.ask_env(
-                ctx,
-                f"Please call submit_action(agent_name='{self.name}', action='{action}') to submit my action decision.",
-                readonly=False
+            submit_result, submit_response = await self.ask_env(
+                {
+                    "variables": {
+                        "agent_name": self.name,
+                        "action": action,
+                    }
+                },
+                "Please call submit_action() using agent_name and action from ctx['variables'] to submit my action decision.",
+                readonly=False,
+                template_mode=True,
             )
+            _ = submit_result, submit_response
             self._logger.info(
                 f"[{self.name}] Round {current_round}: Submitted action={action}, "
                 f"explanation={explanation[:50]}..."
@@ -243,7 +250,6 @@ This agent participates in a 10-round Prisoner's Dilemma game where two players 
     def _build_profile_string(self) -> str:
         """Build profile string from profile dict"""
         if isinstance(self._profile, dict):
-            name = self._profile.get("name", f"Agent {self.id}")
             # Build complete game rules description matching baseline
             return (
                 "You are a rational decision-maker. You are playing a game that is played in multiple rounds with another player. "
@@ -274,18 +280,10 @@ This agent participates in a 10-round Prisoner's Dilemma game where two players 
                 "Remember this matrix and make decisions to maximize your total points. You must output 1-2 sentences to explain your decision."
             )
 
-    def _parse_round_history(self, response: str) -> list:
+    def _parse_round_history(self, env_result: Any, response: str) -> list:
         """Parse round history from environment response"""
-        try:
-            # Try to extract JSON array from response
-            json_match = re.search(r'\[.*\]', response, re.DOTALL)
-            if json_match:
-                rounds = json.loads(json_match.group(0))
-                if isinstance(rounds, list):
-                    return rounds
-        except Exception as e:
-            self._logger.warning(f"[{self.name}] Failed to parse round history: {e}")
-        return []
+        rounds = self._extract_env_list_result(env_result, response, "round_history")
+        return [round_data for round_data in rounds if isinstance(round_data, dict)]
 
     def _sync_history(self, round_history: list):
         """Sync local history with environment round history"""
@@ -293,7 +291,6 @@ This agent participates in a 10-round Prisoner's Dilemma game where two players 
         # Convert environment format to local format: (my_action, opponent_action)
         self.history = []
         for round_data in round_history:
-            round_num = round_data.get("round", 0)
             agent_a_action = round_data.get("agent_a_action", "")
             agent_b_action = round_data.get("agent_b_action", "")
             
@@ -327,4 +324,3 @@ This agent participates in a 10-round Prisoner's Dilemma game where two players 
             history_str += f"Round {i + 1}: Your choice={formatted_my_action}, {opponent_name}'s choice={formatted_opponent_action}\n"
 
         return history_str
-

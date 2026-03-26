@@ -36,6 +36,7 @@ Example::
 """
 
 import asyncio
+import json
 import logging
 import os
 from abc import ABC, abstractmethod
@@ -557,15 +558,43 @@ Remember: You are simulating a real person living in a simulated world. Your beh
                           using {variable_name} syntax (similar to Python f-strings).
 
         Returns:
-            A tuple of (ctx, answer)
-                - ctx: The context of the agent.
-                - answer: The answer from the environment.
+            A tuple of (result, answer)
+                - result: Structured result dict returned by the router (for example tool outputs in `results`)
+                - answer: The natural-language summary returned by the router
         """
         assert self._env is not None, "Environment is not initialized"
         if "id" not in ctx:
             ctx["id"] = self._id
         ctx, answer = await self._env.ask(ctx, message, readonly=readonly, template_mode=template_mode)
         return ctx, answer
+
+    @staticmethod
+    def _extract_json_list_from_text(text: str) -> list[Any]:
+        decoder = json.JSONDecoder()
+        for idx, ch in enumerate(text):
+            if ch != "[":
+                continue
+            try:
+                value, _ = decoder.raw_decode(text[idx:])
+            except json.JSONDecodeError:
+                continue
+            if isinstance(value, list):
+                return value
+        return []
+
+    def _extract_env_list_result(
+        self,
+        env_result: Any,
+        answer: str,
+        key: str,
+    ) -> list[Any]:
+        if isinstance(env_result, list):
+            return env_result
+        if isinstance(env_result, dict):
+            value = env_result.get(key)
+            if isinstance(value, list):
+                return value
+        return self._extract_json_list_from_text(answer)
 
     async def init(
         self,
