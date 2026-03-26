@@ -12,11 +12,10 @@
  */
 
 import * as vscode from 'vscode';
-import * as path from 'path';
-import { exec } from 'child_process';
+import { execFile } from 'child_process';
 import { promisify } from 'util';
 
-const execAsync = promisify(exec);
+const execFileAsync = promisify(execFile);
 
 export interface ValidationResult {
   success: boolean;
@@ -173,7 +172,7 @@ export class PythonValidator {
     const { pythonPath } = config;
 
     // 如果没有指定 Python 路径，尝试自动检测
-    const pythonCmd = pythonPath || 'python3';
+    const pythonCmd = this.normalizePythonPath(pythonPath) || 'python3';
     this.log(`Validating Python: ${pythonCmd}`);
 
     try {
@@ -190,24 +189,30 @@ export class PythonValidator {
         };
       }
 
-      this.log(`Python version: ${versionResult.stdout.trim()}`);
+      const pythonVersion = this.getCommandOutput(versionResult);
+      this.log(`Python version: ${pythonVersion}`);
 
       // 检查 agentsociety2 是否安装
       this.log(`Checking agentsociety2 installation...`);
       const importResult = await this.execCommand(
         pythonCmd,
         '-c',
-        '"import agentsociety2; print(agentsociety2.__version__)"'
+        'import agentsociety2; print(agentsociety2.__version__)'
       );
 
       if (!importResult.success) {
+        const importError = this.getCommandOutput(importResult);
         return {
           success: false,
-          error: `agentsociety2 未安装在此 Python 环境中。\n版本信息: ${versionResult.stdout.trim()}`
+          error: [
+            'agentsociety2 未安装在此 Python 环境中。',
+            `版本信息: ${pythonVersion}`,
+            importError ? `检测详情: ${importError}` : null,
+          ].filter(Boolean).join('\n')
         };
       }
 
-      const version = importResult.stdout.trim();
+      const version = this.getCommandOutput(importResult);
       this.log(`agentsociety2 version: ${version}`);
 
       return {
@@ -226,13 +231,13 @@ export class PythonValidator {
    * 执行命令并返回结果
    */
   private async execCommand(command: string, ...args: string[]): Promise<{ success: boolean; stdout: string; stderr: string }> {
-    const fullCmd = [command, ...args].join(' ');
     this.log(`Executing: ${command} ${args.join(' ')}`);
 
     try {
-      const { stdout, stderr } = await execAsync(fullCmd, {
+      const { stdout, stderr } = await execFileAsync(command, args, {
         timeout: 10000, // 10秒超时
         env: { ...process.env, PYTHONIOENCODING: 'utf-8' },
+        windowsHide: true,
       });
 
       return { success: true, stdout: stdout || '', stderr: stderr || '' };
@@ -244,6 +249,15 @@ export class PythonValidator {
         stderr: error.stderr || error.message || ''
       };
     }
+  }
+
+  private normalizePythonPath(pythonPath?: string): string {
+    const trimmed = pythonPath?.trim() || '';
+    return trimmed.replace(/^["'](.+)["']$/, '$1');
+  }
+
+  private getCommandOutput(result: { stdout: string; stderr: string }): string {
+    return (result.stdout || result.stderr || '').trim();
   }
 
   dispose(): void {
