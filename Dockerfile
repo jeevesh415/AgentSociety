@@ -11,6 +11,7 @@ RUN npm install -g @vscode/vsce
 # Copy extension dependency files first for better caching
 WORKDIR /app/extension
 COPY ./extension/package.json ./extension/package-lock.json ./
+COPY ./extension/.npmrc ./
 RUN npm ci
 
 # Copy extension source code and config files
