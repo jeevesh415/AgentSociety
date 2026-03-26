@@ -658,7 +658,10 @@ class PersonAgent(AgentBase):
                 payload = self._coerce_llm_dict(args.get("args", {}))
                 payload.setdefault("tick", tick)
                 payload.setdefault("time", t.isoformat())
-                out = await self.execute(skill_name, payload)
+                try:
+                    out = await self.execute(skill_name, payload)
+                except Exception as e:
+                    out = {"ok": False, "error_type": type(e).__name__, "stderr": str(e), "stdout": ""}
                 ok = bool(out.get("ok"))
                 result_obj = {
                     "action": action,
@@ -725,21 +728,24 @@ class PersonAgent(AgentBase):
             # ── workspace_list ──
             if action == "workspace_list":
                 path = str(args.get("path", ".") or ".")
-                files = self._skill_runtime.workspace_list(path)
-                result_obj = {
-                    "action": action,
-                    "path": path,
-                    "ok": True,
-                    "count": len(files),
-                    "files": files[:200],
-                }
+                try:
+                    files = self._skill_runtime.workspace_list(path)
+                    result_obj = {
+                        "action": action,
+                        "path": path,
+                        "ok": True,
+                        "count": len(files),
+                        "files": files[:200],
+                    }
+                except Exception as e:
+                    result_obj = {"action": action, "path": path, "ok": False, "error": str(e)}
                 history.append(result_obj)
-                self._skill_runtime.append_tool_log(
-                    {"tick": tick, "time": t.isoformat(), "action": action,
-                     "path": path, "ok": True, "count": len(files)}
-                )
+                self._skill_runtime.append_tool_log({"tick": tick, "time": t.isoformat(), **result_obj})
                 self._append_tool_result_to_thread(thread_messages, tick, t, result_obj)
-                logs.append(f"workspace_list:{path}:{len(files)}")
+                if result_obj.get("ok"):
+                    logs.append(f"workspace_list:{path}:{result_obj.get('count', 0)}")
+                else:
+                    logs.append(f"workspace_list:{path}:fail")
                 continue
 
             # ── bash ──
@@ -747,7 +753,10 @@ class PersonAgent(AgentBase):
                 command = str(args.get("command", "")).strip()
                 timeout_sec = int(args.get("timeout_sec", 20))
                 timeout_sec = max(1, min(120, timeout_sec))
-                out = await self._run_bash_in_workspace(command=command, timeout_sec=timeout_sec)
+                try:
+                    out = await self._run_bash_in_workspace(command=command, timeout_sec=timeout_sec)
+                except Exception as e:
+                    out = {"ok": False, "exit_code": None, "stdout": "", "stderr": str(e)}
                 ok = bool(out.get("ok"))
                 result_obj = {
                     "action": action,
@@ -810,9 +819,12 @@ class PersonAgent(AgentBase):
                 instruction = str(args.get("instruction", ""))
                 ctx = self._coerce_llm_dict(args.get("ctx", {}))
                 template_mode = bool(args.get("template_mode", False))
-                out = await self._run_codegen(
-                    instruction=instruction, ctx=ctx, template_mode=template_mode,
-                )
+                try:
+                    out = await self._run_codegen(
+                        instruction=instruction, ctx=ctx, template_mode=template_mode,
+                    )
+                except Exception as e:
+                    out = {"ok": False, "stdout": "", "stderr": str(e)}
                 ok = bool(out.get("ok"))
                 result_obj: dict[str, Any] = {
                     "action": action,

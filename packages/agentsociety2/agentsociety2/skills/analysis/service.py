@@ -988,7 +988,7 @@ Use CDATA to wrap content. HTML must be a complete, well-styled document. If cha
                     return report_md
                 last_feedback = str(e)
                 continue
-            # 双语解析：优先取中文，fallback 到通用字段
+            # 双语解析：优先取中文；markdown/html 为解析器计算出的聚合字段
             md_content = (data.get("markdown_zh") or data.get("markdown") or "").strip()
             html_content = (data.get("html_zh") or data.get("html") or "").strip()
             md_content_en = (data.get("markdown_en") or "").strip()
@@ -1144,6 +1144,154 @@ async def run_analysis(
         on_progress=on_progress,
     )
 
+
+def _discover_experiment_ids(workspace_path: Path, hypothesis_id: str) -> List[str]:
+    """在 hypothesis_<id> 下自动发现 experiment id 列表（仅目录名，不读文件内容）。"""
+    paths = experiment_paths(workspace_path, hypothesis_id, "0")
+    base = paths.hypothesis_base
+    if not base.exists():
+        return []
+    ids: List[str] = []
+    for p in base.iterdir():
+        if not p.is_dir():
+            continue
+        if not p.name.startswith(DIR_EXPERIMENT_PREFIX):
+            continue
+        raw_id = p.name.split(DIR_EXPERIMENT_PREFIX, 1)[-1]
+        ids.append(raw_id)
+
+    def _sort_key(x: str) -> tuple[int, str]:
+        try:
+            return (0, f"{int(x):09d}")
+        except ValueError:
+            return (1, x)
+
+    # 统一与路径规则一致的清洗逻辑
+    from .utils import _sanitize_id as _sanitize
+
+    return sorted({_sanitize(eid) for eid in ids}, key=_sort_key)
+
+
+async def run_analysis_many(
+    workspace_path: str,
+    hypothesis_id: str,
+    experiment_ids: Optional[List[str]] = None,
+    custom_instructions: Optional[str] = None,
+    literature_summary: Optional[str] = None,
+    on_progress: AnalysisProgressCallback = None,
+) -> Dict[str, Any]:
+    """按 hypothesis 批量执行单实验分析（互不覆盖），输出到 `presentation/`。
+
+    说明：
+    - `run_analysis` 是单实验入口；本函数用于一次性分析一个 hypothesis 下的多个实验。
+    - 若不传 experiment_ids，则自动发现 hypothesis_<id>/experiment_*。
+    - 每个实验的产物固定落在：`presentation/hypothesis_<hid>/experiment_<eid>/`（报告、data、charts、assets）。
+    """
+    config = AnalysisConfig(workspace_path=workspace_path)
+    service = Analyzer(config)
+    wp = Path(workspace_path).resolve()
+    eids = experiment_ids or _discover_experiment_ids(wp, hypothesis_id)
+    if not eids:
+        return {
+            "success": False,
+            "error": f"No experiments found under hypothesis_{hypothesis_id}",
+            "hypothesis_id": hypothesis_id,
+            "results": [],
+        }
+
+    async def progress(msg: str) -> None:
+        if on_progress:
+            await on_progress(msg)
+
+    results: List[Dict[str, Any]] = []
+    for i, eid in enumerate(eids):
+        await progress(f"Analyzing experiment {eid} ({i + 1}/{len(eids)})...")
+        results.append(
+            await service.analyze(
+                hypothesis_id=hypothesis_id,
+                experiment_id=eid,
+                custom_instructions=custom_instructions,
+                literature_summary=literature_summary,
+                on_progress=on_progress,
+            )
+        )
+
+    return {
+        "success": True,
+        "hypothesis_id": hypothesis_id,
+        "experiment_ids": eids,
+        "count": len(results),
+        "results": results,
+    }
+
+
+async def run_analysis_workflow(
+    workspace_path: str,
+    mode: str,
+    hypothesis_id: Optional[str] = None,
+    experiment_id: Optional[str] = None,
+    experiment_ids: Optional[List[str]] = None,
+    hypothesis_ids: Optional[List[str]] = None,
+    custom_instructions: Optional[str] = None,
+    literature_summary: Optional[str] = None,
+    config: Optional[AnalysisConfig] = None,
+    on_progress: AnalysisProgressCallback = None,
+) -> Dict[str, Any]:
+    """统一分析入口：单实验 / 指定多实验 / 综合（跨 hypothesis）。
+
+    - `mode="single"`: 需要 `hypothesis_id` + `experiment_id`，输出到 `presentation/hypothesis_<hid>/experiment_<eid>/`
+    - `mode="batch"`: 需要 `hypothesis_id`；`experiment_ids` 可选（不传则自动发现），逐个输出到各自的 presentation 目录
+    - `mode="synthesize"`: `hypothesis_ids` / `experiment_ids` 可选（不传则自动发现），输出到 `synthesis/`
+    """
+    m = (mode or "").strip().lower()
+    if m not in {"single", "batch", "synthesize"}:
+        raise ValueError("mode must be one of: single|batch|synthesize")
+
+    cfg = config or AnalysisConfig(workspace_path=workspace_path)
+
+    if m == "single":
+        if not hypothesis_id or not experiment_id:
+            raise ValueError("single mode requires hypothesis_id and experiment_id")
+        return {
+            "mode": "single",
+            **(
+                await run_analysis(
+                    workspace_path=workspace_path,
+                    hypothesis_id=hypothesis_id,
+                    experiment_id=experiment_id,
+                    custom_instructions=custom_instructions,
+                    literature_summary=literature_summary,
+                    on_progress=on_progress,
+                )
+            ),
+        }
+
+    if m == "batch":
+        if not hypothesis_id:
+            raise ValueError("batch mode requires hypothesis_id")
+        return {
+            "mode": "batch",
+            **(
+                await run_analysis_many(
+                    workspace_path=workspace_path,
+                    hypothesis_id=hypothesis_id,
+                    experiment_ids=experiment_ids,
+                    custom_instructions=custom_instructions,
+                    literature_summary=literature_summary,
+                    on_progress=on_progress,
+                )
+            ),
+        }
+
+    synth = Synthesizer(workspace_path=workspace_path, config=cfg)
+    out = await synth.synthesize(
+        hypothesis_ids=hypothesis_ids,
+        experiment_ids=experiment_ids,
+        custom_instructions=custom_instructions,
+        literature_summary=literature_summary,
+        on_progress=on_progress,
+    )
+    return {"mode": "synthesize", "success": True, "synthesis": out.model_dump(mode="json")}
 
 async def run_synthesis(
     workspace_path: str,

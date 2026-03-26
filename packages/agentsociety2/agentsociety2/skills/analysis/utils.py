@@ -12,7 +12,7 @@ from typing import Any, Awaitable, Callable, Dict, List, Optional, TypeVar, Type
 
 import json_repair
 from pydantic import BaseModel
-from xenon import TrustLevel, repair_xml_safe
+ 
 
 from .models import (
     DIR_ARTIFACTS,
@@ -272,17 +272,11 @@ def _xml_element_to_value(el: ET.Element) -> Any:
 
 
 def _parse_xml_to_root(xml_str: str) -> ET.Element:
-    """解析 XML 字符串为 Element，失败时尝试用 xenon 修复后再解析。失败则抛出 XmlParseError。"""
+    """解析 XML 字符串为 Element；失败则抛出 XmlParseError。"""
     try:
         return ET.fromstring(xml_str)
-    except ET.ParseError:
-        try:
-            repaired = repair_xml_safe(xml_str, trust=TrustLevel.UNTRUSTED)
-            return ET.fromstring(repaired)
-        except Exception as e:
-            raise XmlParseError(
-                f"XML parse failed after repair attempt: {e}", raw_content=xml_str
-            ) from e
+    except ET.ParseError as e:
+        raise XmlParseError(f"XML parse failed: {e}", raw_content=xml_str) from e
 
 
 def parse_llm_xml_response(content: str, root_tag: str = "result") -> Dict[str, Any]:
@@ -337,16 +331,21 @@ def _take_json_string(content: str) -> str:
 
 
 def parse_llm_json_response(content: str) -> Dict[str, Any]:
-    """解析 LLM 返回的 JSON，约定为单段 JSON 或 ```json ... ```。返回 dict，失败返回 {}。"""
+    """解析 LLM 返回的 JSON，约定为单段 JSON 或 ```json ... ```。
+
+    - 提取不到 JSON 或 JSON 根不是 object：抛出 ValueError。
+    """
     json_str = _take_json_string(content)
     if not json_str:
-        return {}
+        raise ValueError("No JSON content extracted")
     data = json_repair.loads(json_str)
-    return data if isinstance(data, dict) else {}
+    if not isinstance(data, dict):
+        raise ValueError("JSON root must be an object")
+    return data
 
 
 def parse_llm_report_response(content: str) -> Dict[str, str]:
-    """解析报告类 LLM 输出（XML 格式），支持双语和单语两种 tag 结构。
+    """解析报告类 LLM 输出（XML 格式），仅支持双语 tag 结构。
 
     双语格式（优先）::
         <report>
@@ -356,13 +355,9 @@ def parse_llm_report_response(content: str) -> Dict[str, str]:
           <html_en><![CDATA[...]]></html_en>
         </report>
 
-    单语兼容格式::
-        <report>
-          <markdown><![CDATA[...]]></markdown>
-          <html><![CDATA[...]]></html>
-        </report>
-
     Returns dict with keys: markdown_zh, html_zh, markdown_en, html_en, markdown, html.
+
+    - 缺少必须的双语字段（至少 markdown_zh/markdown_en + html_zh/html_en）：抛出 XmlParseError。
     """
     raw = (content or "").strip()
     if not raw:
@@ -386,24 +381,18 @@ def parse_llm_report_response(content: str) -> Dict[str, str]:
     html_zh = _text("html_zh")
     md_en = _text("markdown_en")
     html_en = _text("html_en")
-    md_plain = _text("markdown")
-    html_plain = _text("html")
-
-    # 单语 fallback：若双语 tag 全空但单语有内容，复制到双语字段
-    if not md_zh and not md_en and md_plain:
-        md_zh = md_plain
-        md_en = md_plain
-    if not html_zh and not html_en and html_plain:
-        html_zh = html_plain
-        html_en = html_plain
+    if not md_zh and not md_en:
+        raise XmlParseError("Report must include markdown_zh or markdown_en", raw_content=content)
+    if not html_zh and not html_en:
+        raise XmlParseError("Report must include html_zh or html_en", raw_content=content)
 
     return {
         "markdown_zh": md_zh,
         "html_zh": html_zh,
         "markdown_en": md_en,
         "html_en": html_en,
-        "markdown": md_zh or md_en or md_plain,
-        "html": html_zh or html_en or html_plain,
+        "markdown": md_zh or md_en,
+        "html": html_zh or html_en,
     }
 
 

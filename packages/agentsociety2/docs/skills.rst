@@ -97,13 +97,34 @@ Python API
 
 .. code-block:: python
 
-   from agentsociety2.skills.analysis import run_analysis, Analyzer
+   from agentsociety2.skills.analysis import (
+       run_analysis,
+       run_analysis_many,
+       run_analysis_workflow,
+       Analyzer,
+       run_synthesis,
+   )
 
    # 使用便捷函数
    result = await run_analysis(
        workspace_path=Path("./workspace"),
        hypothesis_id="1",
        experiment_id="1"
+   )
+
+   # 同一 hypothesis 下批量分析（experiment_ids 不传则自动发现）
+   batch = await run_analysis_many(
+       workspace_path=str(Path("./workspace")),
+       hypothesis_id="1",
+       experiment_ids=["1", "2", "3"],  # 可选
+   )
+
+   # 统一入口：single | batch | synthesize
+   out = await run_analysis_workflow(
+       workspace_path=str(Path("./workspace")),
+       mode="synthesize",
+       hypothesis_ids=["1"],          # 可选，不传则自动发现
+       experiment_ids=["1", "2", "3"] # 可选，不传则分析全部
    )
 
    # 使用 Analyzer 类

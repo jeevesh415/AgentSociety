@@ -39,6 +39,7 @@ Use the `PYTHON_PATH` from your `.env` file to ensure the correct Python interpr
 | --experiment-ids | strings | No | Experiment IDs to synthesize (default: auto-discover all) |
 | --workspace | string | No | Workspace path (default: current directory) |
 | --instructions | string | No | Additional synthesis instructions |
+| --literature-summary | string | No | Optional literature summary to incorporate |
 
 ## Two Modes
 

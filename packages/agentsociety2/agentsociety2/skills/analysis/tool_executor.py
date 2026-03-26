@@ -526,6 +526,9 @@ Please generate corrected code that addresses the issues above."""
 
         Returns:
             ExecutionResult 判断结果
+
+        Raises:
+            XmlParseError: LLM 裁判输出为空或 XML 不可解析。
         """
         # Collect artifacts
         artifact_extensions = {
@@ -546,22 +549,6 @@ Please generate corrected code that addresses the issues above."""
         }
         new_files = files_after - files_before_execution
         output_dir_files = list(self.output_dir.glob("**/*"))
-
-        def _fallback_check() -> ExecutionResult:
-            if (
-                exec_result
-                and exec_result.return_code == 0
-                and (exec_result.stdout.strip() or new_files or output_dir_files)
-            ):
-                return ExecutionResult(
-                    success=True, reason="Execution completed with output"
-                )
-            return ExecutionResult(
-                success=False,
-                reason="LLM judgment failed, execution may have failed",
-                should_retry=True,
-                retry_instruction="Check the execution output and fix any errors",
-            )
 
         def _trunc(s: str, max_len: int = 4000) -> str:
             if not s:
@@ -627,9 +614,6 @@ You should analyze the execution result and determine:
 
         content = response.choices[0].message.content  # type: ignore
         if not content:
-            return _fallback_check()
+            raise XmlParseError("Empty judgment content", raw_content="")
 
-        try:
-            return parse_llm_xml_to_model(content, ExecutionResult, root_tag="judgment")
-        except XmlParseError:
-            return _fallback_check()
+        return parse_llm_xml_to_model(content, ExecutionResult, root_tag="judgment")

@@ -608,8 +608,7 @@ Based on the experiment context and **actual data structure above**, generate an
                     self.logger.warning(
                         "XML解析失败，尝试 %s 次后失败: %s", self.max_retries, e
                     )
-                    parsed = {}
-                    break
+                    raise
                 messages.append(
                     {
                         "role": "user",
@@ -769,7 +768,7 @@ Based on the experiment context and **actual data structure above**, generate an
             except XmlParseError as e:
                 if attempt >= max_retries - 1:
                     self.logger.warning("分析策略XML解析失败: %s", e)
-                    return {"analysis_strategy": "", "tools_to_use": []}
+                    raise
                 if on_progress:
                     await on_progress(f"Strategy XML parse failed, retrying: {e}")
                 continue
@@ -784,7 +783,7 @@ Based on the experiment context and **actual data structure above**, generate an
             if on_progress:
                 await on_progress(f"Strategy needs improvement: {judgment.reason}")
 
-        return {"analysis_strategy": "", "tools_to_use": []}
+        raise XmlParseError("Strategy retries exhausted", raw_content="")
 
     async def _decide_analysis_strategy(
         self,
@@ -1190,12 +1189,12 @@ Based on the experiment context and **actual data structure above**, generate an
             except XmlParseError as e:
                 if attempt >= max_retries - 1:
                     self.logger.warning("可视化XML解析失败: %s", e)
-                    return [], []
+                    raise
                 previous_feedback = str(e)
                 continue
 
             if not visualization_plan:
-                return [], []
+                raise XmlParseError("Empty visualization plan", raw_content="")
 
             await progress("Generating charts...")
             generated_charts, error_logs = await self._generate_visualizations(
@@ -1217,7 +1216,7 @@ Based on the experiment context and **actual data structure above**, generate an
                 )
             except XmlParseError as e:
                 if attempt >= max_retries - 1:
-                    return visualization_plan, generated_charts
+                    raise
                 previous_feedback = str(e)
                 continue
 

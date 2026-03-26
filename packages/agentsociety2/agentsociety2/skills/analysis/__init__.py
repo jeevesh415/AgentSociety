@@ -64,7 +64,14 @@ from .models import (
 )
 from .agents import AnalysisAgent
 from .tool_executor import AnalysisRunner
-from .service import Analyzer, run_analysis, Synthesizer, run_synthesis
+from .service import (
+    Analyzer,
+    run_analysis,
+    run_analysis_many,
+    run_analysis_workflow,
+    Synthesizer,
+    run_synthesis,
+)
 from .report_generator import Reporter
 from .utils import (
     AnalysisSkillMeta,
@@ -124,6 +131,8 @@ __all__ = [
     # 分析子智能体入口与便捷函数
     "Analyzer",
     "run_analysis",
+    "run_analysis_many",
+    "run_analysis_workflow",
     "Synthesizer",
     "run_synthesis",
     # 统一分析智能体

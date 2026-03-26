@@ -6,7 +6,7 @@ license: Proprietary. LICENSE.txt has complete terms
 
 # Data Analysis
 
-Analyze a single experiment's simulation data and generate comprehensive reports with visualizations.
+Analyze experiment data and generate reports. Supports single experiment, batch experiments, and synthesis.
 
 ## Quick Start
 
@@ -28,9 +28,14 @@ Use the `PYTHON_PATH` from your `.env` file to ensure the correct Python interpr
 
 | Parameter | Type | Required | Description |
 |-----------|------|----------|-------------|
-| --hypothesis-id | string | Yes | Hypothesis ID (e.g., '1', '2') |
-| --experiment-id | string | Yes | Experiment ID (e.g., '1', '2') |
+| --mode | string | No | `single` (default) \| `batch` \| `synthesize` |
+| --hypothesis-id | string | single/batch | Hypothesis ID (e.g., '1', '2') |
+| --experiment-id | string | single | Experiment ID (e.g., '1', '2') |
+| --experiment-ids | string[] | batch/synthesize | Experiment IDs list (default: auto-discover) |
+| --hypothesis-ids | string[] | synthesize | Hypothesis IDs list (default: auto-discover) |
 | --workspace | string | No | Workspace path (default: current directory) |
+| --instructions | string | No | Additional analysis/synthesis instructions |
+| --literature-summary | string | No | Optional literature summary to incorporate |
 
 ## What It Does
 
