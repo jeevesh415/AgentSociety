@@ -11,6 +11,7 @@ import copy
 import json
 from collections.abc import Mapping
 import re
+import shlex
 from datetime import datetime
 from typing import TYPE_CHECKING, Any, Optional
 
@@ -27,6 +28,10 @@ if TYPE_CHECKING:
 
 
 class ToolDecision(BaseModel):
+    """单轮工具决策输出。
+
+    由 LLM 生成并通过 Pydantic 校验，作为 `_tool_loop` 的唯一执行输入。
+    """
     tool_name: str = Field(
         description=(
             "activate_skill|read_skill|execute_skill|workspace_read|workspace_write|workspace_list|enable_skill|disable_skill|bash|glob|grep|codegen|done"
@@ -38,17 +43,42 @@ class ToolDecision(BaseModel):
 
 
 class PersonAgent(AgentBase):
-    """每个 Person = 一个独立的 Claude-like agent。
+    """Person 场景下的 skills-first 工具代理。
 
-    每步：system prompt 注入身份+技能目录+工具表 → LLM 逐轮选工具 → 结果回写 thread → done 结束。
+    设计目标是让每个 Person 拥有独立线程、独立工作区和独立技能可见性，
+    在每个 step 内通过工具循环完成“观察-推理-行动”。
     """
 
     @classmethod
     def mcp_description(cls) -> str:
+        """返回 MCP 候选列表中的简短描述。"""
         return (
             "PersonAgent: Minimal skills-first agent. "
             "Uses progressive skill loading and isolated agent workspace."
         )
+
+    _TOOL_SPECS: tuple[tuple[str, str, str], ...] = (
+        ("activate_skill", "skill_name, arguments", "Load skill instructions (optional args)"),
+        ("read_skill", "skill_name, path", "Read a file inside a skill directory"),
+        ("execute_skill", "skill_name, args", "Run a skill's subprocess script"),
+        ("bash", "command, timeout_sec", "Shell command in workspace"),
+        ("codegen", "instruction, ctx", "Send instruction to the environment"),
+        ("workspace_read", "path", "Read file"),
+        ("workspace_write", "path, content", "Write file"),
+        ("workspace_list", "path", "List files"),
+        ("glob", "glob, path", "Find files by pattern"),
+        ("grep", "pattern, glob, path", "Search file contents"),
+        ("enable_skill", "skill_name", "Reveal a hidden skill"),
+        ("disable_skill", "skill_name", "Hide a skill"),
+        ("done", "(done=true, summary)", "Finish this step"),
+    )
+
+    @classmethod
+    def _render_tool_table(cls) -> str:
+        lines = ["| Tool | Arguments | Purpose |", "|------|-----------|----------|"]
+        for name, arguments, purpose in cls._TOOL_SPECS:
+            lines.append(f"| {name} | {arguments} | {purpose} |")
+        return "\n".join(lines)
 
     def __init__(
         self,
@@ -59,6 +89,16 @@ class PersonAgent(AgentBase):
         init_state: Optional[dict[str, Any]] = None,
         **capability_kwargs: Any,
     ):
+        """初始化 PersonAgent。
+
+        Args:
+            id: Agent 唯一标识。
+            profile: 画像对象（dict 或可序列化对象）。
+            name: 可选显示名。
+            replay_writer: 可选回放写入器。
+            init_state: 初始状态（会被归一化为 dict）。
+            **capability_kwargs: 能力参数，如 core_skills/max_tool_rounds/thread_compact_chars。
+        """
         super().__init__(id=id, profile=profile, name=name, replay_writer=replay_writer)
         self._agent_state: dict[str, Any] = self._coerce_llm_dict(init_state)
         self._capability_kwargs: dict[str, Any] = dict(capability_kwargs)
@@ -72,6 +112,7 @@ class PersonAgent(AgentBase):
         self._selectable_skill_names: set[str] = set()
         self._skill_visibility_overrides: dict[str, bool] = {}
         self._activated_skills: set[str] = set()
+        self._active_skill_scope: str = ""
         # Claude-like capability disclosure: only a small core set is visible by default.
         default_core = {"observation", "needs", "cognition", "plan", "memory"}
         core = self._capability_kwargs.get("core_skills", None)
@@ -85,10 +126,12 @@ class PersonAgent(AgentBase):
         self._max_tool_rounds = max(1, int(self._capability_kwargs.get("max_tool_rounds", 24)))
 
     def _all_visible_skill_names(self) -> set[str]:
+        """返回当前 agent 可见技能名集合副本。"""
         return set(self._selectable_skill_names)
 
     @staticmethod
     def _truncate_text(text: str, max_len: int = 2000) -> str:
+        """按字符上限截断文本，避免 thread/tool 日志过大。"""
         if len(text) <= max_len:
             return text
         return text[:max_len] + "...<truncated>"
@@ -118,7 +161,10 @@ class PersonAgent(AgentBase):
     # ── System Prompt ──────────────────────────────────────────────────────────
 
     def get_system_prompt(self, tick: int, t: datetime) -> str:
-        """每轮注入完整上下文到 system role（对标 Claude Code 的行为）。"""
+        """构造本轮 system prompt。
+
+        包含身份信息、可见技能目录、工具说明与已激活技能列表。
+        """
         base = super().get_system_prompt(tick, t)
 
         agent_identity = {
@@ -127,38 +173,27 @@ class PersonAgent(AgentBase):
             "profile": self.get_profile(),
         }
 
-        try:
-            catalog = self._skill_runtime.skill_list(sorted(self._all_visible_skill_names()))
-        except Exception:
-            catalog = []
+        catalog = self._skill_runtime.skill_list(sorted(self._all_visible_skill_names()))
 
         skill_section = (
             f"\n\n# Agent Identity\n"
             f"{json.dumps(agent_identity, ensure_ascii=False)}\n\n"
             "# You Are an Autonomous Tool-Using Agent\n"
-            "Call tools one at a time. "
+            "Call exactly one tool per round. "
             "Respond ONLY with valid JSON: {tool_name, arguments, done, summary}.\n"
             "For execute_skill use arguments.args as a JSON object; for codegen use arguments.ctx as a JSON object "
             "(prefer objects over stringified JSON; the runtime parses strings with json_repair).\n\n"
             "# Skills\n"
             "The catalog below lists available skills (name + description). "
-            "Use `activate_skill` to load a skill's full instructions, then follow them.\n\n"
+            "Use `activate_skill` to load a skill's full instructions, then follow them. "
+            "You may pass `arguments` when activating a skill; the runtime will inject them into skill content.\n"
+            "If TOOL_RESULT_JSON reports blocked/visibility/dependency errors, adjust your next tool call accordingly.\n\n"
+            "# Execution Rules\n"
+            "- Do not invent tools or fields.\n"
+            "- Prefer skill-driven execution: activate -> read/execute -> workspace operations -> done.\n"
+            "- Keep `summary` concise and factual.\n\n"
             "# Tools\n"
-            "| Tool | Arguments | Purpose |\n"
-            "|------|-----------|----------|\n"
-            "| activate_skill | skill_name | Load skill instructions |\n"
-            "| read_skill | skill_name, path | Read a file inside a skill directory |\n"
-            "| execute_skill | skill_name, args | Run a skill's subprocess script |\n"
-            "| bash | command, timeout_sec | Shell command in workspace |\n"
-            "| codegen | instruction, ctx | Send instruction to the environment |\n"
-            "| workspace_read | path | Read file |\n"
-            "| workspace_write | path, content | Write file |\n"
-            "| workspace_list | path | List files |\n"
-            "| glob | glob, path | Find files by pattern |\n"
-            "| grep | pattern, glob, path | Search file contents |\n"
-            "| enable_skill | skill_name | Reveal a hidden skill |\n"
-            "| disable_skill | skill_name | Hide a skill |\n"
-            "| done | (done=true, summary) | Finish this step |\n\n"
+            f"{self._render_tool_table()}\n\n"
             f"# Skill Catalog\n{json.dumps(catalog, ensure_ascii=False, indent=1)}\n\n"
             f"# Activated Skills\n{json.dumps(sorted(self._activated_skills), ensure_ascii=False)}"
         )
@@ -174,12 +209,142 @@ class PersonAgent(AgentBase):
         t: datetime,
         result_obj: dict[str, Any],
     ) -> None:
+        """将工具结果写入 thread（同时写磁盘与内存窗口）。"""
         payload = json.dumps(result_obj, ensure_ascii=False)
         content = "TOOL_RESULT_JSON:\n" + self._truncate_text(payload, max_len=12000)
         self._skill_runtime.append_thread_message("user", content, tick=tick, t=t)
         thread_messages.append({"role": "user", "content": content})
         if len(thread_messages) > 40:
             del thread_messages[:-40]
+
+    def _is_model_invocable_skill(self, skill_name: str) -> bool:
+        """模型可调用 skill：disable_model_invocation=True 的 skill 一律拒绝工具侧激活/读取/执行。"""
+        info = self._skill_registry.get_skill_info(skill_name, load_content=False)
+        if info is None:
+            return False
+        return not bool(getattr(info, "disable_model_invocation", False))
+
+    @staticmethod
+    def _normalize_allowed_tools(raw: list[str]) -> set[str]:
+        """将 skill frontmatter 的 allowed-tools 归一到 PersonAgent 的 tool_name 集合。"""
+        if not raw:
+            return set()
+
+        mapping = {
+            "read": "workspace_read",
+            "write": "workspace_write",
+            "workspace_read": "workspace_read",
+            "workspace_write": "workspace_write",
+            "workspace_list": "workspace_list",
+            "activate_skill": "activate_skill",
+            "read_skill": "read_skill",
+            "execute_skill": "execute_skill",
+            "bash": "bash",
+            "grep": "grep",
+            "glob": "glob",
+            "codegen": "codegen",
+            "enable_skill": "enable_skill",
+            "disable_skill": "disable_skill",
+            "done": "done",
+        }
+        out: set[str] = set()
+        for item in raw:
+            s = str(item).strip()
+            if not s:
+                continue
+            # 兼容 Claude 文档里类似 Bash(gh *) 的写法：先截断到 "(" 前
+            base = s.split("(", 1)[0].strip().lower()
+            if base in mapping:
+                out.add(mapping[base])
+            else:
+                out.add(base)
+        return out
+
+    def _allowed_tools_for_active_scope(self) -> set[str] | None:
+        """当前 scope 的 allowed-tools；为空表示不限制。"""
+        name = self._active_skill_scope.strip()
+        if not name:
+            return None
+        info = self._skill_registry.get_skill_info(name, load_content=False)
+        if info is None:
+            return None
+        allowed = self._normalize_allowed_tools(getattr(info, "allowed_tools", []) or [])
+        return allowed or None
+
+    def _check_allowed_tools_for_action(self, action: str) -> dict[str, Any] | None:
+        """统一处理 allowed-tools 拦截。返回 None 表示允许，否则返回错误对象。"""
+        guarded_actions = {
+            "workspace_read",
+            "workspace_write",
+            "workspace_list",
+            "bash",
+            "glob",
+            "grep",
+            "codegen",
+        }
+        if action not in guarded_actions:
+            return None
+        allowed = self._allowed_tools_for_active_scope()
+        if allowed is None or action in allowed:
+            return None
+        return {
+            "action": action,
+            "ok": False,
+            "error": f"blocked by allowed-tools of active skill: {self._active_skill_scope}",
+        }
+
+    @staticmethod
+    def _split_skill_arguments(raw: Any) -> tuple[str, list[str]]:
+        """把 activate_skill 的 arguments 解析为原始串与分词数组。"""
+        if raw is None:
+            return "", []
+        if isinstance(raw, list):
+            parts = [str(x).strip() for x in raw if str(x).strip()]
+            return " ".join(parts), parts
+        s = str(raw).strip()
+        if not s:
+            return "", []
+        try:
+            parts = [x for x in shlex.split(s) if x]
+        except ValueError:
+            parts = [x for x in s.split() if x]
+        return s, parts
+
+    @staticmethod
+    def _inject_skill_arguments(content: str, arguments_raw: str, arguments_parts: list[str]) -> str:
+        """将 `$ARGUMENTS/$ARGUMENTS[N]/$N` 占位符渲染到 skill 内容。"""
+        rendered = content.replace("$ARGUMENTS", arguments_raw)
+
+        def repl_indexed(m: re.Match[str]) -> str:
+            idx = int(m.group(1))
+            return arguments_parts[idx] if 0 <= idx < len(arguments_parts) else ""
+
+        rendered = re.sub(r"\$ARGUMENTS\[(\d+)\]", repl_indexed, rendered)
+        rendered = re.sub(r"\$(\d+)", repl_indexed, rendered)
+
+        has_argument_placeholder = ("$ARGUMENTS" in content) or bool(re.search(r"\$(\d+)|\$ARGUMENTS\[\d+\]", content))
+        if arguments_raw and not has_argument_placeholder:
+            rendered += f"\n\nARGUMENTS: {arguments_raw}"
+        return rendered
+
+    async def _inject_skill_command_outputs(self, content: str) -> str:
+        """注入 !`cmd` 动态上下文（Linux/bash）。命令失败则激活失败，不做回落。"""
+        pattern = re.compile(r"!\`([^`\n]+)\`")
+        rendered = content
+        offset = 0
+        for m in list(pattern.finditer(content)):
+            cmd = m.group(1).strip()
+            if not cmd:
+                raise ValueError("empty dynamic command")
+            out = await self._run_bash_in_workspace(command=cmd, timeout_sec=20)
+            if not out.get("ok"):
+                raise ValueError(f"dynamic command failed: {cmd}; {out.get('stderr', '')}")
+            replacement = str(out.get("stdout", "")).strip()
+            start = m.start() + offset
+            end = m.end() + offset
+            rendered = rendered[:start] + replacement + rendered[end:]
+            offset += len(replacement) - (m.end() - m.start())
+        return rendered
 
     # ── Skill Dependency ──────────────────────────────────────────────────────
 
@@ -190,7 +355,13 @@ class PersonAgent(AgentBase):
         thread_messages: list[dict[str, str]],
         skill_name: str,
     ) -> dict[str, Any]:
-        """确保 skill 的 requires 依赖都已激活。"""
+        """确保 skill 的 requires 依赖已激活。
+
+        Returns:
+            dict: `{"ok": bool, "requires": [...], "activated": [...], "missing": [...]}`。
+                - ok=True: 所有依赖满足（可能有自动激活）
+                - ok=False: 存在不可见/不可调用依赖，`missing` 给出缺失项
+        """
         info = self._skill_registry.get_skill_info(skill_name, load_content=False)
         requires = list(getattr(info, "requires", []) or []) if info else []
         if not requires:
@@ -201,6 +372,9 @@ class PersonAgent(AgentBase):
         for dep in requires:
             dep = str(dep).strip()
             if not dep:
+                continue
+            if not self._is_model_invocable_skill(dep):
+                missing.append(dep)
                 continue
             if dep not in self._all_visible_skill_names():
                 missing.append(dep)
@@ -245,6 +419,10 @@ class PersonAgent(AgentBase):
     })
 
     async def _run_bash_in_workspace(self, command: str, timeout_sec: int) -> dict[str, Any]:
+        """在 agent workspace 执行 bash 命令并施加安全限制。
+
+        限制包括：禁止绝对路径、禁止父目录遍历、危险 token 黑名单、超时终止。
+        """
         command = command.strip()
         if not command:
             return {"ok": False, "exit_code": -1, "stdout": "", "stderr": "empty command"}
@@ -283,6 +461,7 @@ class PersonAgent(AgentBase):
         }
 
     async def _run_codegen(self, instruction: str, ctx: dict[str, Any], template_mode: bool) -> dict[str, Any]:
+        """调用环境路由器执行 codegen 指令。"""
         if self._env is None:
             return {"ok": False, "stdout": "", "stderr": "environment not initialized"}
         if not instruction.strip():
@@ -299,6 +478,7 @@ class PersonAgent(AgentBase):
         return {"ok": True, "stdout": answer, "stderr": "", "ctx": updated_ctx}
 
     def _glob_in_workspace(self, pattern: str, root: str) -> dict[str, Any]:
+        """在 workspace 内做 glob 检索（带路径越界保护）。"""
         work_dir = self._skill_runtime.workspace_root()
         root_path = (work_dir / (root or ".")).resolve()
         if root_path != work_dir and work_dir not in root_path.parents:
@@ -313,6 +493,7 @@ class PersonAgent(AgentBase):
         return {"ok": True, "count": len(matches), "matches": sorted(matches)}
 
     def _grep_in_workspace(self, pattern: str, root: str, file_glob: str) -> dict[str, Any]:
+        """在 workspace 内做内容检索（限制扫描文件数/匹配数/单文件大小）。"""
         work_dir = self._skill_runtime.workspace_root()
         root_path = (work_dir / (root or ".")).resolve()
         if root_path != work_dir and work_dir not in root_path.parents:
@@ -343,6 +524,7 @@ class PersonAgent(AgentBase):
     # ── Skill Visibility ──────────────────────────────────────────────────────
 
     def _refresh_selectable_skills(self) -> None:
+        """根据 enabled/core/override 三类条件刷新可见技能集合。"""
         enabled = self._skill_registry.list_enabled()
         visible = []
         for s in enabled:
@@ -355,6 +537,7 @@ class PersonAgent(AgentBase):
         self._selectable_skill_names = {s.name for s in visible}
 
     def _persist_agent_config(self) -> None:
+        """持久化 agent 配置与技能可见性状态到 `agent_config.json`。"""
         self._skill_runtime.workspace_write(
             "agent_config.json",
             json.dumps(
@@ -373,6 +556,7 @@ class PersonAgent(AgentBase):
     # ── Lifecycle ─────────────────────────────────────────────────────────────
 
     async def init(self, env: RouterBase):
+        """初始化运行时目录，加载持久配置并扫描 custom/env skills。"""
         await super().init(env=env)
         self._skill_runtime.ensure_agent_work_dir(self._env)
         existing_cfg = self._skill_runtime.read_json("agent_config.json", {})
@@ -412,10 +596,9 @@ class PersonAgent(AgentBase):
         tick: int,
         t: datetime,
     ) -> list[dict[str, str]]:
-        """当 thread 过长时，用 LLM 对旧消息做摘要，保留最近消息。
+        """在超出阈值时压缩 thread。
 
-        对标 Claude Code 的 context window management：旧对话压缩为摘要，
-        最近 N 条消息原样保留，确保不超模型上下文窗口。
+        策略：旧消息摘要 + 最近消息原样保留，控制上下文大小并保持最近决策连贯性。
         """
         max_chars = int(self._capability_kwargs.get("thread_compact_chars", 24000))
         keep_recent = int(self._capability_kwargs.get("thread_keep_recent", 6))
@@ -443,9 +626,10 @@ class PersonAgent(AgentBase):
             {
                 "role": "system",
                 "content": (
-                    "Summarize the following agent conversation history into a concise paragraph (3-5 sentences). "
-                    "Focus on: key decisions made, important tool results, current agent state, "
-                    "and any workspace files written. Be brief and factual."
+                    "Summarize the following tool-loop history in 3-5 short sentences. "
+                    "Keep only: activated skills, key tool outcomes, important errors, "
+                    "current intent, and files written in workspace. "
+                    "Do not include extra analysis."
                 ),
             },
             {"role": "user", "content": "\n---\n".join(digest_parts)},
@@ -469,7 +653,14 @@ class PersonAgent(AgentBase):
         tick: int,
         t: datetime,
     ) -> tuple[list[str], list[dict[str, Any]]]:
-        """每轮 LLM 决策 → 执行工具 → 结果回写 thread → 循环。"""
+        """执行单个 step 的工具循环。
+
+        循环流程：
+        1) 基于 thread 让 LLM 产出 `ToolDecision`
+        2) 通过可见性/权限/依赖 gate 校验
+        3) 执行工具并把结果回写 thread
+        4) 直到 `done` 或达到轮次上限
+        """
         logs: list[str] = []
         history: list[dict[str, Any]] = []
         thread_messages = self._skill_runtime.read_recent_thread_messages(limit=40)
@@ -523,6 +714,8 @@ class PersonAgent(AgentBase):
                     continue
                 self._skill_visibility_overrides[skill_name] = False
                 self._activated_skills.discard(skill_name)
+                if self._active_skill_scope == skill_name:
+                    self._active_skill_scope = ""
                 self._persist_agent_config()
                 self._refresh_selectable_skills()
                 result_obj = {"action": action, "skill_name": skill_name, "ok": True}
@@ -578,6 +771,28 @@ class PersonAgent(AgentBase):
                 logs.append(f"{action}:{skill_name}:rejected")
                 continue
 
+            # ── user-only skill gate (disable_model_invocation) ──
+            if action in {"activate_skill", "read_skill", "execute_skill"} and skill_name:
+                if not self._is_model_invocable_skill(skill_name):
+                    result_obj = {
+                        "action": action,
+                        "skill_name": skill_name,
+                        "ok": False,
+                        "error": "skill is user-only (disable_model_invocation=true)",
+                    }
+                    history.append(result_obj)
+                    self._append_tool_result_to_thread(thread_messages, tick, t, result_obj)
+                    logs.append(f"{action}:{skill_name}:user_only")
+                    continue
+
+            # ── allowed-tools gate ──
+            blocked_obj = self._check_allowed_tools_for_action(action)
+            if blocked_obj is not None:
+                history.append(blocked_obj)
+                self._append_tool_result_to_thread(thread_messages, tick, t, blocked_obj)
+                logs.append(f"{action}:blocked_allowed_tools")
+                continue
+
             # ── activate_skill ──
             if action == "activate_skill":
                 dep_status = self._ensure_requires_activated(
@@ -596,10 +811,27 @@ class PersonAgent(AgentBase):
                     logs.append(f"activate:{skill_name}:blocked_requires")
                     continue
 
-                content = self._skill_runtime.skill_activate(skill_name)
-                ok = bool(content)
+                activation_raw, activation_parts = self._split_skill_arguments(args.get("arguments", ""))
+                base_content = self._skill_runtime.skill_activate(skill_name)
+                ok = bool(base_content)
+                content = ""
                 if ok:
+                    try:
+                        content = self._inject_skill_arguments(base_content, activation_raw, activation_parts)
+                        content = await self._inject_skill_command_outputs(content)
+                    except Exception as e:
+                        result_obj = {
+                            "action": action,
+                            "skill_name": skill_name,
+                            "ok": False,
+                            "error": f"skill_render_failed: {e}",
+                        }
+                        history.append(result_obj)
+                        self._append_tool_result_to_thread(thread_messages, tick, t, result_obj)
+                        logs.append(f"activate:{skill_name}:render_failed")
+                        continue
                     self._activated_skills.add(skill_name)
+                    self._active_skill_scope = skill_name
                     self._persist_agent_config()
                 result_obj = {
                     "action": action,
@@ -621,6 +853,8 @@ class PersonAgent(AgentBase):
                 read_path = str(args.get("path", ""))
                 content = self._skill_runtime.skill_read(skill_name, read_path)
                 ok = bool(content)
+                if ok:
+                    self._active_skill_scope = skill_name
                 result_obj = {
                     "action": action,
                     "skill_name": skill_name,
@@ -663,6 +897,8 @@ class PersonAgent(AgentBase):
                 except Exception as e:
                     out = {"ok": False, "error_type": type(e).__name__, "stderr": str(e), "stdout": ""}
                 ok = bool(out.get("ok"))
+                if ok:
+                    self._active_skill_scope = skill_name
                 result_obj = {
                     "action": action,
                     "skill_name": skill_name,
@@ -753,10 +989,7 @@ class PersonAgent(AgentBase):
                 command = str(args.get("command", "")).strip()
                 timeout_sec = int(args.get("timeout_sec", 20))
                 timeout_sec = max(1, min(120, timeout_sec))
-                try:
-                    out = await self._run_bash_in_workspace(command=command, timeout_sec=timeout_sec)
-                except Exception as e:
-                    out = {"ok": False, "exit_code": None, "stdout": "", "stderr": str(e)}
+                out = await self._run_bash_in_workspace(command=command, timeout_sec=timeout_sec)
                 ok = bool(out.get("ok"))
                 result_obj = {
                     "action": action,
@@ -819,12 +1052,9 @@ class PersonAgent(AgentBase):
                 instruction = str(args.get("instruction", ""))
                 ctx = self._coerce_llm_dict(args.get("ctx", {}))
                 template_mode = bool(args.get("template_mode", False))
-                try:
-                    out = await self._run_codegen(
-                        instruction=instruction, ctx=ctx, template_mode=template_mode,
-                    )
-                except Exception as e:
-                    out = {"ok": False, "stdout": "", "stderr": str(e)}
+                out = await self._run_codegen(
+                    instruction=instruction, ctx=ctx, template_mode=template_mode,
+                )
                 ok = bool(out.get("ok"))
                 result_obj: dict[str, Any] = {
                     "action": action,
@@ -865,10 +1095,14 @@ class PersonAgent(AgentBase):
     # ── Public API ────────────────────────────────────────────────────────────
 
     async def execute(self, skill_name: str, args: dict[str, Any]) -> dict[str, Any]:
+        """执行技能（转发到 runtime/registry）。"""
         return await self._skill_runtime.execute(skill_name=skill_name, args=args)
 
     async def step(self, tick: int, t: datetime) -> str:
+        """执行一个仿真步并持久化会话状态与回放记录。"""
         self._step_count += 1
+        # 每步重新进入自由工具选择，避免上一步 skill 的 allowed-tools 作用域跨步泄漏。
+        self._active_skill_scope = ""
         self._last_selected_skills = set(self._selectable_skill_names)
         logs, tool_history = await self._tool_loop(tick=tick, t=t)
 
@@ -890,12 +1124,14 @@ class PersonAgent(AgentBase):
         return " | ".join(logs)
 
     async def ask(self, message: str, readonly: bool = True) -> str:
+        """转发到环境问答接口；无环境时回显输入。"""
         if self._env is not None:
             _, answer = await self.ask_env({"id": self.id}, message, readonly=readonly)
             return answer
         return message
 
     async def dump(self) -> dict:
+        """导出最小运行状态快照（用于外部持久化/调试）。"""
         return {
             "id": self.id,
             "name": self._name,
@@ -905,5 +1141,6 @@ class PersonAgent(AgentBase):
         }
 
     async def load(self, dump_data: dict):
+        """从 `dump` 结果恢复轻量运行状态。"""
         self._step_count = int(dump_data.get("step_count", 0))
         self._last_selected_skills = set(dump_data.get("last_selected_skills", []))

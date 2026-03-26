@@ -64,6 +64,9 @@ _BUILTIN_ROOT = Path(__file__).resolve().parent
 class SkillInfo:
     name: str
     description: str = ""
+    argument_hint: str = ""
+    user_invocable: bool = True
+    allowed_tools: list[str] = field(default_factory=list)
     script: str = ""
     executor: str = ""  # codegen
     source: str = ""  # builtin | custom | env:<name>
@@ -148,12 +151,17 @@ class SkillRegistry:
         for info in base:
             if info.disable_model_invocation:
                 continue
+            if not info.user_invocable:
+                # 与 Claude Skills 的 user-invocable 语义一致：从可调用列表隐藏。
+                continue
             if name_set is not None and info.name not in name_set:
                 continue
             entry: dict[str, Any] = {
                 "name": info.name,
                 "description": info.description,
             }
+            if info.argument_hint:
+                entry["argument_hint"] = info.argument_hint
             if info.requires:
                 entry["requires"] = list(info.requires)
             result.append(entry)
@@ -236,6 +244,11 @@ class SkillRegistry:
 
         info.name = new_name
         info.description = str(meta.get("description", info.description))
+        info.argument_hint = str(
+            meta.get("argument_hint", meta.get("argument-hint", info.argument_hint))
+        ).strip()
+        info.user_invocable = _to_bool(meta.get("user_invocable", meta.get("user-invocable", info.user_invocable)))
+        info.allowed_tools = _to_list(meta.get("allowed_tools", meta.get("allowed-tools", info.allowed_tools)))
         info.script = str(meta.get("script", info.script)).strip()
         info.executor = str(meta.get("executor", info.executor)).strip().lower()
         info.disable_model_invocation = _to_bool(
@@ -361,6 +374,11 @@ def _discover_skills(root: Path, source: str) -> list[SkillInfo]:
         info = SkillInfo(
             name=str(meta.get("name", child.name)),
             description=str(meta.get("description", "")),
+            argument_hint=str(meta.get("argument_hint", meta.get("argument-hint", ""))).strip(),
+            user_invocable=_to_bool(
+                meta.get("user_invocable", meta.get("user-invocable", True))
+            ),
+            allowed_tools=_to_list(meta.get("allowed_tools", meta.get("allowed-tools"))),
             script=str(meta.get("script", "")).strip(),
             executor=str(meta.get("executor", "")).strip().lower(),
             source=source,
