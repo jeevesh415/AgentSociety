@@ -21,7 +21,7 @@ SUPPORTED_IMAGE_FORMATS = {".png", ".jpg", ".jpeg", ".gif", ".svg", ".webp"}
 
 def get_easypaper_url() -> str:
     """Get EasyPaper API URL from config"""
-    return Config.EASYPAPER_API_URL
+    return Config.get_easypaper_api_url()
 
 
 async def generate_paper_from_metadata(

@@ -4,7 +4,6 @@ Provides experiment execution and result management.
 """
 
 from .runner import start_experiment, stop_experiment, get_experiment_status, list_experiments
-from .executor import ExperimentExecutor, ExperimentResult
 from .models import ExperimentConfig, ExperimentStatus, ExperimentInfo
 from .init_tool import ExperimentConfigTool
 from .module_discovery import (
@@ -28,8 +27,6 @@ __all__ = [
     "stop_experiment",
     "get_experiment_status",
     "list_experiments",
-    "ExperimentExecutor",
-    "ExperimentResult",
     "ExperimentConfig",
     "ExperimentStatus",
     "ExperimentInfo",

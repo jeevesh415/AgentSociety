@@ -531,15 +531,15 @@ class LiteratureSearchTool:
     async def execute(self, arguments: Dict[str, Any]) -> ToolResult:
         """Execute literature search"""
         try:
-            from agentsociety2.skills.literature.search import search_literature
+            from agentsociety2.skills.literature.search import search_literature_and_save
 
             query = arguments.get("query", "")
             limit = arguments.get("limit", 10)
 
-            result = await search_literature(
-                workspace_path=self.workspace_path,
+            result = await search_literature_and_save(
                 query=query,
-                limit=limit,
+                workspace_path=self.workspace_path,
+                top_k=limit,
             )
 
             if result.get("success"):

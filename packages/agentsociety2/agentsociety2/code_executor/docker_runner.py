@@ -172,10 +172,23 @@ class DockerRunner:
             ]
 
         # 透传与 LLM 调用相关的环境变量到沙箱中
-        # 这样在容器内执行的 main.py 也能正常读取 API_KEY / API_BASE 等
+        # 兼容旧的 API_KEY/API_BASE 和当前 AGENTSOCIETY_* 配置。
         for key in [
             "API_KEY",
             "API_BASE",
+            "AGENTSOCIETY_LLM_API_KEY",
+            "AGENTSOCIETY_LLM_API_BASE",
+            "AGENTSOCIETY_LLM_MODEL",
+            "AGENTSOCIETY_CODER_LLM_API_KEY",
+            "AGENTSOCIETY_CODER_LLM_API_BASE",
+            "AGENTSOCIETY_CODER_LLM_MODEL",
+            "AGENTSOCIETY_NANO_LLM_API_KEY",
+            "AGENTSOCIETY_NANO_LLM_API_BASE",
+            "AGENTSOCIETY_NANO_LLM_MODEL",
+            "AGENTSOCIETY_EMBEDDING_API_KEY",
+            "AGENTSOCIETY_EMBEDDING_API_BASE",
+            "AGENTSOCIETY_EMBEDDING_MODEL",
+            "AGENTSOCIETY_EMBEDDING_DIMS",
             "AGENT_EVALUATOR_MODEL",
             "AGENT_FILTER_MODEL",
         ]:
