@@ -5,7 +5,7 @@ using TableSchema and ColumnDef. They call ReplayWriter.register_table(schema) t
 create the table and ReplayWriter.write(table_name, row) to persist data. The replay
 API discovers these tables at query time via SQLAlchemy table reflection — no
 module-specific schema definitions are needed on the query side. Framework tables
-(agent_profile, agent_status, agent_dialog) are defined in models.py (SQLModel) and
+(agent_profile, agent_status) are defined in models.py (SQLModel) and
 created by ReplayWriter.init(); they are not registered via TableSchema.
 """
 

@@ -273,17 +273,6 @@ class ExperimentRunner:
         conn = sqlite3.connect(self.db_file)
         cursor = conn.cursor()
 
-        # 创建实验状态表
-        cursor.execute("""
-            CREATE TABLE IF NOT EXISTS experiment_state (
-                id INTEGER PRIMARY KEY AUTOINCREMENT,
-                timestamp TEXT NOT NULL,
-                current_time TEXT,
-                step_count INTEGER,
-                state_data TEXT
-            )
-        """)
-
         # 创建步骤执行记录表
         cursor.execute("""
             CREATE TABLE IF NOT EXISTS step_executions (

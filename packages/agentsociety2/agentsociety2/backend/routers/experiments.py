@@ -23,7 +23,7 @@ import json
 import sqlite3
 from datetime import datetime
 from pathlib import Path
-from typing import Any, Dict, List, Optional
+from typing import Any, Dict, List, Optional, Tuple
 
 from fastapi import APIRouter, HTTPException, Query
 from pydantic import BaseModel
@@ -120,12 +120,20 @@ def _get_db_connection(db_path: Path) -> sqlite3.Connection:
     return sqlite3.connect(db_path)
 
 
-def _parse_state_data(state_data_json: str) -> Dict[str, Any]:
-    """解析状态数据JSON"""
-    try:
-        return json.loads(state_data_json)
-    except json.JSONDecodeError:
-        return {}
+def _parse_json_field(raw: Any, default: Any) -> Any:
+    """解析 SQLite 中保存的 JSON 字段。"""
+    if raw is None:
+        return default
+    if isinstance(raw, (dict, list)):
+        return raw
+    if isinstance(raw, (bytes, bytearray)):
+        raw = raw.decode("utf-8", errors="ignore")
+    if isinstance(raw, str):
+        try:
+            return json.loads(raw)
+        except json.JSONDecodeError:
+            return default
+    return default
 
 
 def _datetime_to_day_t(dt: datetime, start_t: datetime) -> tuple[int, int]:
@@ -134,6 +142,106 @@ def _datetime_to_day_t(dt: datetime, start_t: datetime) -> tuple[int, int]:
     day = delta.days
     t = int(delta.seconds)
     return day, t
+
+
+def _table_exists(cursor: sqlite3.Cursor, table_name: str) -> bool:
+    cursor.execute(
+        "SELECT 1 FROM sqlite_master WHERE type='table' AND name = ?",
+        (table_name,),
+    )
+    return cursor.fetchone() is not None
+
+
+def _load_agent_profiles(cursor: sqlite3.Cursor) -> List[AgentProfile]:
+    if not _table_exists(cursor, "agent_profile"):
+        return []
+
+    cursor.execute("SELECT id, name, profile FROM agent_profile ORDER BY id ASC")
+    agents: List[AgentProfile] = []
+    for agent_id, name, profile_raw in cursor.fetchall():
+        profile = _parse_json_field(profile_raw, {})
+        if not isinstance(profile, dict):
+            profile = {}
+        agents.append(
+            AgentProfile(
+                id=int(agent_id),
+                name=name or profile.get("name"),
+                profile=profile,
+            )
+        )
+    return agents
+
+
+def _build_profiles_from_status_rows(
+    status_rows: List[Tuple[int, int, datetime, Optional[str], Dict[str, Any]]],
+) -> List[AgentProfile]:
+    agent_ids = sorted({agent_id for agent_id, _, _, _, _ in status_rows})
+    return [
+        AgentProfile(id=agent_id, name=f"Agent_{agent_id}", profile={})
+        for agent_id in agent_ids
+    ]
+
+
+def _load_agent_status_rows(
+    cursor: sqlite3.Cursor,
+    agent_id: Optional[int] = None,
+) -> List[Tuple[int, int, datetime, Optional[str], Dict[str, Any]]]:
+    if not _table_exists(cursor, "agent_status"):
+        return []
+
+    query = "SELECT id, step, t, action, status FROM agent_status"
+    params: tuple[Any, ...] = ()
+    if agent_id is not None:
+        query += " WHERE id = ?"
+        params = (agent_id,)
+    query += " ORDER BY step ASC, id ASC"
+    cursor.execute(query, params)
+
+    rows: List[Tuple[int, int, datetime, Optional[str], Dict[str, Any]]] = []
+    for raw_agent_id, step, t_raw, action, status_raw in cursor.fetchall():
+        if not t_raw:
+            continue
+        try:
+            timestamp = datetime.fromisoformat(str(t_raw))
+        except ValueError:
+            continue
+        status = _parse_json_field(status_raw, {})
+        if not isinstance(status, dict):
+            status = {}
+        rows.append((int(raw_agent_id), int(step), timestamp, action, status))
+    return rows
+
+
+def _load_step_executions(
+    cursor: sqlite3.Cursor,
+) -> List[Tuple[int, int, str, str, Optional[str], Optional[int], Optional[str]]]:
+    if not _table_exists(cursor, "step_executions"):
+        return []
+
+    cursor.execute(
+        """
+        SELECT id, step_index, step_type, start_time, end_time, success, result
+        FROM step_executions
+        ORDER BY step_index ASC
+        """
+    )
+    return cursor.fetchall()
+
+
+def _get_first_timestamp(
+    status_rows: List[Tuple[int, int, datetime, Optional[str], Dict[str, Any]]],
+    step_rows: List[Tuple[int, int, str, str, Optional[str], Optional[int], Optional[str]]],
+) -> Optional[datetime]:
+    if status_rows:
+        return status_rows[0][2]
+    for _, _, _, start_time, _, _, _ in step_rows:
+        if not start_time:
+            continue
+        try:
+            return datetime.fromisoformat(start_time)
+        except ValueError:
+            continue
+    return None
 
 
 # ============================================================================
@@ -204,21 +312,23 @@ async def get_experiment_info(
             conn = _get_db_connection(db_file)
             cursor = conn.cursor()
 
-            # 从最新的state_data获取agent数量
-            cursor.execute("""
-                SELECT state_data FROM experiment_state
-                ORDER BY id DESC LIMIT 1
-            """)
-            row = cursor.fetchone()
-            if row and row[0]:
-                state_data = _parse_state_data(row[0])
-                agents = state_data.get("agents", [])
-                agent_count = len(agents)
+            profiles = _load_agent_profiles(cursor)
+            if profiles:
+                agent_count = len(profiles)
+            elif _table_exists(cursor, "agent_status"):
+                cursor.execute("SELECT COUNT(DISTINCT id) FROM agent_status")
+                row = cursor.fetchone()
+                agent_count = row[0] if row else 0
 
             # 获取step数量
-            cursor.execute("SELECT COUNT(*) FROM step_executions")
-            row = cursor.fetchone()
-            step_count = row[0] if row else 0
+            if _table_exists(cursor, "step_executions"):
+                cursor.execute("SELECT COUNT(*) FROM step_executions")
+                row = cursor.fetchone()
+                step_count = row[0] if row else 0
+            elif _table_exists(cursor, "agent_status"):
+                cursor.execute("SELECT COUNT(DISTINCT step) FROM agent_status")
+                row = cursor.fetchone()
+                step_count = row[0] if row else 0
 
             conn.close()
         except Exception as e:
@@ -267,32 +377,34 @@ async def get_timeline(
     conn = _get_db_connection(db_file)
     cursor = conn.cursor()
 
-    cursor.execute("""
-        SELECT id, current_time, step_count FROM experiment_state
-        ORDER BY id ASC
-    """)
+    status_rows = _load_agent_status_rows(cursor)
+    step_rows = _load_step_executions(cursor)
 
-    timeline = []
-    first_time = None
+    timeline: List[TimePoint] = []
+    first_time = _get_first_timestamp(status_rows, step_rows)
 
-    for row in cursor.fetchall():
-        state_id, current_time_str, step_count = row
-        if current_time_str:
+    if status_rows and first_time is not None:
+        seen_steps: set[int] = set()
+        for _, step, timestamp, _, _ in status_rows:
+            if step in seen_steps:
+                continue
+            seen_steps.add(step)
+            day, t = _datetime_to_day_t(timestamp, first_time)
+            timeline.append(
+                TimePoint(day=day, t=t, timestamp=timestamp.isoformat())
+            )
+    elif step_rows and first_time is not None:
+        for _, step_index, _, start_time, _, _, _ in step_rows:
+            if not start_time:
+                continue
             try:
-                current_time = datetime.fromisoformat(current_time_str)
-                if first_time is None:
-                    first_time = current_time
-
-                day, t = _datetime_to_day_t(current_time, first_time)
-                timeline.append(
-                    TimePoint(
-                        day=day,
-                        t=t,
-                        timestamp=current_time_str,
-                    )
-                )
+                timestamp = datetime.fromisoformat(start_time)
             except ValueError:
                 continue
+            day, t = _datetime_to_day_t(timestamp, first_time)
+            timeline.append(
+                TimePoint(day=day, t=t, timestamp=timestamp.isoformat())
+            )
 
     conn.close()
     return timeline
@@ -330,33 +442,10 @@ async def get_agents(
     conn = _get_db_connection(db_file)
     cursor = conn.cursor()
 
-    # 获取最新的状态数据
-    cursor.execute("""
-        SELECT state_data FROM experiment_state
-        ORDER BY id DESC LIMIT 1
-    """)
-    row = cursor.fetchone()
+    agents = _load_agent_profiles(cursor)
+    if not agents:
+        agents = _build_profiles_from_status_rows(_load_agent_status_rows(cursor))
     conn.close()
-
-    if not row or not row[0]:
-        return []
-
-    state_data = _parse_state_data(row[0])
-    agents_data = state_data.get("agents", [])
-
-    agents = []
-    for agent_data in agents_data:
-        dump_data = agent_data.get("dump", {})
-        profile = dump_data.get("profile", {})
-
-        agents.append(
-            AgentProfile(
-                id=agent_data.get("id", 0),
-                name=profile.get("name", f"Agent_{agent_data.get('id', 0)}"),
-                profile=profile,
-            )
-        )
-
     return agents
 
 
@@ -407,59 +496,30 @@ async def get_agent_status(
     conn = _get_db_connection(db_file)
     cursor = conn.cursor()
 
-    cursor.execute("""
-        SELECT current_time, state_data FROM experiment_state
-        ORDER BY id ASC
-    """)
+    status_rows = _load_agent_status_rows(cursor, agent_id=agent_id)
+    all_status_rows = _load_agent_status_rows(cursor)
+    step_rows = _load_step_executions(cursor)
+    first_time = _get_first_timestamp(all_status_rows, step_rows)
 
-    statuses = []
-    first_time = None
-
-    for row in cursor.fetchall():
-        current_time_str, state_data_json = row
-        if not current_time_str or not state_data_json:
-            continue
-
-        try:
-            current_time = datetime.fromisoformat(current_time_str)
-            if first_time is None:
-                first_time = current_time
-
-            current_day, current_t = _datetime_to_day_t(current_time, first_time)
-
-            # 如果指定了时间，只返回匹配的状态
+    statuses: List[AgentStatus] = []
+    if first_time is not None:
+        for _, _, timestamp, action, status in status_rows:
+            current_day, current_t = _datetime_to_day_t(timestamp, first_time)
             if day is not None and t is not None:
-                if current_day != day or abs(current_t - t) > 60:  # 允许1分钟误差
+                if current_day != day or abs(current_t - t) > 60:
                     continue
-
-            state_data = _parse_state_data(state_data_json)
-            agents_data = state_data.get("agents", [])
-
-            for agent_data in agents_data:
-                if agent_data.get("id") == agent_id:
-                    dump_data = agent_data.get("dump", {})
-
-                    # 提取位置信息（如果有）
-                    position = dump_data.get("position", {})
-                    lng = position.get("lng") or position.get("longitude")
-                    lat = position.get("lat") or position.get("latitude")
-
-                    statuses.append(
-                        AgentStatus(
-                            id=agent_id,
-                            day=current_day,
-                            t=current_t,
-                            lng=lng,
-                            lat=lat,
-                            parent_id=dump_data.get("parent_id"),
-                            action=dump_data.get("current_action"),
-                            status=dump_data.get("status", {}),
-                        )
-                    )
-                    break
-
-        except ValueError:
-            continue
+            statuses.append(
+                AgentStatus(
+                    id=agent_id,
+                    day=current_day,
+                    t=current_t,
+                    lng=None,
+                    lat=None,
+                    parent_id=None,
+                    action=action,
+                    status=status,
+                )
+            )
 
     conn.close()
     return statuses
@@ -576,24 +636,64 @@ async def get_latest_state(
     conn = _get_db_connection(db_file)
     cursor = conn.cursor()
 
-    cursor.execute("""
-        SELECT timestamp, current_time, step_count, state_data
-        FROM experiment_state
-        ORDER BY id DESC LIMIT 1
-    """)
-    row = cursor.fetchone()
+    profiles = _load_agent_profiles(cursor)
+    status_rows = _load_agent_status_rows(cursor)
+    step_rows = _load_step_executions(cursor)
     conn.close()
 
-    if not row:
+    if not profiles and status_rows:
+        profiles = _build_profiles_from_status_rows(status_rows)
+
+    if not profiles and not status_rows and not step_rows:
         raise HTTPException(status_code=404, detail="No state data found")
 
-    timestamp, current_time, step_count, state_data_json = row
+    latest_timestamp: Optional[datetime] = None
+    latest_step = 0
+    if status_rows:
+        latest_step = max(step for _, step, _, _, _ in status_rows)
+        latest_timestamp = max(ts for _, _, ts, _, _ in status_rows)
+    elif step_rows:
+        latest_step = len(step_rows)
+        for _, _, _, _, end_time, _, _ in reversed(step_rows):
+            candidate = end_time
+            if not candidate:
+                continue
+            try:
+                latest_timestamp = datetime.fromisoformat(candidate)
+                break
+            except ValueError:
+                continue
+
+    latest_status_by_agent: Dict[int, Dict[str, Any]] = {}
+    for raw_agent_id, step, timestamp, action, status in status_rows:
+        if step != latest_step:
+            continue
+        latest_status_by_agent[raw_agent_id] = {
+            "timestamp": timestamp,
+            "action": action,
+            "status": status,
+        }
+
+    agents_state = []
+    for profile in profiles:
+        state_entry = latest_status_by_agent.get(profile.id, {})
+        agents_state.append(
+            {
+                "id": profile.id,
+                "name": profile.name,
+                "dump": {
+                    "profile": profile.profile or {},
+                    "current_action": state_entry.get("action"),
+                    "status": state_entry.get("status", {}),
+                },
+            }
+        )
 
     return {
-        "timestamp": timestamp,
-        "current_time": current_time,
-        "step_count": step_count,
-        "state": _parse_state_data(state_data_json) if state_data_json else {},
+        "timestamp": latest_timestamp.isoformat() if latest_timestamp else None,
+        "current_time": latest_timestamp.isoformat() if latest_timestamp else None,
+        "step_count": latest_step,
+        "state": {"agents": agents_state},
     }
 
 

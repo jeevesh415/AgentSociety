@@ -4,13 +4,12 @@
 
 **ReplayWriter** — 回放数据写入器：
 - 写入 SQLite 数据库
-- 支持框架表（agent_profile、agent_status、agent_dialog）
+- 支持框架表（agent_profile、agent_status）
 - 支持动态表注册
 
 **数据模型**：
 - ``AgentProfile``: 智能体档案表
 - ``AgentStatus``: 智能体状态表
-- ``AgentDialog``: 智能体对话表
 
 **动态表**：
 - ``ColumnDef``: 列定义
@@ -37,7 +36,6 @@ from .replay_writer import ReplayWriter
 from .models import (
     AgentProfile,
     AgentStatus,
-    AgentDialog,
 )
 from .table_schema import ColumnDef, TableSchema
 
@@ -45,7 +43,6 @@ __all__ = [
     "ReplayWriter",
     "AgentProfile",
     "AgentStatus",
-    "AgentDialog",
     "ColumnDef",
     "TableSchema",
 ]

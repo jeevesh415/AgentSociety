@@ -228,7 +228,6 @@ await writer.initialize()
 # Framework tables (auto-created):
 # - agent_profile: Agent profiles
 # - agent_status: Agent status over time
-# - agent_dialog: Agent LLM interactions
 
 # Custom tables
 from agentsociety2.storage import ColumnDef, TableSchema

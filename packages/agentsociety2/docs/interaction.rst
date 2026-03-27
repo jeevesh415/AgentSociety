@@ -181,7 +181,6 @@ intervene() 方法 - 读写修改
 
    # Read back collected data
    profiles = await writer.read_agent_profiles()
-   dialogs = await writer.read_agent_dialogs()
    statuses = await writer.read_agent_status()
 
    await society.close()

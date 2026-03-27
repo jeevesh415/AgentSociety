@@ -24,6 +24,7 @@ Claude Code Skills
 - Agent(Person) 扩展 skills：由后端 `/api/v1/agent-skills/*` 管理，支持扫描/导入/热重载。
 
 * **agentsociety-literature-search** - 文献检索
+* **agentsociety-innovation-framing** - 基于文献结果进行创新 framing
 * **agentsociety-hypothesis** - 假设管理（add, get, list, delete）
 * **agentsociety-experiment-config** - 实验配置生成与验证
 * **agentsociety-run-experiment** - 实验执行与监控
@@ -130,11 +131,12 @@ Python API
 
 1. **定义研究话题** - 编辑 ``TOPIC.md``
 2. **文献检索** - 使用 ``/agentsociety-literature-search``
-3. **创建假设** - 使用 ``/agentsociety-hypothesis add``
-4. **配置实验** - 使用 ``/agentsociety-experiment-config validate/prepare/run``
-5. **执行实验** - 使用 ``/agentsociety-run-experiment start``
-6. **分析结果** - 使用 ``/agentsociety-analysis``
-7. **生成论文** - 使用 ``/agentsociety-generate-paper``
+3. **创新 Framing** - 使用 ``/agentsociety-innovation-framing``
+4. **创建假设** - 使用 ``/agentsociety-hypothesis add``
+5. **配置实验** - 使用 ``/agentsociety-experiment-config validate/prepare/run``
+6. **执行实验** - 使用 ``/agentsociety-run-experiment start``
+7. **分析结果** - 使用 ``/agentsociety-analysis``
+8. **生成论文** - 使用 ``/agentsociety-generate-paper``
 
 配置
 ------------------------

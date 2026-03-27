@@ -78,7 +78,6 @@ def _is_rate_limit_like_error(error: Exception) -> bool:
 
 __all__ = [
     "AgentBase",
-    "DIALOG_TYPE_REFLECTION",
     "LLMInteractionHistory",
 ]
 
@@ -88,10 +87,6 @@ _ENABLE_LLM_HISTORY = os.getenv("ENABLE_LLM_HISTORY", "false").lower() in (
     "1",
     "yes",
 )
-
-# Dialog type for replay
-DIALOG_TYPE_REFLECTION = 0
-
 
 @dataclass
 class LLMInteractionHistory:
@@ -710,39 +705,6 @@ Remember: You are simulating a real person living in a simulated world. Your beh
                 t=t,
                 action=action,
                 status=status or {},
-            )
-
-    async def _write_dialog(
-        self,
-        step: int,
-        t: datetime,
-        dialog_type: int,
-        speaker: str,
-        content: str,
-    ) -> None:
-        """Write agent dialog record to replay database.
-
-        This method is called by subclasses to record conversations and thoughts.
-        AgentBase only supports type 0 (反思 / thought/reflection); other types
-        should be written by other modules.
-
-        Args:
-            step: The simulation step number.
-            t: The simulation datetime.
-            dialog_type: Dialog type. Must be 0 (反思) for AgentBase.
-            speaker: The speaker's name.
-            content: The dialog content.
-        """
-        if dialog_type != DIALOG_TYPE_REFLECTION:
-            return
-        if self._replay_writer is not None:
-            await self._replay_writer.write_agent_dialog(
-                agent_id=self._id,
-                step=step,
-                t=t,
-                dialog_type=dialog_type,
-                speaker=speaker,
-                content=content,
             )
 
     async def _get_position(self) -> Tuple[Optional[float], Optional[float]]:

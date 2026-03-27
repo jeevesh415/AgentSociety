@@ -27,7 +27,7 @@ print(f"T-statistic: {t_stat:.3f}, P-value: {p_value:.4f}")
 ```
 
 ## 2. Social Network Analysis (SNA)
-If `agent_dialog` or interaction logs are available, treat the society as a graph.
+If interaction logs are available, treat the society as a graph.
 - **Construction**: Build a graph `G` where nodes are agents and edges represent interactions (messages, trades, etc.).
 - **Metrics to Calculate**:
   - **Degree Centrality**: Who are the influencers?
@@ -65,7 +65,7 @@ plt.title('Distribution by Group')
 ```
 
 ## 5. Text & Sentiment Mining (NLP)
-If `agent_dialog` content is relevant:
+If textual interaction content is relevant:
 - **Keyword Extraction**: Use TF-IDF to identify important terms.
 - **Sentiment Analysis**: Track how average sentiment changes over time.
 - **Correlation**: Does sentiment correlate with decision outcomes?

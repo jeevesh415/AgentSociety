@@ -28,13 +28,6 @@ AgentStatus
    :members:
    :undoc-members:
 
-AgentDialog
-~~~~~~~~~~~
-
-.. autoclass:: agentsociety2.storage.AgentDialog
-   :members:
-   :undoc-members:
-
 ColumnDef
 ~~~~~~~~~
 

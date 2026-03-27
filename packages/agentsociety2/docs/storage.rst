@@ -10,7 +10,6 @@ AgentSociety 2 包含一个基于 SQLite 的存储系统，用于捕获：
 
 * **智能体配置文件**: 静态特征和个性特征
 * **智能体状态**: 模拟期间更新的动态状态
-* **智能体对话**: 包含 LLM 输入/输出的对话历史
 * **自定义表**: 特定于模块的数据
 
 存储架构
@@ -29,7 +28,6 @@ AgentSociety 2 包含一个基于 SQLite 的存储系统，用于捕获：
 
            Profile [label="agent_profile\n静态配置"];
            Status [label="agent_status\n动态状态"];
-           Dialog [label="agent_dialog\n对话历史"];
            Custom [label="自定义表\n模块数据"];
        }
 
@@ -41,12 +39,10 @@ AgentSociety 2 包含一个基于 SQLite 的存储系统，用于捕获：
        Env --> ReplayWriter;
        ReplayWriter --> Profile;
        ReplayWriter --> Status;
-       ReplayWriter --> Dialog;
        ReplayWriter --> Custom;
 
        Profile [shape=folder, style=filled];
        Status [shape=folder, style=filled];
-       Dialog [shape=folder, style=filled];
        Custom [shape=folder, style=filled];
    }
 
@@ -73,7 +69,6 @@ AgentSociety 2 包含一个基于 SQLite 的存储系统，用于捕获：
 
 * **智能体配置文件**: 静态特征和个性特征
 * **智能体状态**: 模拟期间更新的动态状态
-* **智能体对话**: 包含 LLM 输入/输出的对话历史
 * **自定义表**: 特定于模块的数据
 
 基本使用
@@ -126,11 +121,6 @@ AgentSociety 2 包含一个基于 SQLite 的存储系统，用于捕获：
    for profile in profiles:
        print(f"Agent {profile.agent_id}: {profile.profile}")
 
-   # Read recent dialogs
-   dialogs = await writer.read_agent_dialogs(limit=100)
-   for dialog in dialogs:
-       print(f"{dialog.agent_id}: {dialog.question[:50]}...")
-
    # Read current status
    statuses = await writer.read_agent_status()
    for status in statuses:
@@ -160,22 +150,6 @@ AgentStatus
 * ``status`` (str): 当前状态（``"active"``、``"inactive"`` 等）
 * ``current_activity`` (str): 当前活动的文本描述
 * ``step_count`` (int): 已完成的模拟步数
-
-AgentDialog
-~~~~~~~~~~~
-
-存储对话历史：
-
-**字段：**
-
-* ``agent_id`` (int): 生成此对话的智能体
-* ``question`` (str): 对智能体或 LLM 的输入/问题
-* ``answer`` (str): 响应
-* ``dialog_type`` (int): 对话类型
-  * ``0``: 反思（智能体的内部推理）
-  * ``1``: 干预（环境修改）
-* ``step`` (int): 发生此事件的模拟步骤
-* ``timestamp`` (str): ISO 格式的时间戳
 
 自定义表
 -------------
@@ -233,13 +207,11 @@ AgentDialog
 
    import pandas as pd
 
-   dialogs = await writer.read_agent_dialogs()
+   statuses = await writer.read_agent_status()
    df = pd.DataFrame([{
-       "agent_id": d.agent_id,
-       "question": d.question,
-       "answer": d.answer,
-       "timestamp": d.timestamp
-   } for d in dialogs])
+       "agent_id": s.agent_id,
+       "status": s.status,
+   } for s in statuses])
 
 **导出到 CSV：**
 
@@ -247,16 +219,14 @@ AgentDialog
 
    import csv
 
-   dialogs = await writer.read_agent_dialogs()
-   with open("dialogs.csv", "w") as f:
+   statuses = await writer.read_agent_status()
+   with open("statuses.csv", "w") as f:
        writer = csv.DictWriter(f, fieldnames=[
-           "agent_id", "question", "answer", "timestamp"
+           "agent_id", "status"
        ])
        writer.writeheader()
-       for d in dialogs:
+       for s in statuses:
            writer.writerow({
-               "agent_id": d.agent_id,
-               "question": d.question,
-               "answer": d.answer,
-               "timestamp": d.timestamp
+               "agent_id": s.agent_id,
+               "status": s.status
            })

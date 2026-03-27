@@ -1,9 +1,9 @@
 """Replay data writer for storing simulation state to SQLite.
 
 Architecture:
-- Framework tables (agent_profile, agent_status, agent_dialog): defined in models.py
-  as SQLModel classes; created in init() via SQLModel.metadata.create_all; written via
-  write_agent_profile, write_agent_status, write_agent_dialog (and batch variants).
+- Framework tables (agent_profile, agent_status): defined in models.py
+  as SQLModel classes; created in init(); written via
+  write_agent_profile and write_agent_status (and batch variants).
 - Dynamic tables (e.g. mobility_agent_state, social_*): each environment module owns
   its schema and data. The module calls register_table(TableSchema) during init() to
   create the table, and write(table_name, row) to persist rows. The replay API
@@ -25,7 +25,7 @@ from sqlalchemy.ext.asyncio import AsyncEngine, AsyncSession, create_async_engin
 from sqlalchemy.orm import sessionmaker
 from sqlmodel import SQLModel
 
-from .models import AgentDialog, AgentProfile, AgentStatus
+from .models import AgentProfile, AgentStatus
 from .table_schema import TableSchema
 
 
@@ -62,11 +62,16 @@ class ReplayWriter:
             self._engine, class_=AsyncSession, expire_on_commit=False
         )
 
-        # Create tables defined in SQLModel (framework models only; agent_position is created by MobilitySpace)
+        # Create framework tables explicitly for the active replay path.
         async with self._engine.begin() as conn:
-            await conn.run_sync(SQLModel.metadata.create_all)
+            await conn.run_sync(
+                lambda sync_conn: SQLModel.metadata.create_all(
+                    sync_conn,
+                    tables=[AgentProfile.__table__, AgentStatus.__table__],
+                )
+            )
 
-        for name in SQLModel.metadata.tables:
+        for name in (AgentProfile.__tablename__, AgentStatus.__tablename__):
             self._registered_tables.add(name)
 
 
@@ -229,49 +234,6 @@ class ReplayWriter:
                     await session.merge(obj)
                 await session.commit()
 
-    async def write_agent_dialog(
-        self,
-        agent_id: int,
-        step: int,
-        t: datetime,
-        dialog_type: int,
-        speaker: str,
-        content: str,
-    ) -> None:
-        """Write dialog."""
-        obj = AgentDialog(
-            agent_id=agent_id,
-            step=step,
-            t=t,
-            type=dialog_type,
-            speaker=speaker,
-            content=content,
-        )
-        async with self._lock:
-            async with self._session_maker() as session:
-                session.add(obj)
-                await session.commit()
-
-    async def write_agent_dialogs_batch(
-        self, dialogs: List[Tuple[int, int, datetime, int, str, str]]
-    ) -> None:
-        """Write batch dialogs."""
-        objs = [
-            AgentDialog(
-                agent_id=aid,
-                step=step,
-                t=t,
-                type=dtype,
-                speaker=spk,
-                content=cont,
-            )
-            for aid, step, t, dtype, spk, cont in dialogs
-        ]
-        async with self._lock:
-            async with self._session_maker() as session:
-                session.add_all(objs)
-                await session.commit()
-
     # Query methods for testing and debugging
     async def get_step_count(self) -> int:
         async with self._session_maker() as session:
@@ -282,4 +244,3 @@ class ReplayWriter:
         async with self._session_maker() as session:
              result = await session.execute(text("SELECT COUNT(*) FROM agent_profile"))
              return result.scalar() or 0
-

@@ -72,11 +72,6 @@ async def main():
     for profile in profiles:
         print(f"  Agent {profile.agent_id}: {profile.profile}")
 
-    print("\nAgent Dialogs:")
-    dialogs = await writer.read_agent_dialogs()
-    for dialog in dialogs[:5]:  # Show first 5
-        print(f"  Agent {dialog.agent_id}: {dialog.question[:50]}...")
-
     print("\nAgent Statuses:")
     statuses = await writer.read_agent_status()
     for status in statuses:
