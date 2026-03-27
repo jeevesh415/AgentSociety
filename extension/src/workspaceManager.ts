@@ -619,22 +619,25 @@ Follow this sequence for social science research:
    └─> agentsociety-literature-search
    └─> agentsociety-web-research
 
-3. Generate Hypothesis
+3. Innovation Framing
+   └─> agentsociety-innovation-framing
+
+4. Generate Hypothesis
    └─> agentsociety-hypothesis add
 
-4. Initialize Experiment
+5. Initialize Experiment
    └─> agentsociety-experiment-config (validate → prepare → info → run → check)
 
-5. Run Experiment
+6. Run Experiment
    └─> agentsociety-run-experiment start
 
-6. Analyze Results
+7. Analyze Results
    └─> agentsociety-analysis
 
-7. Generate Report
+8. Generate Report
    └─> agentsociety-synthesize
 
-8. Refine Hypothesis/Experiment
+9. Refine Hypothesis/Experiment
    └─> Repeat from step 3 with new insights
 \`\`\`
 
@@ -728,6 +731,7 @@ When interacting with users:
 | Skill | Purpose | Example |
 |-------|---------|---------|
 | \`agentsociety-scan-modules\` | List available agents/envs | \`list --short\` |
+| \`agentsociety-innovation-framing\` | Frame innovation from literature | \`--query "..."\` |
 | \`agentsociety-hypothesis\` | Manage hypotheses | \`add\`, \`list\`, \`get\` |
 | \`agentsociety-experiment-config\` | Generate experiment config | \`validate\`, \`prepare\`, \`run\` |
 | \`agentsociety-run-experiment\` | Execute simulations | \`start\`, \`status\`, \`stop\` |
