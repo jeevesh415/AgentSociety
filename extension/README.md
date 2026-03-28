@@ -28,7 +28,7 @@ AI Social Scientist采用VSCode插件 + Claude Code Skills的架构：
    - 参数预填充功能
 
 2. **Claude Code Skills** - 提供完整的研究工作流能力
-   - 文献检索、假设管理、实验配置、实验执行、数据分析、论文生成
+   - 文献检索、创新 framing、假设管理、实验配置、实验执行、数据分析、论文生成
 
 ## 快速开始
 
