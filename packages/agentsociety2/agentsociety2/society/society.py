@@ -131,19 +131,22 @@ class AgentSociety:
         return self._step_count
 
     async def init(self):
-        await self._env_router.init(self._t)
-        for agent in self._agents:
-            await agent.init(env=self._env_router)
-
-        # Replay writer: use provided one or create and inject when enabled
+        # Replay writer: use provided one or create it before env/agent init so
+        # modules that register replay tables during init see a ready writer.
         if self._replay_writer is None and self._enable_replay and self._run_dir is not None:
             db_path = self._run_dir / "sqlite.db"
             self._replay_writer = ReplayWriter(db_path)
             await self._replay_writer.init()
+
+        if self._replay_writer is not None:
             for agent in self._agents:
                 agent.set_replay_writer(self._replay_writer)
                 self._setup_agent_position_callback(agent)
             self._env_router.set_replay_writer(self._replay_writer)
+
+        await self._env_router.init(self._t)
+        for agent in self._agents:
+            await agent.init(env=self._env_router)
 
         if self._replay_writer is not None:
             profiles = [
@@ -151,8 +154,6 @@ class AgentSociety:
                 for agent in self._agents
             ]
             await self._replay_writer.write_agent_profiles_batch(profiles)
-            for agent in self._agents:
-                self._setup_agent_position_callback(agent)
 
     def _setup_agent_position_callback(self, agent: AgentBase) -> None:
         """Set up position callback for an agent to query from environment modules.
