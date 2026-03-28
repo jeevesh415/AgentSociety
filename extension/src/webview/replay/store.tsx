@@ -16,6 +16,8 @@ import type {
   SocialNetwork,
   SocialActivityAtStep,
   LayoutMode,
+  ReplayDatasetInfo,
+  ReplayDatasetRows,
 } from './types';
 
 /** Replay store state */
@@ -57,13 +59,8 @@ export interface ReplayState {
   postCommentsMap: Record<number, SocialComment[]>;
 
   // Database data
-  dbTables: string[];
-  dbTableContent: {
-    tableName: string;
-    columns: string[];
-    rows: any[];
-    total: number;
-  } | null;
+  replayDatasets: ReplayDatasetInfo[];
+  replayDatasetRows: ReplayDatasetRows | null;
 
   // Map
   viewState: ViewState;
@@ -89,8 +86,8 @@ export interface ReplayActions {
   setSocialActivityAtStep: (activity: SocialActivityAtStep | null) => void;
   setAllPosts: (posts: SocialPost[]) => void;
   setPostComments: (postId: number, comments: SocialComment[]) => void;
-  setDbTables: (tables: string[]) => void;
-  setDbTableContent: (content: { tableName: string; columns: string[]; rows: any[]; total: number } | null) => void;
+  setReplayDatasets: (datasets: ReplayDatasetInfo[]) => void;
+  setReplayDatasetRows: (rows: ReplayDatasetRows | null) => void;
   setViewState: (viewState: Partial<ViewState>) => void;
   setLoading: (loading: boolean) => void;
   setError: (error: string | null) => void;
@@ -137,8 +134,8 @@ const initialState: ReplayState = {
   socialActivityAtStep: null,
   allPosts: [],
   postCommentsMap: {},
-  dbTables: [],
-  dbTableContent: null,
+  replayDatasets: [],
+  replayDatasetRows: null,
 
   viewState: {
     longitude: 116.4,
@@ -231,9 +228,9 @@ export const ReplayProvider: React.FC<ReplayProviderProps> = ({ children, vscode
     setPostComments: (postId: number, comments: SocialComment[]) =>
       setState((s) => ({ ...s, postCommentsMap: { ...s.postCommentsMap, [postId]: comments } })),
 
-    setDbTables: (tables) => setState((s) => ({ ...s, dbTables: tables })),
+    setReplayDatasets: (datasets) => setState((s) => ({ ...s, replayDatasets: datasets })),
 
-    setDbTableContent: (content) => setState((s) => ({ ...s, dbTableContent: content })),
+    setReplayDatasetRows: (rows) => setState((s) => ({ ...s, replayDatasetRows: rows })),
 
     setViewState: (viewState) =>
       setState((s) => ({ ...s, viewState: { ...s.viewState, ...viewState } })),

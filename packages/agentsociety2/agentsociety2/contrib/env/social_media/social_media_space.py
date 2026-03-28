@@ -7,7 +7,7 @@ from typing import Any, ClassVar, Dict, List, Optional, Set, Tuple, Union
 
 from agentsociety2.env import EnvBase, tool
 from agentsociety2.logger import get_logger
-from agentsociety2.storage import ColumnDef, TableSchema
+from agentsociety2.storage import ColumnDef, ReplayDatasetSpec, TableSchema
 
 from .models import (
     SocialMediaPerson,
@@ -31,14 +31,67 @@ from .recommend import RecommendationEngine
 _SOCIAL_MEDIA_EVENT_SCHEMA = TableSchema(
     name="social_media_event",
     columns=[
-        ColumnDef("id", "INTEGER", nullable=False),
-        ColumnDef("step", "INTEGER", nullable=False),
-        ColumnDef("t", "TIMESTAMP", nullable=False),
-        ColumnDef("sender_id", "INTEGER", nullable=False),
-        ColumnDef("action", "TEXT", nullable=False),
-        ColumnDef("content", "TEXT"),
-        ColumnDef("receiver_id", "INTEGER"),
-        ColumnDef("target_id", "INTEGER"),
+        ColumnDef(
+            "id",
+            "INTEGER",
+            nullable=False,
+            logical_type="identifier",
+            analysis_role="identifier",
+            description="Stable replay event identifier.",
+        ),
+        ColumnDef(
+            "step",
+            "INTEGER",
+            nullable=False,
+            logical_type="step",
+            analysis_role="timestamp",
+            description="Simulation step at which the social event was recorded.",
+        ),
+        ColumnDef(
+            "t",
+            "TIMESTAMP",
+            nullable=False,
+            logical_type="timestamp",
+            analysis_role="timestamp",
+            description="Simulation timestamp at which the social event was recorded.",
+        ),
+        ColumnDef(
+            "sender_id",
+            "INTEGER",
+            nullable=False,
+            logical_type="identifier",
+            analysis_role="dimension",
+            description="User ID of the event initiator.",
+        ),
+        ColumnDef(
+            "action",
+            "TEXT",
+            nullable=False,
+            logical_type="category",
+            analysis_role="dimension",
+            description="Social action type such as post, follow, like, comment, or repost.",
+        ),
+        ColumnDef(
+            "content",
+            "TEXT",
+            logical_type="text",
+            analysis_role="metadata",
+            description="Human-readable content associated with the social event.",
+        ),
+        ColumnDef(
+            "receiver_id",
+            "INTEGER",
+            logical_type="identifier",
+            analysis_role="dimension",
+            description="Optional user ID of the direct receiver for targeted actions.",
+        ),
+        ColumnDef(
+            "target_id",
+            "INTEGER",
+            logical_type="identifier",
+            analysis_role="dimension",
+            description="Optional target object ID referenced by the action.",
+        ),
     ],
     primary_key=["id"],
     indexes=[["step"], ["sender_id"], ["action"]],
@@ -58,9 +111,27 @@ class SocialMediaSpace(EnvBase):
 
     # 声明式 per-person per-step 快照
     _agent_state_columns: ClassVar[list[ColumnDef]] = [
-        ColumnDef("followers_count", "INTEGER"),
-        ColumnDef("following_count", "INTEGER"),
-        ColumnDef("posts_count", "INTEGER"),
+        ColumnDef(
+            "followers_count",
+            "INTEGER",
+            logical_type="count",
+            analysis_role="measure",
+            description="Number of followers owned by the user at this step.",
+        ),
+        ColumnDef(
+            "following_count",
+            "INTEGER",
+            logical_type="count",
+            analysis_role="measure",
+            description="Number of accounts followed by the user at this step.",
+        ),
+        ColumnDef(
+            "posts_count",
+            "INTEGER",
+            logical_type="count",
+            analysis_role="measure",
+            description="Number of posts created by the user at this step.",
+        ),
     ]
 
     def __init__(
@@ -267,6 +338,22 @@ class SocialMediaSpace(EnvBase):
         if self._replay_writer is None:
             return
         await self._replay_writer.register_table(_SOCIAL_MEDIA_EVENT_SCHEMA)
+        await self._replay_writer.register_dataset(
+            ReplayDatasetSpec(
+                dataset_id="social_media.event",
+                table_name=_SOCIAL_MEDIA_EVENT_SCHEMA.name,
+                module_name=self.name,
+                kind="event_stream",
+                title="Social Media Event Stream",
+                description="Event stream exported by SocialMediaSpace for posts, follows, likes, comments, and reposts.",
+                entity_key="sender_id",
+                step_key="step",
+                time_key="t",
+                default_order=["step", "id"],
+                capabilities=["event_stream", "social_event"],
+            ),
+            _SOCIAL_MEDIA_EVENT_SCHEMA.columns,
+        )
         get_logger().info("Registered social_media_event table")
 
     def _schedule_replay_task(self, coro) -> None:

@@ -108,17 +108,12 @@ const ReplayAppInner: React.FC<ReplayAppProps> = ({ vscode }) => {
           actions.setSelectedAgentTrajectory(message.data);
           break;
 
-        case 'dbTables':
-          actions.setDbTables(message.data.tables);
+        case 'replayDatasets':
+          actions.setReplayDatasets(message.data.datasets);
           break;
 
-        case 'dbTableContent':
-          actions.setDbTableContent({
-            tableName: message.tableName,
-            columns: message.data.columns,
-            rows: message.data.rows,
-            total: message.data.total,
-          });
+        case 'replayDatasetRows':
+          actions.setReplayDatasetRows(message.data);
           break;
 
         case 'error':

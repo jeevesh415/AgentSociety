@@ -19,7 +19,7 @@ from agentsociety2.agent.base import AgentBase
 from agentsociety2.agent.skills import SkillRegistry, get_skill_registry
 from agentsociety2.agent.skills.runtime import AgentSkillRuntime
 from agentsociety2.env import RouterBase
-from agentsociety2.storage import ColumnDef, TableSchema
+from agentsociety2.storage import ColumnDef, ReplayDatasetSpec, TableSchema
 
 if TYPE_CHECKING:
     from agentsociety2.storage import ReplayWriter
@@ -415,6 +415,54 @@ class PersonAgent(AgentBase):
         await self._replay_writer.register_table(self._ANALYSIS_RUN_SCHEMA)
         await self._replay_writer.register_table(self._ANALYSIS_STEP_SCHEMA)
         await self._replay_writer.register_table(self._ANALYSIS_EVENT_SCHEMA)
+        await self._replay_writer.register_dataset(
+            ReplayDatasetSpec(
+                dataset_id="agent.analysis_run",
+                table_name=self._ANALYSIS_RUN_SCHEMA.name,
+                module_name=type(self).__name__,
+                kind="metric_series",
+                title="Agent Analysis Run",
+                description="Per-agent analysis workspace/session metadata exported by PersonAgent.",
+                entity_key="agent_id",
+                step_key=None,
+                time_key="started_at",
+                default_order=["agent_id"],
+                capabilities=["agent_analysis", "analysis_run"],
+            ),
+            self._ANALYSIS_RUN_SCHEMA.columns,
+        )
+        await self._replay_writer.register_dataset(
+            ReplayDatasetSpec(
+                dataset_id="agent.analysis_step",
+                table_name=self._ANALYSIS_STEP_SCHEMA.name,
+                module_name=type(self).__name__,
+                kind="entity_snapshot",
+                title="Agent Analysis Step",
+                description="Per-agent, per-step analysis trace exported by PersonAgent.",
+                entity_key="agent_id",
+                step_key="step",
+                time_key="t",
+                default_order=["step", "agent_id"],
+                capabilities=["agent_analysis", "timeseries", "analysis_step"],
+            ),
+            self._ANALYSIS_STEP_SCHEMA.columns,
+        )
+        await self._replay_writer.register_dataset(
+            ReplayDatasetSpec(
+                dataset_id="agent.analysis_event",
+                table_name=self._ANALYSIS_EVENT_SCHEMA.name,
+                module_name=type(self).__name__,
+                kind="event_stream",
+                title="Agent Analysis Event",
+                description="Structured analysis events exported by PersonAgent during tool-driven execution.",
+                entity_key="agent_id",
+                step_key="step",
+                time_key="t",
+                default_order=["t", "event_order"],
+                capabilities=["agent_analysis", "event_stream", "analysis_event"],
+            ),
+            self._ANALYSIS_EVENT_SCHEMA.columns,
+        )
         self._analysis_tables_registered = True
 
     def _analysis_workspace_dir(self) -> str:

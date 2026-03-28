@@ -1,17 +1,10 @@
 """Replay data writer for storing simulation state to SQLite.
 
-Architecture:
-- Framework tables (agent_profile, agent_status): defined in models.py
-  as SQLModel classes; created in init(); written via
-  write_agent_profile and write_agent_status (and batch variants).
-- Dynamic tables (e.g. mobility_agent_state, social_*): each environment module owns
-  its schema and data. The module calls register_table(TableSchema) during init() to
-  create the table, and write(table_name, row) to persist rows. The replay API
-  discovers these tables at query time via SQLAlchemy table reflection — no
-  module-specific schema definitions are needed on the query side.
-Extensibility: new env modules can add replay tables by defining a TableSchema,
-calling register_table() and write(). The replay router will automatically discover
-and query them via database reflection.
+Replay storage has two layers:
+
+- Storage schema: actual SQLite tables registered via :class:`TableSchema`
+- Semantic metadata: dataset and column catalog tables used by replay export and
+  downstream analysis
 """
 
 import asyncio
@@ -26,7 +19,17 @@ from sqlalchemy.orm import sessionmaker
 from sqlmodel import SQLModel
 
 from .models import AgentProfile, AgentStatus
-from .table_schema import TableSchema
+from .replay_metadata import (
+    COLUMN_CATALOG_TABLE,
+    DATASET_CATALOG_TABLE,
+    ReplayDatasetSpec,
+)
+from .table_schema import ColumnDef, TableSchema
+
+
+def _quote_identifier(name: str) -> str:
+    """Quote SQLite identifiers for raw SQL statements."""
+    return '"' + name.replace('"', '""') + '"'
 
 
 class ReplayWriter:
@@ -47,6 +50,7 @@ class ReplayWriter:
         self._session_maker: Optional[sessionmaker] = None
         self._lock = asyncio.Lock()
         self._registered_tables: Set[str] = set()
+        self._registered_datasets: Set[str] = set()
 
     async def init(self) -> None:
         """Initialize database connection and create tables."""
@@ -73,6 +77,7 @@ class ReplayWriter:
 
         for name in (AgentProfile.__tablename__, AgentStatus.__tablename__):
             self._registered_tables.add(name)
+        await self._ensure_catalog_tables()
 
 
     async def close(self) -> None:
@@ -82,6 +87,120 @@ class ReplayWriter:
             self._engine = None
 
     # ==================== Generic Table Operations ====================
+
+    async def _ensure_catalog_tables(self) -> None:
+        """Create replay metadata catalog tables."""
+        dataset_schema = TableSchema(
+            name=DATASET_CATALOG_TABLE,
+            columns=[
+                ColumnDef("dataset_id", "TEXT", nullable=False),
+                ColumnDef("table_name", "TEXT", nullable=False),
+                ColumnDef("module_name", "TEXT", nullable=False),
+                ColumnDef("kind", "TEXT", nullable=False),
+                ColumnDef("title", "TEXT"),
+                ColumnDef("description", "TEXT"),
+                ColumnDef("entity_key", "TEXT"),
+                ColumnDef("step_key", "TEXT"),
+                ColumnDef("time_key", "TEXT"),
+                ColumnDef("default_order_json", "JSON", nullable=False),
+                ColumnDef("capabilities_json", "JSON", nullable=False),
+                ColumnDef("version", "INTEGER", nullable=False, default="1"),
+                ColumnDef("created_at", "TIMESTAMP", nullable=False),
+            ],
+            primary_key=["dataset_id"],
+            indexes=[["table_name"], ["module_name"], ["kind"]],
+        )
+        column_schema = TableSchema(
+            name=COLUMN_CATALOG_TABLE,
+            columns=[
+                ColumnDef("dataset_id", "TEXT", nullable=False),
+                ColumnDef("column_name", "TEXT", nullable=False),
+                ColumnDef("sqlite_type", "TEXT", nullable=False),
+                ColumnDef("logical_type", "TEXT"),
+                ColumnDef("analysis_role", "TEXT"),
+                ColumnDef("title", "TEXT"),
+                ColumnDef("description", "TEXT"),
+                ColumnDef("unit", "TEXT"),
+                ColumnDef("enum_json", "JSON"),
+                ColumnDef("example_json", "JSON"),
+                ColumnDef("nullable", "INTEGER", nullable=False),
+                ColumnDef("tags_json", "JSON", nullable=False),
+            ],
+            primary_key=["dataset_id", "column_name"],
+            indexes=[["dataset_id"], ["logical_type"], ["analysis_role"]],
+        )
+        await self.register_table(dataset_schema)
+        await self.register_table(column_schema)
+
+    async def register_dataset(
+        self,
+        spec: ReplayDatasetSpec,
+        columns: List[ColumnDef],
+    ) -> None:
+        """Register replay dataset and column metadata."""
+        await self._ensure_catalog_tables()
+        dataset_row = {
+            "dataset_id": spec.dataset_id,
+            "table_name": spec.table_name,
+            "module_name": spec.module_name,
+            "kind": spec.kind,
+            "title": spec.title,
+            "description": spec.description,
+            "entity_key": spec.entity_key,
+            "step_key": spec.step_key,
+            "time_key": spec.time_key,
+            "default_order_json": spec.default_order,
+            "capabilities_json": spec.capabilities,
+            "version": spec.version,
+            "created_at": datetime.now(),
+        }
+        column_rows = [
+            {
+                "dataset_id": spec.dataset_id,
+                "column_name": column.name,
+                "sqlite_type": column.type,
+                "logical_type": column.logical_type,
+                "analysis_role": column.analysis_role,
+                "title": column.title,
+                "description": column.description,
+                "unit": column.unit,
+                "enum_json": column.enum_values,
+                "example_json": column.example,
+                "nullable": 1 if column.nullable else 0,
+                "tags_json": column.tags,
+            }
+            for column in columns
+        ]
+
+        async with self._lock:
+            async with self._session_maker() as session:
+                await session.execute(
+                    text(
+                        f"INSERT OR REPLACE INTO {DATASET_CATALOG_TABLE} "
+                        "(dataset_id, table_name, module_name, kind, title, description, "
+                        "entity_key, step_key, time_key, default_order_json, capabilities_json, version, created_at) "
+                        "VALUES (:dataset_id, :table_name, :module_name, :kind, :title, :description, "
+                        ":entity_key, :step_key, :time_key, :default_order_json, :capabilities_json, :version, :created_at)"
+                    ),
+                    self._process_data_for_write(dataset_row),
+                )
+                await session.execute(
+                    text(
+                        f"DELETE FROM {COLUMN_CATALOG_TABLE} WHERE dataset_id = :dataset_id"
+                    ),
+                    {"dataset_id": spec.dataset_id},
+                )
+                if column_rows:
+                    await session.execute(
+                        text(
+                            f"INSERT INTO {COLUMN_CATALOG_TABLE} "
+                            "(dataset_id, column_name, sqlite_type, logical_type, analysis_role, title, description, unit, enum_json, example_json, nullable, tags_json) "
+                            "VALUES (:dataset_id, :column_name, :sqlite_type, :logical_type, :analysis_role, :title, :description, :unit, :enum_json, :example_json, :nullable, :tags_json)"
+                        ),
+                        [self._process_data_for_write(row) for row in column_rows],
+                    )
+                await session.commit()
+        self._registered_datasets.add(spec.dataset_id)
 
     async def register_table(self, schema: TableSchema) -> None:
         """Register and create a new table dynamically.
@@ -133,8 +252,11 @@ class ReplayWriter:
                 
                 columns = list(processed_data.keys())
                 placeholders = ", ".join([f":{col}" for col in columns])
-                columns_str = ", ".join(columns)
-                sql = text(f"INSERT OR REPLACE INTO {table_name} ({columns_str}) VALUES ({placeholders})")
+                columns_str = ", ".join(_quote_identifier(col) for col in columns)
+                sql = text(
+                    f"INSERT OR REPLACE INTO {_quote_identifier(table_name)} "
+                    f"({columns_str}) VALUES ({placeholders})"
+                )
                 
                 await session.execute(sql, processed_data)
                 await session.commit()
@@ -149,8 +271,11 @@ class ReplayWriter:
         processed_list = [self._process_data_for_write(d) for d in data_list]
         columns = list(processed_list[0].keys())
         placeholders = ", ".join([f":{col}" for col in columns])
-        columns_str = ", ".join(columns)
-        sql = text(f"INSERT OR REPLACE INTO {table_name} ({columns_str}) VALUES ({placeholders})")
+        columns_str = ", ".join(_quote_identifier(col) for col in columns)
+        sql = text(
+            f"INSERT OR REPLACE INTO {_quote_identifier(table_name)} "
+            f"({columns_str}) VALUES ({placeholders})"
+        )
 
         async with self._lock:
             async with self._session_maker() as session:

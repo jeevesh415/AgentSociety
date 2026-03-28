@@ -180,13 +180,43 @@ export interface PlaybackState {
 /** Layout mode for agent visualization */
 export type LayoutMode = 'map' | 'network' | 'random';
 
-/** Database table list */
-export interface TableList {
-  tables: string[];
+export interface ReplayDatasetColumn {
+  column_name: string;
+  sqlite_type: string;
+  logical_type?: string | null;
+  analysis_role?: string | null;
+  title?: string | null;
+  description?: string | null;
+  unit?: string | null;
+  nullable: boolean;
+  enum_values?: any;
+  example?: any;
+  tags: string[];
 }
 
-/** Database table content */
-export interface TableContent {
+export interface ReplayDatasetInfo {
+  dataset_id: string;
+  table_name: string;
+  module_name: string;
+  kind: string;
+  title: string;
+  description: string;
+  entity_key?: string | null;
+  step_key?: string | null;
+  time_key?: string | null;
+  default_order: string[];
+  capabilities: string[];
+  version: number;
+  created_at: string;
+  columns: ReplayDatasetColumn[];
+}
+
+export interface ReplayDatasetList {
+  datasets: ReplayDatasetInfo[];
+}
+
+export interface ReplayDatasetRows {
+  dataset_id: string;
   columns: string[];
   rows: Record<string, any>[];
   total: number;
@@ -215,8 +245,8 @@ export type ExtensionMessage =
   | { type: 'allPosts'; data: SocialPost[] }
   | { type: 'postComments'; data: SocialComment[]; postId: number }
   | { type: 'trajectory'; data: PositionPoint[] }
-  | { type: 'dbTables'; data: TableList }
-  | { type: 'dbTableContent'; data: TableContent; tableName: string }
+  | { type: 'replayDatasets'; data: ReplayDatasetList }
+  | { type: 'replayDatasetRows'; data: ReplayDatasetRows }
   | { type: 'error'; message: string };
 
 /** Initial data from extension */
@@ -244,7 +274,7 @@ export type WebviewMessage =
   | { command: 'fetchAllPosts'; step?: number }
   | { command: 'fetchPostComments'; postId: number }
   | { command: 'fetchTrajectory'; agentId: number; startStep?: number; endStep?: number }
-  | { command: 'fetchDbTables' }
-  | { command: 'fetchDbTableContent'; tableName: string; page?: number; pageSize?: number }
+  | { command: 'fetchReplayDatasets' }
+  | { command: 'fetchReplayDatasetRows'; datasetId: string; page?: number; pageSize?: number }
   | { command: 'selectAgent'; agentId: number | null }
   | { command: 'error'; message: string };

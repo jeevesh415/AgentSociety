@@ -149,12 +149,12 @@ export class ReplayWebviewProvider {
         await this.fetchTrajectory(message.agentId, message.startStep, message.endStep);
         break;
 
-      case 'fetchDbTables':
-        await this.fetchDbTables();
+      case 'fetchReplayDatasets':
+        await this.fetchReplayDatasets();
         break;
 
-      case 'fetchDbTableContent':
-        await this.fetchDbTableContent(message.tableName, message.page, message.pageSize);
+      case 'fetchReplayDatasetRows':
+        await this.fetchReplayDatasetRows(message.datasetId, message.page, message.pageSize);
         break;
 
       case 'error':
@@ -445,9 +445,9 @@ export class ReplayWebviewProvider {
   /**
    * Fetch database tables
    */
-  private async fetchDbTables(): Promise<void> {
+  private async fetchReplayDatasets(): Promise<void> {
     try {
-      const url = `${this.backendUrl}/api/v1/replay/${this.hypothesisId}/${this.experimentId}/tables?workspace_path=${encodeURIComponent(this.workspacePath)}`;
+      const url = `${this.backendUrl}/api/v1/replay/${this.hypothesisId}/${this.experimentId}/datasets?workspace_path=${encodeURIComponent(this.workspacePath)}`;
       const response = await fetch(url);
 
       if (!response.ok) {
@@ -455,18 +455,18 @@ export class ReplayWebviewProvider {
       }
 
       const data = await response.json();
-      this.postMessage({ type: 'dbTables', data });
+      this.postMessage({ type: 'replayDatasets', data });
     } catch (error) {
-      this.handleFetchError('db tables', error);
+      this.handleFetchError('replay datasets', error);
     }
   }
 
   /**
-   * Fetch database table content
+   * Fetch replay dataset rows
    */
-  private async fetchDbTableContent(tableName: string, page: number = 1, pageSize: number = 50): Promise<void> {
+  private async fetchReplayDatasetRows(datasetId: string, page: number = 1, pageSize: number = 50): Promise<void> {
     try {
-      const url = `${this.backendUrl}/api/v1/replay/${this.hypothesisId}/${this.experimentId}/tables/${tableName}?workspace_path=${encodeURIComponent(this.workspacePath)}&page=${page}&page_size=${pageSize}`;
+      const url = `${this.backendUrl}/api/v1/replay/${this.hypothesisId}/${this.experimentId}/datasets/${encodeURIComponent(datasetId)}/rows?workspace_path=${encodeURIComponent(this.workspacePath)}&page=${page}&page_size=${pageSize}`;
       const response = await fetch(url);
 
       if (!response.ok) {
@@ -474,9 +474,9 @@ export class ReplayWebviewProvider {
       }
 
       const data = await response.json();
-      this.postMessage({ type: 'dbTableContent', data, tableName });
+      this.postMessage({ type: 'replayDatasetRows', data });
     } catch (error) {
-      this.handleFetchError('db table content', error);
+      this.handleFetchError('replay dataset rows', error);
     }
   }
 

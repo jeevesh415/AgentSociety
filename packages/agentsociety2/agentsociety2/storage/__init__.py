@@ -11,9 +11,10 @@
 - ``AgentProfile``: 智能体档案表
 - ``AgentStatus``: 智能体状态表
 
-**动态表**：
-- ``ColumnDef``: 列定义
+**动态表与元数据**：
+- ``ColumnDef``: 列定义与语义元数据
 - ``TableSchema``: 表结构定义
+- ``ReplayDatasetSpec``: 数据集级 replay 元数据
 
 使用示例::
 
@@ -37,6 +38,7 @@ from .models import (
     AgentProfile,
     AgentStatus,
 )
+from .replay_metadata import ReplayDatasetSpec
 from .table_schema import ColumnDef, TableSchema
 
 __all__ = [
@@ -45,4 +47,5 @@ __all__ = [
     "AgentStatus",
     "ColumnDef",
     "TableSchema",
+    "ReplayDatasetSpec",
 ]

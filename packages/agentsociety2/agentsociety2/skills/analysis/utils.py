@@ -13,6 +13,10 @@ from typing import Any, Awaitable, Callable, Dict, List, Optional, TypeVar, Type
 import json_repair
 from pydantic import BaseModel
 from xenon import TrustLevel, repair_xml_safe
+from agentsociety2.storage.replay_metadata import (
+    COLUMN_CATALOG_TABLE,
+    DATASET_CATALOG_TABLE,
+)
 
 from .models import (
     DIR_ARTIFACTS,
@@ -411,30 +415,86 @@ def parse_llm_report_response(content: str) -> Dict[str, str]:
 
 
 def extract_database_schema(db_path: Path) -> Dict[str, Any]:
-    """提取 SQLite 表结构；先查 sqlite_master 再按表取 PRAGMA。"""
+    """Extract replay schema from metadata catalog tables."""
     if not db_path or not db_path.exists():
         return {}
     conn = sqlite3.connect(str(db_path))
     cursor = conn.cursor()
-    cursor.execute(
-        "SELECT name FROM sqlite_master WHERE type='table' AND name NOT LIKE 'sqlite_%'"
-    )
-    tables = cursor.fetchall()
-    schema = {}
-    for (table_name,) in tables:
-        cursor.execute(f"PRAGMA table_info({table_name})")
-        columns = cursor.fetchall()
-        schema[table_name] = [
-            {
-                "name": col[1],
-                "type": col[2],
-                "notnull": bool(col[3]),
-                "pk": bool(col[5]),
+    try:
+        cursor.execute(
+            "SELECT name FROM sqlite_master WHERE type='table' AND name NOT LIKE 'sqlite_%'"
+        )
+        tables = {row[0] for row in cursor.fetchall()}
+        if DATASET_CATALOG_TABLE not in tables or COLUMN_CATALOG_TABLE not in tables:
+            raise ValueError(
+                "Replay metadata catalog is required but not found in sqlite.db"
+            )
+
+        cursor.execute(
+            f"SELECT dataset_id, table_name, kind, title, description, entity_key, step_key, time_key, default_order_json, capabilities_json "
+            f"FROM {DATASET_CATALOG_TABLE} ORDER BY dataset_id"
+        )
+        dataset_rows = cursor.fetchall()
+        dataset_meta_by_table: Dict[str, Dict[str, Any]] = {}
+        for row in dataset_rows:
+            default_order = json_repair.loads(row[8]) if row[8] else []
+            capabilities = json_repair.loads(row[9]) if row[9] else []
+            dataset_meta_by_table[row[1]] = {
+                "dataset_id": row[0],
+                "kind": row[2],
+                "title": row[3],
+                "description": row[4],
+                "entity_key": row[5],
+                "step_key": row[6],
+                "time_key": row[7],
+                "default_order": default_order if isinstance(default_order, list) else [],
+                "capabilities": capabilities if isinstance(capabilities, list) else [],
             }
-            for col in columns
-        ]
-    conn.close()
-    return schema
+
+        cursor.execute(
+            f"SELECT dataset_id, column_name, sqlite_type, logical_type, analysis_role, title, description, unit, enum_json, example_json, nullable, tags_json "
+            f"FROM {COLUMN_CATALOG_TABLE} ORDER BY dataset_id, column_name"
+        )
+        column_rows = cursor.fetchall()
+        columns_by_dataset: Dict[str, List[Dict[str, Any]]] = {}
+        for row in column_rows:
+            enum_values = json_repair.loads(row[8]) if row[8] else None
+            example = json_repair.loads(row[9]) if row[9] else None
+            tags = json_repair.loads(row[11]) if row[11] else []
+            columns_by_dataset.setdefault(row[0], []).append(
+                {
+                    "name": row[1],
+                    "type": row[2],
+                    "logical_type": row[3],
+                    "analysis_role": row[4],
+                    "title": row[5],
+                    "description": row[6],
+                    "unit": row[7],
+                    "enum_values": enum_values,
+                    "example": example,
+                    "notnull": not bool(row[10]),
+                    "pk": False,
+                    "tags": tags if isinstance(tags, list) else [],
+                }
+            )
+
+        schema: Dict[str, Any] = {}
+        for table_name, meta in dataset_meta_by_table.items():
+            dataset_columns = columns_by_dataset.get(meta["dataset_id"], [])
+            pk_columns = {
+                key
+                for key in (meta.get("entity_key"), meta.get("step_key"))
+                if key
+            }
+            schema[table_name] = []
+            for column in dataset_columns:
+                column = dict(column)
+                column["pk"] = column["name"] in pk_columns
+                column["dataset"] = meta
+                schema[table_name].append(column)
+        return schema
+    finally:
+        conn.close()
 
 
 def format_database_schema_markdown(
@@ -442,16 +502,37 @@ def format_database_schema_markdown(
     include_row_counts: bool = False,
     db_path: Optional[Path] = None,
 ) -> str:
-    """将 schema 格式化为 Markdown，可选行数。"""
+    """将 replay metadata schema 格式化为 Markdown，可选行数。"""
     if not schema:
         return "Schema not available"
     lines = []
     for table_name, columns in schema.items():
-        lines.append(f"### Table: `{table_name}`")
+        dataset = columns[0].get("dataset") if columns else None
+        dataset_id = dataset.get("dataset_id") if isinstance(dataset, dict) else table_name
+        lines.append(f"### Dataset: `{dataset_id}`")
+        lines.append(f"- Table: `{table_name}`")
+        if isinstance(dataset, dict):
+            lines.append(f"- Kind: `{dataset.get('kind', '')}`")
+            capabilities = dataset.get("capabilities") or []
+            if capabilities:
+                lines.append(f"- Capabilities: {', '.join(f'`{cap}`' for cap in capabilities)}")
+            description = dataset.get("description")
+            if description:
+                lines.append(f"- Description: {description}")
         lines.append(f"Columns: {', '.join([col['name'] for col in columns])}")
         for col in columns:
             pk_marker = " (PRIMARY KEY)" if col.get("pk") else ""
-            lines.append(f"  - {col['name']} ({col['type']}){pk_marker}")
+            extras = []
+            if col.get("logical_type"):
+                extras.append(f"logical_type={col['logical_type']}")
+            if col.get("analysis_role"):
+                extras.append(f"analysis_role={col['analysis_role']}")
+            if col.get("unit"):
+                extras.append(f"unit={col['unit']}")
+            extra_text = f" [{' ; '.join(extras)}]" if extras else ""
+            lines.append(f"  - {col['name']} ({col['type']}){pk_marker}{extra_text}")
+            if col.get("description"):
+                lines.append(f"    description: {col['description']}")
         lines.append("")
     if include_row_counts and db_path:
         conn = sqlite3.connect(str(db_path))

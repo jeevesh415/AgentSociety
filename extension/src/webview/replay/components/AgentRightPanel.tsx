@@ -14,6 +14,7 @@ import {
   SocialComment,
   SocialEvent,
   SocialUser,
+  ReplayDatasetInfo,
 } from '../types';
 import dayjs from 'dayjs';
 
@@ -22,40 +23,43 @@ const { Option } = Select;
 const DatabaseTab: React.FC = () => {
   const { t } = useTranslation();
   const { state, sendMessage } = useReplay();
-  const { dbTables, dbTableContent, loading } = state;
-  const [selectedTable, setSelectedTable] = React.useState<string | null>(null);
+  const { replayDatasets, replayDatasetRows, loading } = state;
+  const [selectedDatasetId, setSelectedDatasetId] = React.useState<string | null>(null);
   const [currentPage, setCurrentPage] = React.useState(1);
   const [isModalVisible, setIsModalVisible] = React.useState(false);
   const pageSize = 20;
+  const selectedDataset = React.useMemo(
+    () => replayDatasets.find((dataset) => dataset.dataset_id === selectedDatasetId) ?? null,
+    [replayDatasets, selectedDatasetId]
+  );
 
-  // Fetch tables on mount
   React.useEffect(() => {
-    sendMessage({ command: 'fetchDbTables' });
+    sendMessage({ command: 'fetchReplayDatasets' });
   }, [sendMessage]);
 
-  const handleTableChange = (value: string) => {
-    setSelectedTable(value);
+  const handleDatasetChange = (value: string) => {
+    setSelectedDatasetId(value);
     setCurrentPage(1);
-    sendMessage({ command: 'fetchDbTableContent', tableName: value, page: 1, pageSize });
+    sendMessage({ command: 'fetchReplayDatasetRows', datasetId: value, page: 1, pageSize });
     setIsModalVisible(true);
   };
 
   const handlePageChange = (page: number) => {
     setCurrentPage(page);
-    if (selectedTable) {
-      sendMessage({ command: 'fetchDbTableContent', tableName: selectedTable, page, pageSize });
+    if (selectedDatasetId) {
+      sendMessage({ command: 'fetchReplayDatasetRows', datasetId: selectedDatasetId, page, pageSize });
     }
   };
 
   const handleRefresh = () => {
-    sendMessage({ command: 'fetchDbTables' });
-    if (selectedTable) {
-      sendMessage({ command: 'fetchDbTableContent', tableName: selectedTable, page: currentPage, pageSize });
+    sendMessage({ command: 'fetchReplayDatasets' });
+    if (selectedDatasetId) {
+      sendMessage({ command: 'fetchReplayDatasetRows', datasetId: selectedDatasetId, page: currentPage, pageSize });
     }
   };
 
   const showModal = () => {
-    if (selectedTable) {
+    if (selectedDatasetId) {
       setIsModalVisible(true);
     }
   };
@@ -65,8 +69,8 @@ const DatabaseTab: React.FC = () => {
   };
 
   const columns = React.useMemo(() => {
-    if (!dbTableContent || !dbTableContent.columns) return [];
-    return dbTableContent.columns.map((col) => ({
+    if (!replayDatasetRows || !replayDatasetRows.columns) return [];
+    return replayDatasetRows.columns.map((col) => ({
       title: col,
       dataIndex: col,
       key: col,
@@ -79,7 +83,12 @@ const DatabaseTab: React.FC = () => {
       ellipsis: true,
       width: 150, // Fixed width for horizontal scrolling
     }));
-  }, [dbTableContent]);
+  }, [replayDatasetRows]);
+
+  const renderDatasetLabel = (dataset: ReplayDatasetInfo) =>
+    dataset.title?.trim()
+      ? `${dataset.title} (${dataset.dataset_id})`
+      : dataset.dataset_id;
 
   return (
     <div className="database-panel" style={{ height: '100%', width: '100%', display: 'flex', flexDirection: 'column', gap: 8 }}>
@@ -87,32 +96,41 @@ const DatabaseTab: React.FC = () => {
         <Select
           style={{ flex: 1, width: 0 }}
           placeholder={t('replay.right.selectTable')}
-          onChange={handleTableChange}
-          value={selectedTable}
+          onChange={handleDatasetChange}
+          value={selectedDatasetId}
           showSearch
           optionFilterProp="children"
         >
-          {dbTables.map((t) => (
-            <Option key={t} value={t}>{t}</Option>
+          {replayDatasets.map((dataset) => (
+            <Option key={dataset.dataset_id} value={dataset.dataset_id}>
+              {renderDatasetLabel(dataset)}
+            </Option>
           ))}
         </Select>
         <Button icon={<ReloadOutlined />} onClick={handleRefresh} />
       </Flex>
 
-      {selectedTable && (
+      {selectedDatasetId && (
         <Button block icon={<TableOutlined />} onClick={showModal}>
-          {t('replay.right.viewTable', { name: selectedTable })}
+          {t('replay.right.viewTable', { name: selectedDatasetId })}
         </Button>
       )}
 
-      {!selectedTable && (
+      {!selectedDatasetId && (
         <div className="left-info-empty" style={{ marginTop: '12px', color: '#909399' }}>
           {t('replay.right.selectTableHint')}
         </div>
       )}
 
+      {selectedDataset && (
+        <div style={{ fontSize: 12, color: '#909399', lineHeight: 1.5 }}>
+          <div>{selectedDataset.module_name} / {selectedDataset.kind}</div>
+          {selectedDataset.description ? <div>{selectedDataset.description}</div> : null}
+        </div>
+      )}
+
       <Modal
-        title={t('replay.right.tableTitle', { name: selectedTable ?? '' })}
+        title={t('replay.right.tableTitle', { name: selectedDatasetId ?? '' })}
         open={isModalVisible}
         onCancel={handleCancel}
         footer={null}
@@ -120,10 +138,10 @@ const DatabaseTab: React.FC = () => {
         style={{ top: 20 }}
       >
         <div style={{ display: 'flex', flexDirection: 'column', gap: 16 }}>
-          {selectedTable && dbTableContent?.tableName === selectedTable ? (
+          {selectedDatasetId && replayDatasetRows?.dataset_id === selectedDatasetId ? (
             <>
               <Table
-                dataSource={dbTableContent.rows}
+                dataSource={replayDatasetRows.rows}
                 columns={columns}
                 size="small"
                 pagination={false}
@@ -136,7 +154,7 @@ const DatabaseTab: React.FC = () => {
                 <Pagination
                   simple
                   current={currentPage}
-                  total={dbTableContent.total}
+                  total={replayDatasetRows.total}
                   pageSize={pageSize}
                   onChange={handlePageChange}
                   size="small"
