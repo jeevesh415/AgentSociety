@@ -110,7 +110,10 @@ class CacheEntry:
         return self.success_count / total if total > 0 else 0.0
 
 
-OBSERVE_INSTRUCTION = "Collect environment observations by calling all available observe tools. For tools that require agent parameters (like agent_id, id, or person_id), extract the agent ID from the ctx dictionary. Store all observation results in results['observations']."
+OBSERVE_INSTRUCTION = (
+    "Builtin observe has collected all readonly kind='observe' tools into results['observations']. "
+    "Summarize the situational information for the agent in clear natural language."
+)
 STATISTICS_INSTRUCTION = "Collect environment statistics by calling all available statistics tools. Store all statistics results in results['statistics']."
 
 
@@ -134,7 +137,7 @@ class AskContext:
     # === Code 获取 (责任链) ===
     code: Optional[str] = None
     cache_entry: Optional["CacheEntry"] = None
-    code_source: Optional[str] = None  # "predefined" | "cache" | "llm"
+    code_source: Optional[str] = None  # "predefined" | "cache" | "llm" | "builtin"
 
     # === LLM 重试状态 ===
     retry_count: int = 0
@@ -460,7 +463,7 @@ class CacheStatsObserver:
     async def on_final(self, context: AskContext) -> None:
         async with self._router._cache_stats_lock:
             self._router._cache_stats.request_count += 1
-            if context.code_source == "predefined":
+            if context.code_source in ("predefined", "builtin"):
                 self._router._cache_stats.predefined_hit_count += 1
             elif context.cache_entry:
                 self._router._cache_stats.cache_hit_count += 1
@@ -548,8 +551,6 @@ class PredefinedCodeProvider:
     async def get_code(self, context: AskContext, router: "CodeGenRouter") -> Optional[str]:
         if not context.is_observe_or_statistics:
             return None
-        if context.instruction_stripped == "<observe>":
-            return router._observe_code if router._observe_code else None
         if context.instruction_stripped == "<statistics>":
             return router._statistics_code if router._statistics_code else None
         return None
@@ -839,6 +840,51 @@ class CodeStage:
     async def process(self, context: AskContext, router: "CodeGenRouter") -> AskContext:
         if context.early_return:
             return context
+        if context.instruction_stripped == "<observe>":
+            context.execution_attempted = True
+            context.code_source = "builtin"
+            try:
+                async with router._execute_lock:
+                    execution_result = await router._run_builtin_observe(context.ctx)
+            except Exception as e:
+                execution_result = {
+                    "success": False,
+                    "error": str(e),
+                    "results": {},
+                    "print_outputs": [],
+                    "output": "",
+                }
+            context.execution_result = execution_result
+            context.ctx = await clean_coroutines_from_results(context.ctx)
+            if execution_result.get("results"):
+                execution_result["results"] = await clean_coroutines_from_results(
+                    execution_result["results"]
+                )
+            if not execution_result.get("success", False):
+                err = execution_result.get("error", "observe failed")
+                context.early_return = (context.ctx, err)
+                return context
+            results = execution_result.get("results", {})
+            print_outputs = execution_result.get("print_outputs", [])
+            proc_err = execution_result.get("error", "")
+            if print_outputs:
+                process_text = "\n".join(print_outputs)
+            else:
+                process_text = json.dumps(results, ensure_ascii=False, default=str)[:8000]
+            if proc_err:
+                process_text += f"\n\nError: {proc_err}"
+            process_text = f"```\n{process_text}\n```"
+            context.success_data = {
+                "ctx": context.ctx,
+                "instruction": context.resolved_instruction,
+                "results": results,
+                "process_text": process_text,
+                "status": results.get("status", "unknown"),
+                "error": proc_err,
+                "code": "<builtin observe>",
+            }
+            context.results = results
+            return context
         max_retries = router.max_llm_call_retry if context.code is None else 0
         while context.retry_count <= max_retries:
             if context.code is None:
@@ -1114,8 +1160,7 @@ class CodeGenRouter(RouterBase):
 
         self._modules = {module.name: module for module in self.env_modules}
 
-        # Code will be generated using LLM in init method
-        self._observe_code = ""
+        # Statistics 初始化代码由 LLM 在 init 中生成；observe 走内置 _run_builtin_observe
         self._statistics_code = ""
 
         # Flag to track if LLM code generation has been attempted
@@ -1186,6 +1231,101 @@ class CodeGenRouter(RouterBase):
             LLMCodegenProvider(),
         ]
 
+    @staticmethod
+    def _resolve_subject_id_from_ctx(ctx: dict) -> Optional[int]:
+        for k in ("id", "agent_id", "person_id"):
+            if k not in ctx:
+                continue
+            v = ctx[k]
+            if v is None or isinstance(v, bool):
+                continue
+            if isinstance(v, int):
+                return v
+            if isinstance(v, str) and v.strip():
+                try:
+                    return int(v.strip(), 10)
+                except ValueError:
+                    continue
+        return None
+
+    @staticmethod
+    async def _call_single_observe_tool(module: Any, fn: Any, subject_id: Optional[int]) -> Any:
+        # tool 装饰器把真实方法包在 *args,**kwargs 里；对 wrapper 做 signature 会得到 param 名 "args"，误传成 observe(args=…)。
+        impl = getattr(fn, "_original_func", fn)
+        sig = inspect.signature(impl)
+        params = list(sig.parameters.values())
+        non_self = [p for p in (params[1:] if params else []) if p.kind in (
+            inspect.Parameter.POSITIONAL_ONLY,
+            inspect.Parameter.POSITIONAL_OR_KEYWORD,
+            inspect.Parameter.KEYWORD_ONLY,
+        )]
+        if len(non_self) == 0:
+            if inspect.iscoroutinefunction(fn):
+                return await fn(module)
+            return fn(module)
+        if subject_id is None:
+            raise ValueError(
+                "missing subject id in ctx (need id, agent_id, or person_id; integer 0 is valid)"
+            )
+        pname = non_self[0].name
+        kw = {pname: subject_id}
+        if inspect.iscoroutinefunction(fn):
+            return await fn(module, **kw)
+        return fn(module, **kw)
+
+    async def _run_builtin_observe(self, ctx: dict) -> Dict[str, Any]:
+        observe_info = self._filter_tools_info(
+            self._collect_tools_info(), readonly=True, kind="observe"
+        )
+        n_tools = sum(len(m.tools) for m in observe_info.values())
+        if n_tools == 0:
+            return {
+                "success": False,
+                "results": {"observations": {}, "status": "fail"},
+                "print_outputs": [],
+                "output": "",
+                "error": "no observe tools registered",
+            }
+        subject_id = self._resolve_subject_id_from_ctx(ctx)
+        observations: Dict[str, Any] = {}
+        errors: List[str] = []
+        for module_name, module_data in observe_info.items():
+            module = self._modules.get(module_name)
+            if module is None:
+                errors.append(f"{module_name}: module not mounted")
+                continue
+            reg = getattr(module.__class__, "_registered_tools", {})
+            for ti in module_data.tools:
+                tname = ti.name
+                tool_obj = reg.get(tname)
+                fn = getattr(tool_obj, "fn", None) if tool_obj else None
+                if not fn:
+                    errors.append(f"{module_name}.{tname}: tool missing")
+                    continue
+                try:
+                    out = await self._call_single_observe_tool(module, fn, subject_id)
+                    observations[f"{module_name}.{tname}"] = out
+                except Exception as e:
+                    errors.append(f"{module_name}.{tname}: {e}")
+        n_ok = len(observations)
+        if n_ok and not errors:
+            status = "success"
+        elif n_ok and errors:
+            status = "partial"
+        else:
+            status = "fail"
+        results: Dict[str, Any] = {"observations": observations, "status": status}
+        if errors:
+            results["observe_errors"] = errors
+        success = n_ok > 0
+        return {
+            "success": success,
+            "results": results,
+            "print_outputs": [],
+            "output": "",
+            "error": "; ".join(errors) if not success else "",
+        }
+
     async def _notify_observers_final(self, context: AskContext) -> None:
         """流程结束后，将最终 context 交给所有观察者记录"""
         for obs in self._observers:
@@ -1238,14 +1378,6 @@ class CodeGenRouter(RouterBase):
 
         # Generate code using LLM if not already done
         if not self._llm_code_generated:
-            # Generate observe code using LLM (using same logic as regular code generation)
-            if (True, "observe") in self._tools_pyi_dict:
-                llm_observe_code = await self._generate_observe_code()
-                if llm_observe_code:
-                    self._observe_code = llm_observe_code
-                    get_logger().info("Generated observe code using LLM")
-                else:
-                    raise ValueError("Failed to generate observe code")
             # Generate statistics code using LLM (using same logic as regular code generation)
             if (True, "statistics") in self._tools_pyi_dict:
                 llm_statistics_code = await self._generate_statistics_code()
@@ -1431,26 +1563,6 @@ class CodeGenRouter(RouterBase):
 
             return code.strip()
         raise ValueError(f"Failed to generate {kind} code after retries.")
-
-    async def _generate_observe_code(self) -> str:
-        """
-        使用LLM生成观察代码，用于调用所有observe类型的工具。
-        使用与其他普通文本相同的代码生成逻辑，失败时通过多轮对话让LLM修正。
-
-        Returns:
-            生成的Python代码字符串，如果生成失败则返回空字符串
-        """
-        get_logger().debug(f"{_get_debug_info('开始生成observe代码')}")
-
-        if (True, "observe") not in self._tools_pyi_dict:
-            get_logger().debug(f"{_get_debug_info('observe工具不存在')} - 跳过代码生成")
-            return ""
-
-        instruction = self.OBSERVE_INSTRUCTION
-        ctx = {"id": 123}  # 测试执行用的最小上下文
-        return await self._generate_initialization_code_with_retry(
-            instruction=instruction, ctx=ctx, kind="observe"
-        )
 
     async def _generate_statistics_code(self) -> str:
         """

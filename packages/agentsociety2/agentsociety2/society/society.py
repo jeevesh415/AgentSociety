@@ -193,6 +193,7 @@ class AgentSociety:
             tick: The number of ticks of this simulation step.
         """
         self._t += timedelta(seconds=tick)
+        self._env_router.sync_simulation_clock(self._t)
         tasks = []
         for agent in self._agents:
             tasks.append(agent.step(tick, self._t))

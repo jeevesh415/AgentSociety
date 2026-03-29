@@ -1,47 +1,8 @@
-"""Skills 注册中心 - 基于 SKILL.md frontmatter + 可选 subprocess script。
+"""Skill discovery, metadata, and execution.
 
-本模块提供 Agent Skills 的注册、发现和执行功能。
-
-主要组件
---------
-
-**SkillRegistry** — Skill 注册中心：
-- 扫描内置 skills（agentsociety2/agent/skills/）
-- 扫描自定义 skills（workspace/custom/skills/）
-- 扫描环境 skills（env modules skills/）
-
-**SkillInfo** — Skill 元信息：
-- name: Skill 名称
-- description: 描述
-- script: 脚本路径（可选）
-- executor: 执行器类型（如 "codegen"）
-- source: 来源（builtin | custom | env:<name>）
-- path: Skill 目录路径
-- enabled: 是否启用
-- disable_model_invocation: 是否禁用模型调用
-- requires: 依赖的其他 skill 名称列表
-- skill_md: SKILL.md 文件内容
-
-**get_skill_registry** — 获取全局注册中心实例
-
-Skill 目录结构::
-
-    my_skill/
-    ├── SKILL.md          # 必需，包含 frontmatter 和文档
-    └── scripts/          # 可选，Python 脚本
-        └── main.py
-
-SKILL.md frontmatter 示例::
-
-    ---
-    name: my_skill
-    description: 这是一个示例 skill
-    script: scripts/main.py
-    executor: codegen
-    disable_model_invocation: false
-    requires:
-      - other_skill
-    ---
+Skills are discovered from `SKILL.md` YAML frontmatter (plus optional scripts) and
+exposed via a progressive-disclosure catalog: the model sees lightweight metadata
+and loads full skill content only after activation.
 """
 
 from __future__ import annotations
@@ -73,6 +34,7 @@ class SkillInfo:
     path: str = ""
     enabled: bool = True
     disable_model_invocation: bool = False
+    paths: list[str] = field(default_factory=list)
     requires: list[str] = field(default_factory=list)
     skill_md: str = ""
     _skill_md_loaded: bool = False
@@ -103,6 +65,11 @@ class SkillRegistry:
 
     # ---------- discover ----------
     def scan_builtin(self, root: Path = _BUILTIN_ROOT) -> None:
+        """Scan built-in skills from the agent/skills directory.
+
+        Built-in skills are always available and cannot be overridden by
+        custom or environment skills with the same name.
+        """
         if self._builtin_scanned:
             return
         for info in _discover_skills(root, source="builtin"):
@@ -110,6 +77,17 @@ class SkillRegistry:
         self._builtin_scanned = True
 
     def scan_custom(self, workspace_path: str | Path) -> list[str]:
+        """Scan custom skills from a workspace directory.
+
+        Looks for skills in `<workspace_path>/custom/skills/`.
+        Custom skills can override environment skills but not built-in skills.
+
+        Args:
+            workspace_path: Root path containing `custom/skills/` directory.
+
+        Returns:
+            List of skill names that were added.
+        """
         custom_root = Path(workspace_path) / "custom" / "skills"
         if not custom_root.is_dir():
             return []
@@ -120,11 +98,30 @@ class SkillRegistry:
         return new_names
 
     def scan_env_skills(self, skills_dir: Path, env_name: str) -> list[str]:
+        """Scan skills from an environment module's skill directory.
+
+        Environment modules can bundle specialized skills via `get_agent_skills_dirs()`.
+        These skills are automatically discovered when PersonAgent initializes.
+
+        Environment skills can override other environment skills and custom skills,
+        but not built-in skills.
+
+        Args:
+            skills_dir: Directory containing skill subdirectories with SKILL.md files.
+            env_name: Name of the environment module (for source tracking).
+
+        Returns:
+            List of skill names that were added.
+
+        See Also:
+            EnvBase.get_agent_skills_dirs(): Method that provides skill directories.
+        """
         if not skills_dir.is_dir():
             return []
         source = f"env:{env_name}"
         new_names: list[str] = []
         for info in _discover_skills(skills_dir, source=source):
+            # Built-in skills cannot be overridden
             if (
                 info.name in self._skills
                 and self._skills[info.name].source == "builtin"
@@ -144,15 +141,16 @@ class SkillRegistry:
     def list_selection_metadata(
         self, names: list[str] | None = None, only_enabled: bool = True
     ) -> list[dict[str, Any]]:
-        """L0 catalog: LLM 只需要 name + description + requires。"""
+        """Return minimal catalog entries for model selection.
+
+        This is the progressive-disclosure layer: only lightweight metadata is returned.
+        Full SKILL.md content is loaded only after activation.
+        """
         base = self.list_enabled() if only_enabled else self.list_all()
         name_set = set(names) if names is not None else None
         result: list[dict[str, Any]] = []
         for info in base:
             if info.disable_model_invocation:
-                continue
-            if not info.user_invocable:
-                # 与 Claude Skills 的 user-invocable 语义一致：从可调用列表隐藏。
                 continue
             if name_set is not None and info.name not in name_set:
                 continue
@@ -162,6 +160,9 @@ class SkillRegistry:
             }
             if info.argument_hint:
                 entry["argument_hint"] = info.argument_hint
+            entry["user_invocable"] = bool(info.user_invocable)
+            if info.paths:
+                entry["paths"] = list(info.paths)
             if info.requires:
                 entry["requires"] = list(info.requires)
             result.append(entry)
@@ -184,10 +185,7 @@ class SkillRegistry:
             return ""
         if skill_root != target and skill_root not in target.parents:
             return ""
-        try:
-            return target.read_text(encoding="utf-8")
-        except Exception:
-            return ""
+        return target.read_text(encoding="utf-8")
 
     # ---------- state ----------
     def enable(self, name: str) -> bool:
@@ -247,8 +245,12 @@ class SkillRegistry:
         info.argument_hint = str(
             meta.get("argument_hint", meta.get("argument-hint", info.argument_hint))
         ).strip()
-        info.user_invocable = _to_bool(meta.get("user_invocable", meta.get("user-invocable", info.user_invocable)))
-        info.allowed_tools = _to_list(meta.get("allowed_tools", meta.get("allowed-tools", info.allowed_tools)))
+        info.user_invocable = _to_bool(
+            meta.get("user_invocable", meta.get("user-invocable", info.user_invocable))
+        )
+        info.allowed_tools = _to_list(
+            meta.get("allowed_tools", meta.get("allowed-tools", info.allowed_tools))
+        )
         info.script = str(meta.get("script", info.script)).strip()
         info.executor = str(meta.get("executor", info.executor)).strip().lower()
         info.disable_model_invocation = _to_bool(
@@ -272,7 +274,9 @@ class SkillRegistry:
         args: dict[str, Any],
         agent_work_dir: str | Path,
         timeout_sec: int = 30,
-        codegen_executor: Callable[[dict[str, Any]], Awaitable[dict[str, Any]]] | None = None,
+        codegen_executor: (
+            Callable[[dict[str, Any]], Awaitable[dict[str, Any]]] | None
+        ) = None,
     ) -> dict[str, Any]:
         info = self._skills.get(skill_name)
         if not info:
@@ -329,7 +333,9 @@ class SkillRegistry:
             except asyncio.TimeoutError:
                 proc.kill()
                 await proc.wait()
-                return _error("timeout", f"Skill execution timed out after {timeout_sec}s")
+                return _error(
+                    "timeout", f"Skill execution timed out after {timeout_sec}s"
+                )
 
         stdout = (stdout_b or b"").decode("utf-8", errors="replace")
         stderr = (stderr_b or b"").decode("utf-8", errors="replace")
@@ -374,19 +380,26 @@ def _discover_skills(root: Path, source: str) -> list[SkillInfo]:
         info = SkillInfo(
             name=str(meta.get("name", child.name)),
             description=str(meta.get("description", "")),
-            argument_hint=str(meta.get("argument_hint", meta.get("argument-hint", ""))).strip(),
+            argument_hint=str(
+                meta.get("argument_hint", meta.get("argument-hint", ""))
+            ).strip(),
             user_invocable=_to_bool(
                 meta.get("user_invocable", meta.get("user-invocable", True))
             ),
-            allowed_tools=_to_list(meta.get("allowed_tools", meta.get("allowed-tools"))),
+            allowed_tools=_to_list(
+                meta.get("allowed_tools", meta.get("allowed-tools"))
+            ),
             script=str(meta.get("script", "")).strip(),
             executor=str(meta.get("executor", "")).strip().lower(),
             source=source,
             path=str(child.resolve()),
-            enabled=True,
+            enabled=_to_bool(meta.get("enabled", True)),
             disable_model_invocation=_to_bool(
-                meta.get("disable_model_invocation", meta.get("disable-model-invocation"))
+                meta.get(
+                    "disable_model_invocation", meta.get("disable-model-invocation")
+                )
             ),
+            paths=_to_list(meta.get("paths")),
             requires=_to_list(meta.get("requires")),
             _skill_md_loaded=False,
         )
@@ -402,7 +415,6 @@ def _to_bool(raw: Any) -> bool:
     return str(raw).strip().lower() in ("true", "1", "yes")
 
 
-
 def _to_list(raw: Any) -> list[str]:
     if raw is None:
         return []
@@ -412,6 +424,12 @@ def _to_list(raw: Any) -> list[str]:
         s = raw.strip()
         if not s:
             return []
+        # Handle empty array notation from simplified YAML parsing
+        if s == "[]":
+            return []
+        # Support comma-separated frontmatter values (e.g., allowed-tools).
+        if "," in s:
+            return [part.strip() for part in s.split(",") if part.strip()]
         return [s]
     return []
 
@@ -429,11 +447,8 @@ def _ensure_skill_md_loaded(info: SkillInfo) -> str:
 def _parse_frontmatter_from_file(path: Path) -> dict[str, Any]:
     if not path.exists():
         return {}
-    try:
-        with path.open("r", encoding="utf-8") as f:
-            lines = f.readlines()
-    except Exception:
-        return {}
+    with path.open("r", encoding="utf-8") as f:
+        lines = f.readlines()
     if len(lines) < 3 or lines[0].strip() != "---":
         return {}
     data: dict[str, Any] = {}
@@ -476,4 +491,3 @@ def get_skill_registry() -> SkillRegistry:
         _registry = SkillRegistry()
         _registry.scan_builtin()
     return _registry
-

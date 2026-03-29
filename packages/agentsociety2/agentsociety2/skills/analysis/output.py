@@ -1,17 +1,24 @@
 """
-报告生成子智能体：将分析结果与图表组装成图文并茂的 Markdown/HTML 报告。
+输出层：EDA、资源管理、双语报告（ReportWriter / Reporter）、附属文件。
 """
+
+from __future__ import annotations
 
 import base64
 import json
 import mimetypes
 import shutil
+import sqlite3
+from dataclasses import dataclass, field
+from datetime import datetime
 from pathlib import Path
-from typing import Any, Dict, List, Optional, Tuple
+from typing import TYPE_CHECKING, Any, Dict, List, Optional, Tuple
+
+import pandas as pd
+from pydantic import BaseModel
 
 from agentsociety2.logger import get_logger
 from litellm import AllMessageValues
-from pydantic import BaseModel
 
 from .models import (
     ExperimentContext,
@@ -26,17 +33,16 @@ from .models import (
     DIR_RUN,
     DIR_HYPOTHESIS_PREFIX,
     DIR_EXPERIMENT_PREFIX,
-    FILE_ANALYSIS_SUMMARY_JSON,
     FILE_README_MD,
-    FILE_REPORT_HTML,
     FILE_REPORT_MD,
+    FILE_REPORT_HTML,
     FILE_REPORT_ZH_MD,
     FILE_REPORT_ZH_HTML,
     FILE_REPORT_EN_MD,
     FILE_REPORT_EN_HTML,
+    FILE_ANALYSIS_SUMMARY_JSON,
 )
-from .agents import AnalysisAgent
-from .prompts import report_judgment_prompt, report_xml_instruction
+from .llm_contracts import report_xml_instruction, judgment_prompt, report_judgment_prompt
 from .utils import (
     XmlParseError,
     parse_llm_report_response,
@@ -46,38 +52,55 @@ from .utils import (
     _sanitize_id,
 )
 
+if TYPE_CHECKING:
+    from .agents import AnalysisAgent
 
-class ReportGenerationResult(BaseModel):
-    """报告生成结果判断"""
+logger = get_logger()
 
+
+# ─────────────────────────────────────────────────────────────────────────
+# 数据结构
+# ─────────────────────────────────────────────────────────────────────────
+
+@dataclass
+class ReportPaths:
+    """报告路径"""
+    markdown: Path
+    html: Path
+    markdown_zh: Optional[Path] = None
+    html_zh: Optional[Path] = None
+    markdown_en: Optional[Path] = None
+    html_en: Optional[Path] = None
+    assets_dir: Optional[Path] = None
+
+
+class ReportJudgment(BaseModel):
+    """报告判断"""
     success: bool
     reason: str
-    has_markdown: bool
-    has_html: bool
+    has_markdown: bool = False
+    has_html: bool = False
     should_retry: bool = False
     retry_instruction: str = ""
 
 
-class AssetProcessor:
-    """发现并处理报告所需的可视化资源（复制/内嵌）。"""
+# ─────────────────────────────────────────────────────────────────────────
+# AssetManager: 资源管理器
+# ─────────────────────────────────────────────────────────────────────────
+
+class AssetManager:
+    """资源管理器"""
 
     def __init__(self, workspace_path: Path):
-        self.workspace_path = workspace_path
-        self.logger = get_logger()
+        self.workspace_path = Path(workspace_path)
+        self.logger = logger
 
     def discover_assets(
-        self, experiment_id: str, hypothesis_id: str
+        self,
+        experiment_id: str,
+        hypothesis_id: str,
     ) -> List[ReportAsset]:
-        """
-        在固定默认路径下发现可视化资源。
-
-        Args:
-            experiment_id: 实验ID
-            hypothesis_id: 假设ID
-
-        Returns:
-            发现到的 ReportAsset 列表
-        """
+        """发现 `run/artifacts` 下的可视化资源。"""
         hid = _sanitize_id(hypothesis_id)
         eid = _sanitize_id(experiment_id)
         asset_path = (
@@ -95,77 +118,496 @@ class AssetProcessor:
         for file_path in asset_path.rglob("*"):
             if file_path.suffix.lower() not in SUPPORTED_IMAGE_FORMATS:
                 continue
-            assets.append(
-                ReportAsset(
-                    asset_id=f"viz_{file_path.stem}",
-                    asset_type="visualization",
-                    title=self._format_title(file_path.stem),
-                    file_path=str(file_path),
-                    description=f"Generated visualization: {file_path.name}",
-                    file_size=file_path.stat().st_size,
-                    embedded_content=None,
-                )
-            )
+            assets.append(ReportAsset(
+                asset_id=f"viz_{file_path.stem}",
+                asset_type="visualization",
+                title=self._format_title(file_path.stem),
+                file_path=str(file_path),
+                description=f"Generated visualization: {file_path.name}",
+                file_size=file_path.stat().st_size,
+            ))
 
         return assets
 
     def process_assets(
-        self, assets: List[ReportAsset], output_dir: Path
+        self,
+        assets: List[ReportAsset],
+        output_dir: Path,
     ) -> Dict[str, Any]:
-        """
-        处理资源并复制到输出目录，同时可选生成可内嵌的 base64 数据。
-
-        Args:
-            assets: ReportAsset 列表
-            output_dir: 输出目录
-
-        Returns:
-            asset_id -> 处理后信息 的字典
-        """
+        """复制到 `assets/` 并生成可选 base64 嵌入数据。"""
         assets_dir = output_dir / DIR_REPORT_ASSETS
         assets_dir.mkdir(exist_ok=True)
-        processed_assets: Dict[str, Any] = {}
+        processed: Dict[str, Any] = {}
 
         for asset in assets:
             source_path = Path(asset.file_path)
             if not source_path.exists():
-                self.logger.warning("资源不存在: %s", source_path)
                 continue
 
             dest_path = assets_dir / source_path.name
-            src_resolved = source_path.resolve(strict=False)
-            dst_resolved = dest_path.resolve(strict=False)
-            if src_resolved != dst_resolved:
+            if source_path.resolve() != dest_path.resolve():
                 shutil.copy2(source_path, dest_path)
 
+            # 生成 base64
+            embedded = None
             if source_path.suffix.lower() in SUPPORTED_IMAGE_FORMATS:
                 with open(source_path, "rb") as f:
                     encoded = base64.b64encode(f.read()).decode("utf-8")
-                    mime_type, _ = mimetypes.guess_type(source_path.name)
-                    if not mime_type:
-                        suffix = source_path.suffix.lower()
-                        mime_type = (
-                            f"image/{suffix[1:]}"
-                            if suffix.startswith(".")
-                            else "application/octet-stream"
-                        )
-                    asset.embedded_content = f"data:{mime_type};base64,{encoded}"
+                    mime = (mimetypes.guess_type(source_path.name) or ("image/png", None))[0]
+                    embedded = f"data:{mime};base64,{encoded}"
 
-            processed_assets[asset.asset_id] = {
+            processed[asset.asset_id] = {
                 "title": asset.title,
                 "local_path": str(dest_path),
                 "relative_path": f"{DIR_REPORT_ASSETS}/{source_path.name}",
-                "embedded_data": asset.embedded_content,
+                "embedded_data": embedded,
                 "description": asset.description,
             }
 
-        return processed_assets
+        return processed
 
     def _format_title(self, filename: str) -> str:
-        """将文件名格式化为可读标题。"""
+        """格式化文件名为标题"""
         title = filename.replace("_", " ").replace("-", " ")
         return " ".join(word.capitalize() for word in title.split())
 
+
+# 历史名称兼容（与 AssetManager 同一实现）
+AssetProcessor = AssetManager
+
+
+# ─────────────────────────────────────────────────────────────────────────
+# EDAGenerator: EDA 报告生成器
+# ─────────────────────────────────────────────────────────────────────────
+
+class EDAGenerator:
+    """EDA 报告生成器"""
+
+    def __init__(self, config: AnalysisConfig):
+        self.config = config
+        self.logger = logger
+
+    def generate_quick_stats(
+        self,
+        db_path: Path,
+        max_rows: int = 5000,
+    ) -> Optional[str]:
+        """生成快速统计摘要"""
+        if not db_path.exists():
+            return None
+
+        from .data import DataReader
+        reader = DataReader(db_path)
+        schema = reader.read_schema()
+        stats = reader.compute_stats(schema)
+
+        return stats.quick_stats_md
+
+    def generate_ydata_profile(
+        self,
+        db_path: Path,
+        output_dir: Path,
+        max_rows: int = 10000,
+    ) -> Optional[Path]:
+        """生成 ydata-profiling EDA 报告"""
+        if not db_path.exists():
+            return None
+
+        from .data import DataReader
+        reader = DataReader(db_path)
+        sample = reader.read_sample_data(limit=max_rows)
+
+        if not sample:
+            return None
+
+        # 取第一个有数据的表
+        first_table = next(iter(sample.keys()))
+        df = pd.DataFrame(sample[first_table])
+
+        if df.empty:
+            return None
+
+        try:
+            from ydata_profiling import ProfileReport
+
+            output_dir.mkdir(parents=True, exist_ok=True)
+            out_file = output_dir / "eda_profile.html"
+
+            profile = ProfileReport(df, title=f"EDA: {first_table}", minimal=True)
+            profile.to_file(str(out_file))
+
+            self.logger.info("生成 ydata-profiling 报告: %s", out_file)
+            return out_file
+        except Exception as e:
+            self.logger.debug("ydata-profiling 生成失败: %s", e)
+            return None
+
+    def generate_sweetviz_profile(
+        self,
+        db_path: Path,
+        output_dir: Path,
+        max_rows: int = 10000,
+    ) -> Optional[Path]:
+        """生成 Sweetviz EDA 报告"""
+        if not db_path.exists():
+            return None
+
+        from .data import DataReader
+        reader = DataReader(db_path)
+        sample = reader.read_sample_data(limit=max_rows)
+
+        if not sample:
+            return None
+
+        first_table = next(iter(sample.keys()))
+        df = pd.DataFrame(sample[first_table])
+
+        if df.empty:
+            return None
+
+        try:
+            import sweetviz as sv
+
+            output_dir.mkdir(parents=True, exist_ok=True)
+            out_file = output_dir / "eda_sweetviz.html"
+
+            report = sv.analyze(df)
+            report.show_html(str(out_file), open_browser=False)
+
+            if out_file.exists():
+                self.logger.info("生成 Sweetviz 报告: %s", out_file)
+                return out_file
+        except Exception as e:
+            self.logger.debug("Sweetviz 生成失败: %s", e)
+
+        return None
+
+
+# ─────────────────────────────────────────────────────────────────────────
+# ReportWriter: 报告生成器
+# ─────────────────────────────────────────────────────────────────────────
+
+class ReportWriter:
+    """报告生成器"""
+
+    def __init__(self, config: AnalysisConfig, llm_router, model_name: str):
+        self.config = config
+        self.llm_router = llm_router
+        self.model_name = model_name
+        self.logger = logger
+
+    async def generate(
+        self,
+        context: ExperimentContext,
+        analysis_result: AnalysisResult,
+        processed_assets: Dict[str, Any],
+        output_dir: Path,
+        literature_summary: Optional[str] = None,
+        eda_profile_path: Optional[Path] = None,
+        eda_sweetviz_path: Optional[Path] = None,
+        quick_stats_md: Optional[str] = None,
+        data_summary: Optional[Any] = None,
+    ) -> Tuple[ReportPaths, bool]:
+        """生成报告"""
+        max_retries = self.config.max_analysis_retries
+
+        for attempt in range(max_retries):
+            try:
+                content = await self._generate_content(
+                    context,
+                    analysis_result,
+                    processed_assets,
+                    literature_summary,
+                    eda_profile_path,
+                    eda_sweetviz_path,
+                    quick_stats_md,
+                    data_summary,
+                )
+                paths = await self._save_report(content, output_dir)
+                judgment = await self._judge(content, paths, processed_assets)
+
+                if judgment.success:
+                    return paths, True
+
+                if not judgment.should_retry or attempt >= max_retries - 1:
+                    return paths, False
+
+            except XmlParseError as e:
+                if attempt >= max_retries - 1:
+                    self.logger.warning("报告生成失败: %s", e)
+                    return await self._save_partial_report(context, output_dir), False
+
+        return await self._save_partial_report(context, output_dir), False
+
+    async def _generate_content(
+        self,
+        context: ExperimentContext,
+        analysis_result: AnalysisResult,
+        processed_assets: Dict[str, Any],
+        literature_summary: Optional[str],
+        eda_profile_path: Optional[Path],
+        eda_sweetviz_path: Optional[Path],
+        quick_stats_md: Optional[str],
+        data_summary: Optional[Any],
+    ) -> ReportContent:
+        """生成报告内容"""
+        prompt = self._build_prompt(
+            context,
+            analysis_result,
+            processed_assets,
+            literature_summary,
+            eda_profile_path,
+            eda_sweetviz_path,
+            quick_stats_md,
+            data_summary,
+        )
+
+        system = self._build_system_prompt()
+
+        response = await self.llm_router.acompletion(
+            model=self.model_name,
+            messages=[
+                {"role": "system", "content": system},
+                {"role": "user", "content": prompt},
+            ],
+            temperature=self.config.temperature,
+        )
+
+        raw = response.choices[0].message.content or ""
+        return self._parse_content(raw, context)
+
+    def _build_system_prompt(self) -> str:
+        """构建系统 prompt"""
+        skills = get_analysis_skills(
+            selected_names=self.config.analysis_skill_names,
+            strict_selection=self.config.analysis_skill_strict_selection,
+        )
+
+        base = """You are a report expert. Based on analysis context, decide layout and generate a professional report.
+HTML must be a complete document with proper styles.
+Include charts where they support the narrative.
+
+**Must return XML with ALL FOUR bilingual sections**:
+- <markdown_zh><![CDATA[Chinese Markdown]]></markdown_zh>
+- <html_zh><![CDATA[Chinese HTML]]></html_zh>
+- <markdown_en><![CDATA[English Markdown]]></markdown_en>
+- <html_en><![CDATA[English HTML]]></html_en>"""
+
+        return f"{skills}\n\n---\n\n{base}" if skills else base
+
+    def _build_prompt(
+        self,
+        context: ExperimentContext,
+        analysis_result: AnalysisResult,
+        processed_assets: Dict[str, Any],
+        literature_summary: Optional[str],
+        eda_profile_path: Optional[Path],
+        eda_sweetviz_path: Optional[Path],
+        quick_stats_md: Optional[str],
+        data_summary: Optional[Any],
+    ) -> str:
+        """构建报告 prompt"""
+        viz_block = self._format_viz_for_llm(processed_assets)
+        literature_block = f"\n## Literature\n{literature_summary[:3000]}\n" if literature_summary else ""
+        eda_block = self._format_eda_block(eda_profile_path, eda_sweetviz_path)
+        stats_block = f"\n## Quick Stats\n{quick_stats_md[:2500]}\n" if quick_stats_md else ""
+        data_block = self._format_data_context(data_summary)
+
+        return f"""## Experiment Context
+
+**Experiment ID**: {context.experiment_id}
+**Hypothesis**: {context.design.hypothesis}
+**Status**: {context.execution_status.value}
+**Completion**: {context.completion_percentage:.1f}%
+
+## Analysis Results
+
+**Insights**: {self._format_list(analysis_result.insights[:8])}
+**Findings**: {self._format_list(analysis_result.findings[:8])}
+**Conclusions**: {analysis_result.conclusions[:1500]}
+**Recommendations**: {self._format_list(analysis_result.recommendations[:6])}
+
+## Visualizations (choose relevant ones)
+
+{viz_block}
+{literature_block}{eda_block}{stats_block}{data_block}
+
+{report_xml_instruction()}"""
+
+    def _format_viz_for_llm(self, assets: Dict[str, Any]) -> str:
+        """格式化可视化资源"""
+        if not assets:
+            return "No visualizations available."
+
+        lines = []
+        for asset_id, data in assets.items():
+            lines.append(f"### {data['title']}")
+            lines.append(f"- Path: {data['relative_path']}")
+            lines.append("")
+
+        return "\n".join(lines)
+
+    def _format_eda_block(
+        self,
+        eda_profile: Optional[Path],
+        eda_sweetviz: Optional[Path],
+    ) -> str:
+        """格式化 EDA 信息"""
+        files = []
+        if eda_profile and eda_profile.exists():
+            files.append("- **data/eda_profile.html** (ydata-profiling)")
+        if eda_sweetviz and eda_sweetviz.exists():
+            files.append("- **data/eda_sweetviz.html** (Sweetviz)")
+
+        if not files:
+            return ""
+
+        return f"\n## EDA Reports\n" + "\n".join(files) + "\n"
+
+    def _format_data_context(self, data_summary: Optional[Any]) -> str:
+        """格式化数据上下文"""
+        if not data_summary:
+            return ""
+
+        tables = getattr(data_summary, "tables", [])
+        row_counts = getattr(data_summary, "row_counts", {})
+        total_rows = sum(row_counts.values()) if row_counts else 0
+        non_empty = [t for t in tables if row_counts.get(t, 0) > 0] if tables else []
+
+        return f"""
+## Data Context
+
+- **Tables**: {tables}
+- **Non-empty**: {non_empty}
+- **Total rows**: {total_rows}
+
+**Note**: Ensure insights reference actual table/column names.
+"""
+
+    def _format_list(self, items: List[Any]) -> str:
+        """格式化列表"""
+        if not items:
+            return "None"
+        return "\n".join([f"- {str(i)[:200]}" for i in items[:8]])
+
+    def _parse_content(self, content: str, context: ExperimentContext) -> ReportContent:
+        """解析报告内容"""
+        data = parse_llm_report_response(content)
+
+        return ReportContent(
+            title=f"Analysis: {context.design.hypothesis}",
+            subtitle=f"Experiment {context.experiment_id}",
+            format_preference="both",
+            full_content_markdown_zh=data.get("markdown_zh"),
+            full_content_html_zh=data.get("html_zh"),
+            full_content_markdown_en=data.get("markdown_en"),
+            full_content_html_en=data.get("html_en"),
+        )
+
+    async def _save_report(self, content: ReportContent, output_dir: Path) -> ReportPaths:
+        """保存报告"""
+        output_dir.mkdir(parents=True, exist_ok=True)
+        assets_dir = output_dir / DIR_REPORT_ASSETS
+        assets_dir.mkdir(exist_ok=True)
+
+        # 保存中文报告
+        md_zh, html_zh = None, None
+        if content.full_content_markdown_zh:
+            md_zh = output_dir / FILE_REPORT_ZH_MD
+            md_zh.write_text(content.full_content_markdown_zh, encoding="utf-8")
+            (output_dir / FILE_REPORT_MD).write_text(content.full_content_markdown_zh, encoding="utf-8")
+        if content.full_content_html_zh:
+            html_zh = output_dir / FILE_REPORT_ZH_HTML
+            html_zh.write_text(content.full_content_html_zh, encoding="utf-8")
+            (output_dir / FILE_REPORT_HTML).write_text(content.full_content_html_zh, encoding="utf-8")
+
+        # 保存英文报告
+        md_en, html_en = None, None
+        if content.full_content_markdown_en:
+            md_en = output_dir / FILE_REPORT_EN_MD
+            md_en.write_text(content.full_content_markdown_en, encoding="utf-8")
+            if not content.full_content_markdown_zh:
+                (output_dir / FILE_REPORT_MD).write_text(content.full_content_markdown_en, encoding="utf-8")
+        if content.full_content_html_en:
+            html_en = output_dir / FILE_REPORT_EN_HTML
+            html_en.write_text(content.full_content_html_en, encoding="utf-8")
+            if not content.full_content_html_zh:
+                (output_dir / FILE_REPORT_HTML).write_text(content.full_content_html_en, encoding="utf-8")
+
+        return ReportPaths(
+            markdown=output_dir / FILE_REPORT_MD,
+            html=output_dir / FILE_REPORT_HTML,
+            markdown_zh=md_zh,
+            html_zh=html_zh,
+            markdown_en=md_en,
+            html_en=html_en,
+            assets_dir=assets_dir,
+        )
+
+    async def _judge(
+        self,
+        content: ReportContent,
+        paths: ReportPaths,
+        assets: Dict[str, Any],
+    ) -> ReportJudgment:
+        """判断报告质量"""
+        md_len = len(content.full_content_markdown or "")
+        html_len = len(content.full_content_html or "")
+        html_preview = (content.full_content_html or "")[:800]
+
+        prompt = f"""Evaluate the report.
+
+**Markdown length**: {md_len} chars
+**HTML length**: {html_len} chars
+**Charts available**: {len(assets)}
+
+**HTML preview**: {html_preview}...
+
+**Check**:
+1. Both MD and HTML present?
+2. HTML is complete document?
+3. Charts embedded if needed?
+
+{judgment_prompt()}"""
+
+        response = await self.llm_router.acompletion(
+            model=self.model_name,
+            messages=[{"role": "user", "content": prompt}],
+            temperature=0.3,
+        )
+
+        return parse_llm_xml_to_model(
+            response.choices[0].message.content or "",
+            ReportJudgment,
+            root_tag="judgment",
+        )
+
+    async def _save_partial_report(
+        self,
+        context: ExperimentContext,
+        output_dir: Path,
+    ) -> ReportPaths:
+        """保存部分报告"""
+        output_dir.mkdir(parents=True, exist_ok=True)
+
+        # 创建空报告
+        md_path = output_dir / FILE_REPORT_MD
+        html_path = output_dir / FILE_REPORT_HTML
+
+        md_path.write_text(f"# Analysis Report\n\nExperiment: {context.experiment_id}\n", encoding="utf-8")
+        html_path.write_text(f"<html><body><h1>Analysis Report</h1><p>Experiment: {context.experiment_id}</p></body></html>", encoding="utf-8")
+
+        return ReportPaths(markdown=md_path, html=html_path)
+
+class ReportGenerationResult(BaseModel):
+    """报告生成结果判断"""
+
+    success: bool
+    reason: str
+    has_markdown: bool
+    has_html: bool
+    should_retry: bool = False
+    retry_instruction: str = ""
 
 class Reporter:
     """报告子智能体：将洞察与图表组装成图文并茂的 Markdown/HTML 报告。"""
@@ -313,7 +755,14 @@ class Reporter:
                 judgment.retry_instruction,
             )
 
-        return ({}, False)
+        # 重试耗尽，保存部分结果
+        self.logger.warning("报告生成重试耗尽，保存部分结果")
+        files = await self._save_supporting_files(
+            context, analysis_result, output_dir
+        )
+        files["markdown"] = str(output_dir / FILE_REPORT_MD)
+        files["html"] = str(output_dir / FILE_REPORT_HTML)
+        return (files, False)
 
     async def _generate_content(
         self,
@@ -369,6 +818,11 @@ class Reporter:
         )
 
         llm_content = response.choices[0].message.content or ""
+        self.logger.info(
+            "报告生成 LLM 返回长度: %d 字符, 前 200 字符: %s",
+            len(llm_content),
+            llm_content[:200].replace("\n", " "),
+        )
         return self._parse_content(llm_content, context)
 
     def _build_prompt(
@@ -511,9 +965,25 @@ Based on the above content, generate a professional report. **Decide** which vis
 
     def _parse_content(self, content: str, context: ExperimentContext) -> ReportContent:
         """解析 LLM 返回的 XML，获取中英双语 markdown 与 html。"""
-        data = parse_llm_report_response(content)
+        try:
+            data = parse_llm_report_response(content)
+        except XmlParseError as e:
+            self.logger.warning(
+                "报告 XML 解析失败: %s, 原始内容前 500 字符: %s",
+                e,
+                (e.raw_content or content)[:500].replace("\n", "\\n"),
+            )
+            raise
         title = f"Analysis: {context.design.hypothesis}"
         subtitle = f"Experiment {context.experiment_id}"
+        md_zh_len = len(data.get("markdown_zh") or "")
+        html_zh_len = len(data.get("html_zh") or "")
+        md_en_len = len(data.get("markdown_en") or "")
+        html_en_len = len(data.get("html_en") or "")
+        self.logger.info(
+            "报告解析成功: markdown_zh=%d, html_zh=%d, markdown_en=%d, html_en=%d 字符",
+            md_zh_len, html_zh_len, md_en_len, html_en_len,
+        )
         return ReportContent(
             title=title,
             subtitle=subtitle,
@@ -585,6 +1055,11 @@ Current retry count: {retry_count}/{max_retries}
         html_preview = html_text[:800]
         num_assets = len(processed_assets) if processed_assets else 0
 
+        self.logger.info(
+            "报告裁判: md_exists=%s, html_exists=%s, md_len=%d, html_len=%d, assets=%d",
+            md_exists, html_exists, len(md_text), len(html_text), num_assets,
+        )
+
         report_summary = f"""## Report Generation Result
 
 **Markdown Report**:
@@ -615,11 +1090,12 @@ Evaluate:
         response = await self.agent.llm_router.acompletion(
             model=self.agent.model_name,
             messages=messages,
-            temperature=self.agent.temperature,
+            temperature=0.3,
         )
 
         response_content = response.choices[0].message.content
         if not response_content:
+            self.logger.warning("报告裁判: LLM 返回空响应")
             return ReportGenerationResult(
                 success=False,
                 reason="LLM returned empty response",
@@ -629,31 +1105,51 @@ Evaluate:
                 retry_instruction="Regenerate report with complete content",
             )
 
-        return parse_llm_xml_to_model(
-            response_content, ReportGenerationResult, root_tag="judgment"
-        )
+        try:
+            result = parse_llm_xml_to_model(
+                response_content, ReportGenerationResult, root_tag="judgment"
+            )
+            self.logger.info(
+                "报告裁判结果: success=%s, reason=%s, should_retry=%s",
+                result.success, result.reason[:100] if result.reason else "", result.should_retry,
+            )
+            return result
+        except XmlParseError as e:
+            self.logger.warning("报告裁判 XML 解析失败: %s", e)
+            return ReportGenerationResult(
+                success=False,
+                reason=f"Judge XML parse failed: {e}",
+                has_markdown=has_markdown_content,
+                has_html=has_html_content,
+                should_retry=False,
+                retry_instruction="",
+            )
 
     async def _save_markdown(
         self,
         content: ReportContent,
         output_dir: Path,
     ) -> Path:
-        """保存中英双语 Markdown 报告。返回中文版路径（主文件）。"""
+        """保存双语 Markdown 报告。中文版为主文件，英文版为 report_en.md。"""
         primary_path = output_dir / FILE_REPORT_MD
+
         if content.full_content_markdown_zh:
-            zh_path = output_dir / FILE_REPORT_ZH_MD
-            zh_path.write_text(content.full_content_markdown_zh, encoding="utf-8")
-            self.logger.info("保存中文 Markdown 报告: %s", zh_path)
-            # 主文件 → 中文版
+            (output_dir / FILE_REPORT_ZH_MD).write_text(
+                content.full_content_markdown_zh, encoding="utf-8"
+            )
             primary_path.write_text(content.full_content_markdown_zh, encoding="utf-8")
+            self.logger.info("保存中文 Markdown 报告: %s", primary_path)
+
         if content.full_content_markdown_en:
             en_path = output_dir / FILE_REPORT_EN_MD
             en_path.write_text(content.full_content_markdown_en, encoding="utf-8")
             self.logger.info("保存英文 Markdown 报告: %s", en_path)
             if not content.full_content_markdown_zh:
                 primary_path.write_text(content.full_content_markdown_en, encoding="utf-8")
+
         if not content.full_content_markdown_zh and not content.full_content_markdown_en:
             primary_path.write_text("", encoding="utf-8")
+
         return primary_path
 
     async def _save_html(
@@ -661,21 +1157,26 @@ Evaluate:
         content: ReportContent,
         output_dir: Path,
     ) -> Path:
-        """保存中英双语 HTML 报告。返回中文版路径（主文件）。"""
+        """保存双语 HTML 报告。中文版为主文件，英文版为 report_en.html。"""
         primary_path = output_dir / FILE_REPORT_HTML
+
         if content.full_content_html_zh:
-            zh_path = output_dir / FILE_REPORT_ZH_HTML
-            zh_path.write_text(content.full_content_html_zh, encoding="utf-8")
-            self.logger.info("保存中文 HTML 报告: %s", zh_path)
+            (output_dir / FILE_REPORT_ZH_HTML).write_text(
+                content.full_content_html_zh, encoding="utf-8"
+            )
             primary_path.write_text(content.full_content_html_zh, encoding="utf-8")
+            self.logger.info("保存中文 HTML 报告: %s", primary_path)
+
         if content.full_content_html_en:
             en_path = output_dir / FILE_REPORT_EN_HTML
             en_path.write_text(content.full_content_html_en, encoding="utf-8")
             self.logger.info("保存英文 HTML 报告: %s", en_path)
             if not content.full_content_html_zh:
                 primary_path.write_text(content.full_content_html_en, encoding="utf-8")
+
         if not content.full_content_html_zh and not content.full_content_html_en:
             primary_path.write_text("", encoding="utf-8")
+
         return primary_path
 
     def _embed_charts_in_html(

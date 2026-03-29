@@ -1,12 +1,4 @@
-"""
-统一分析智能体：数据优先的分析流程，合并定性分析与定量分析。
-
-设计原则：
-1. 数据优先：先读取数据，理解数据结构，再进行分析
-2. 统一上下文：洞察生成与可视化共享数据上下文
-3. 确保准确性：基于实际数据生成洞察，而非空洞的文本生成
-4. 上下文压缩：在迭代过程中压缩历史上下文，防止膨胀
-"""
+"""`AnalysisAgent`：数据优先、多阶段洞察 + ReAct 工具环 + 可视化与上下文压缩。"""
 
 import shutil
 from datetime import datetime
@@ -14,7 +6,6 @@ from pathlib import Path
 from typing import Any, Dict, List, Optional, Tuple
 
 import json_repair
-from pydantic import BaseModel, Field
 from agentsociety2.logger import get_logger
 from agentsociety2.config import get_llm_router_and_model, get_model_name
 from litellm import AllMessageValues
@@ -23,10 +14,14 @@ from .models import (
     ExperimentContext,
     AnalysisResult,
     AnalysisConfig,
+    AnalysisJudgment,
+    StrategyJudgment,
+    VisualizationJudgment,
+    ContextSummary,
     SUPPORTED_ASSET_FORMATS,
     DIR_DATA,
 )
-from .prompts import (
+from .llm_contracts import (
     judgment_prompt,
     analysis_xml_contract,
     strategy_xml_contract,
@@ -39,22 +34,12 @@ from .utils import (
     parse_llm_xml_response,
     parse_llm_xml_to_model,
     get_analysis_skills,
-    extract_database_schema,
-    format_database_schema_markdown,
     collect_experiment_files,
     AnalysisProgressCallback,
 )
-from .tool_executor import AnalysisRunner
-
-
-class ContextSummary(BaseModel):
-    """上下文摘要，用于压缩历史信息"""
-
-    key_findings: List[str] = Field(default_factory=list)  # 关键发现
-    failed_attempts: List[str] = Field(default_factory=list)  # 失败尝试
-    successful_tools: List[str] = Field(default_factory=list)  # 成功的工具
-    recommendations: str = ""  # 后续建议
-    iteration_count: int = 0  # 迭代次数
+from .data import DataReader, DataSummary
+from .executor import AnalysisRunner
+from .output import EDAGenerator
 
 
 def _system_with_skills(config: Optional[AnalysisConfig] = None) -> str:
@@ -67,57 +52,6 @@ def _system_with_skills(config: Optional[AnalysisConfig] = None) -> str:
     )
     base = "Return only the XML the prompt requests."
     return f"{skills}\n\n---\n\n{base}" if skills else base
-
-
-class AnalysisJudgment(BaseModel):
-    """分析结果判断"""
-
-    success: bool
-    reason: str
-    should_retry: bool = False
-    retry_instruction: str = ""
-
-
-class StrategyJudgment(BaseModel):
-    """分析策略判断"""
-
-    success: bool
-    reason: str
-    should_retry: bool = False
-    retry_instruction: str = ""
-
-
-class VisualizationJudgment(BaseModel):
-    """可视化结果判断"""
-
-    success: bool
-    reason: str
-    should_retry: bool = False
-    retry_instruction: str = ""
-
-
-class DataSummary(BaseModel):
-    """数据摘要，用于共享上下文"""
-
-    db_path: Optional[str] = None
-    schema_markdown: str = ""
-    tables: List[str] = Field(default_factory=list)
-    row_counts: Dict[str, int] = Field(default_factory=dict)
-    quick_stats: str = ""
-    sample_data: Dict[str, List[Dict]] = Field(
-        default_factory=dict
-    )  # 每个表的前几行数据
-    numeric_stats: Dict[str, Dict[str, Any]] = Field(
-        default_factory=dict
-    )  # 数值列统计摘要
-    categorical_stats: Dict[str, Dict[str, Any]] = Field(
-        default_factory=dict
-    )  # 分类列统计摘要
-
-
-def _quote_identifier(name: str) -> str:
-    """Safely quote SQLite identifiers (table/column names)."""
-    return '"' + name.replace('"', '""') + '"'
 
 
 class AnalysisAgent:
@@ -186,7 +120,7 @@ class AnalysisAgent:
         data_summary = DataSummary()
         if db_path and db_path.exists():
             await progress("Reading and understanding data structure...")
-            data_summary = await self._understand_data(db_path)
+            data_summary = DataReader(db_path).read_full_summary()
             self.logger.info(
                 "数据理解完成: %s 个表, 总行数: %s",
                 len(data_summary.tables),
@@ -274,206 +208,6 @@ class AnalysisAgent:
 
         return analysis_result, data_analysis_result
 
-    async def _understand_data(self, db_path: Path) -> DataSummary:
-        """
-        读取并理解数据结构。
-
-        这是数据优先分析流程的核心：在实际分析之前，
-        先了解数据的结构、行数、样本数据、统计摘要。
-        """
-        summary = DataSummary(db_path=str(db_path))
-
-        if not db_path.exists():
-            return summary
-
-        # 提取 schema
-        schema = extract_database_schema(db_path)
-        summary.tables = list(schema.keys())
-        summary.schema_markdown = format_database_schema_markdown(
-            schema, include_row_counts=True, db_path=db_path
-        )
-
-        # 提取行数
-        import sqlite3
-
-        conn = sqlite3.connect(str(db_path))
-        cursor = conn.cursor()
-        for table in summary.tables:
-            try:
-                cursor.execute(f"SELECT COUNT(*) FROM {_quote_identifier(table)}")
-                summary.row_counts[table] = cursor.fetchone()[0]
-            except sqlite3.Error:
-                summary.row_counts[table] = 0
-
-        # 提取每个表的前几行数据作为样本（增加到5行）
-        for table in summary.tables:
-            if summary.row_counts.get(table, 0) > 0:
-                try:
-                    cursor.execute(f"SELECT * FROM {_quote_identifier(table)} LIMIT 5")
-                    columns = [desc[0] for desc in cursor.description]
-                    rows = cursor.fetchall()
-                    summary.sample_data[table] = [
-                        dict(zip(columns, row)) for row in rows
-                    ]
-                except sqlite3.Error:
-                    pass
-
-        # 计算数值列和分类列的统计摘要
-        summary.numeric_stats = self._compute_numeric_stats(
-            conn, summary.tables, schema
-        )
-        summary.categorical_stats = self._compute_categorical_stats(
-            conn, summary.tables, schema
-        )
-
-        # 生成快速统计
-        summary.quick_stats = self._generate_quick_stats_markdown(summary)
-        conn.close()
-
-        return summary
-
-    def _compute_numeric_stats(
-        self,
-        conn,
-        tables: List[str],
-        schema: Dict[str, Any],
-    ) -> Dict[str, Dict[str, Any]]:
-        """计算数值列的统计摘要（min, max, avg, count）。"""
-        import sqlite3
-
-        cursor = conn.cursor()
-        result: Dict[str, Dict[str, Any]] = {}
-
-        for table in tables:
-            columns_info = schema.get(table, [])
-            numeric_cols = [
-                col["name"]
-                for col in columns_info
-                if col.get("type", "").upper()
-                in ("INTEGER", "REAL", "FLOAT", "DOUBLE", "NUMERIC")
-            ]
-            if not numeric_cols:
-                continue
-
-            table_stats: Dict[str, Any] = {}
-            for col in numeric_cols:
-                try:
-                    t = _quote_identifier(table)
-                    c = _quote_identifier(col)
-                    cursor.execute(
-                        f"SELECT MIN({c}), MAX({c}), AVG({c}), COUNT({c}) FROM {t}"
-                    )
-                    row = cursor.fetchone()
-                    if row and row[3] > 0:  # 有数据
-                        table_stats[col] = {
-                            "min": row[0],
-                            "max": row[1],
-                            "avg": round(row[2], 4) if row[2] is not None else None,
-                            "count": row[3],
-                        }
-                except sqlite3.Error:
-                    pass
-            if table_stats:
-                result[table] = table_stats
-
-        return result
-
-    def _compute_categorical_stats(
-        self,
-        conn,
-        tables: List[str],
-        schema: Dict[str, Any],
-    ) -> Dict[str, Dict[str, Any]]:
-        """计算分类列的统计摘要（唯一值数量、高频值）。"""
-        import sqlite3
-
-        cursor = conn.cursor()
-        result: Dict[str, Dict[str, Any]] = {}
-
-        for table in tables:
-            columns_info = schema.get(table, [])
-            text_cols = [
-                col["name"]
-                for col in columns_info
-                if col.get("type", "").upper() in ("TEXT", "VARCHAR", "CHAR", "STRING")
-            ]
-            if not text_cols:
-                continue
-
-            table_stats: Dict[str, Any] = {}
-            for col in text_cols:
-                try:
-                    # 唯一值数量
-                    t = _quote_identifier(table)
-                    c = _quote_identifier(col)
-                    cursor.execute(f"SELECT COUNT(DISTINCT {c}) FROM {t}")
-                    unique_count = cursor.fetchone()[0]
-
-                    # 高频值（top 5）
-                    cursor.execute(
-                        f"SELECT {c}, COUNT(*) as cnt FROM {t} "
-                        f"WHERE {c} IS NOT NULL GROUP BY {c} ORDER BY cnt DESC LIMIT 5"
-                    )
-                    top_values = cursor.fetchall()
-
-                    if unique_count > 0:
-                        table_stats[col] = {
-                            "unique_count": unique_count,
-                            "top_values": (
-                                [(v[0], v[1]) for v in top_values] if top_values else []
-                            ),
-                        }
-                except sqlite3.Error:
-                    pass
-            if table_stats:
-                result[table] = table_stats
-
-        return result
-
-    def _generate_quick_stats_markdown(self, summary: DataSummary) -> str:
-        """生成快速统计的 Markdown 摘要。"""
-        lines = ["## Data Overview\n"]
-        lines.append(f"- **Database**: {summary.db_path}")
-        lines.append(f"- **Tables**: {len(summary.tables)}")
-        lines.append(f"- **Total Rows**: {sum(summary.row_counts.values())}")
-        lines.append("")
-
-        for table in summary.tables:
-            rows = summary.row_counts.get(table, 0)
-            lines.append(f"### Table: `{table}` ({rows} rows)")
-
-            # 样本数据
-            if summary.sample_data.get(table):
-                lines.append("Sample data (first rows):")
-                for i, row in enumerate(summary.sample_data[table][:3], 1):
-                    items = [f"  - {k}: {v}" for k, v in list(row.items())[:5]]
-                    lines.append(f"  Row {i}:")
-                    lines.extend(items)
-                lines.append("")
-
-            # 数值列统计
-            if table in summary.numeric_stats:
-                lines.append("Numeric columns stats:")
-                for col, stats in summary.numeric_stats[table].items():
-                    lines.append(
-                        f"  - `{col}`: min={stats.get('min')}, max={stats.get('max')}, avg={stats.get('avg')}"
-                    )
-                lines.append("")
-
-            # 分类列统计
-            if table in summary.categorical_stats:
-                lines.append("Categorical columns stats:")
-                for col, stats in summary.categorical_stats[table].items():
-                    unique = stats.get("unique_count", 0)
-                    top_vals = stats.get("top_values", [])[:3]
-                    top_str = ", ".join(
-                        [f"'{v[0]}'({v[1]})" for v in top_vals if v[0] is not None]
-                    )
-                    lines.append(f"  - `{col}`: {unique} unique values, top: {top_str}")
-                lines.append("")
-
-        return "\n".join(lines)
-
     async def _generate_insights_with_data(
         self,
         context: ExperimentContext,
@@ -481,13 +215,7 @@ class AnalysisAgent:
         custom_instructions: Optional[str] = None,
         literature_summary: Optional[str] = None,
     ) -> AnalysisResult:
-        """
-        基于实际数据生成洞察。
-
-        关键：洞察生成时能看到数据结构和样本数据，
-        使用 LLM 总结长文档。
-        """
-        # 使用 LLM 总结长文档
+        """基于实际数据生成洞察，使用 LLM 总结长文档。"""
         hypothesis_md_block = ""
         if getattr(context.design, "hypothesis_markdown", None):
             hyp_md = await self._summarize_document(
@@ -495,9 +223,7 @@ class AnalysisAgent:
                 "hypothesis",
                 max_length=800,
             )
-            hypothesis_md_block = (
-                f"\n## Hypothesis Document\n\n```markdown\n{hyp_md}\n```\n"
-            )
+            hypothesis_md_block = f"\n## Hypothesis Document\n\n```markdown\n{hyp_md}\n```\n"
 
         experiment_md_block = ""
         if getattr(context.design, "experiment_markdown", None):
@@ -506,9 +232,7 @@ class AnalysisAgent:
                 "experiment design",
                 max_length=800,
             )
-            experiment_md_block = (
-                f"\n## Experiment Design Document\n\n```markdown\n{exp_md}\n```\n"
-            )
+            experiment_md_block = f"\n## Experiment Design Document\n\n```markdown\n{exp_md}\n```\n"
 
         literature_block = ""
         if literature_summary and literature_summary.strip():
@@ -521,13 +245,10 @@ class AnalysisAgent:
 
         data_block = ""
         if data_summary.schema_markdown:
-            # 对于 schema，使用 LLM 总结（schema 很重要，需要智能提取）
             schema_md = await self._summarize_schema(
                 data_summary.schema_markdown,
                 data_summary.row_counts,
             )
-
-            # quick_stats 可以截断（统计信息相对结构化）
             quick_stats = data_summary.quick_stats
             if len(quick_stats) > 1500:
                 quick_stats = quick_stats[:1500] + "\n...[more stats available]"
@@ -555,7 +276,6 @@ class AnalysisAgent:
         if custom_instructions:
             custom_block = f"\n## Custom Instructions\n\n{custom_instructions}\n"
 
-        # 压缩错误信息
         errors_text = "None"
         if context.error_messages:
             errors = [str(e)[:150] for e in context.error_messages[:3]]
@@ -584,7 +304,6 @@ Based on the experiment context and **actual data structure above**, generate an
             messages.append({"role": "system", "content": skills})
         messages.append({"role": "user", "content": prompt})
 
-        # 重试循环
         parsed: Optional[Dict[str, Any]] = None
         for attempt in range(self.max_retries):
             self.logger.info(
@@ -967,15 +686,12 @@ Based on the experiment context and **actual data structure above**, generate an
                     iteration,
                 )
                 if not adj.get("tools_to_use"):
-                    # 即便停止迭代，也保留这一轮的结构化总结，确保流程可追踪。
                     context_summary = await self._summarize_context(
                         conversation_history,
                         results,
                         iteration + 1,
                     )
-                    self.logger.info(
-                        "第 %d 轮无新增工具，完成总结后停止迭代", iteration + 1
-                    )
+                    self.logger.info("第 %d 轮无新增工具，停止迭代", iteration + 1)
                     break
                 current_tools = adj.get("tools_to_use", [])
 
@@ -1010,7 +726,6 @@ Based on the experiment context and **actual data structure above**, generate an
                     )
 
                 results[tool_name] = result
-                # 只保留关键信息，不保留完整结果
                 conversation_history.append(
                     {
                         "tool": tool_name,
@@ -1023,13 +738,12 @@ Based on the experiment context and **actual data structure above**, generate an
                     }
                 )
 
-            # 每一轮都总结：有工具执行时总结执行结果；无工具时总结当前状态。
             context_summary = await self._summarize_context(
                 conversation_history,
                 results,
                 iteration + 1,
             )
-            self.logger.info("已完成第 %d 轮总结，进入下一轮策略迭代", iteration + 1)
+            self.logger.info("第 %d 轮工具执行完成", iteration + 1)
 
         return results
 
@@ -1044,17 +758,14 @@ Based on the experiment context and **actual data structure above**, generate an
         data_dir = output_dir / DIR_DATA
         data_dir.mkdir(parents=True, exist_ok=True)
         path = None
+        gen = EDAGenerator(self.config)
 
         if tool_name == "eda_profile":
-            from .eda import generate_eda_profile
-
-            path = generate_eda_profile(db_path, data_dir, config=self.config)
+            path = gen.generate_ydata_profile(db_path, data_dir)
             if path and on_progress:
                 await on_progress(f"EDA (ydata) generated: {path.name}")
         elif tool_name == "eda_sweetviz":
-            from .eda import generate_sweetviz_profile
-
-            path = generate_sweetviz_profile(db_path, data_dir, config=self.config)
+            path = gen.generate_sweetviz_profile(db_path, data_dir)
             if path and on_progress:
                 await on_progress(f"EDA (sweetviz) generated: {path.name}")
 
@@ -1194,7 +905,8 @@ Based on the experiment context and **actual data structure above**, generate an
                 continue
 
             if not visualization_plan:
-                raise XmlParseError("Empty visualization plan", raw_content="")
+                self.logger.warning("可视化计划为空，跳过图表生成")
+                return visualization_plan, generated_charts
 
             await progress("Generating charts...")
             generated_charts, error_logs = await self._generate_visualizations(
@@ -1446,6 +1158,7 @@ Based on the experiment context and **actual data structure above**, generate an
     ) -> List[Path]:
         """收集工具产出的图表文件。"""
         chart_paths: List[Path] = []
+        output_dir.mkdir(parents=True, exist_ok=True)
         for artifact_path_str in tool_result.get("artifacts", []):
             artifact_path = Path(artifact_path_str)
             if not artifact_path.exists() or not artifact_path.is_file():
@@ -1573,16 +1286,9 @@ Return ONLY the summary text, no XML needed."""
         document_type: str,
         max_length: int = 500,
     ) -> str:
-        """
-        使用 LLM 总结长文档。
-
-        Args:
-            document: 原始文档内容
-            document_type: 文档类型（如 "hypothesis", "experiment", "literature"）
-            max_length: 目标最大长度
-
-        Returns:
-            总结后的文档
+        """使用 LLM 总结长文档。
+        
+        对于短文档直接返回，长文档调用 LLM 提取关键信息。
         """
         if not document or len(document) <= max_length:
             return document or ""
@@ -1613,8 +1319,7 @@ Return ONLY the summary, no additional text."""
             return summary
         except Exception as e:
             self.logger.warning("文档总结失败 (%s): %s", document_type, e)
-            # 回退到截断
-            return document[:max_length] + "...[summary failed]"
+            return document[:max_length] + "...[truncated]"
 
     async def _summarize_schema(
         self,
@@ -1622,22 +1327,15 @@ Return ONLY the summary, no additional text."""
         row_counts: Dict[str, int],
         max_tables: int = 10,
     ) -> str:
-        """
-        使用 LLM 总结数据库 schema，提取关键信息。
-
-        对于大型 schema，提取最相关的表和列。
-        """
+        """使用 LLM 总结数据库 schema，提取关键信息。"""
         if not schema_markdown:
             return "(no schema)"
 
-        # 如果 schema 不长，直接返回
         if len(schema_markdown) <= 2000:
             return schema_markdown
 
-        # 提取关键表（有数据的表优先）
         tables_with_data = [(t, c) for t, c in row_counts.items() if c > 0]
         tables_sorted = sorted(tables_with_data, key=lambda x: -x[1])[:max_tables]
-
         key_tables_info = "\n".join([f"- {t}: {c} rows" for t, c in tables_sorted])
 
         prompt = f"""Summarize this database schema for analysis purposes.
@@ -1673,8 +1371,7 @@ Keep it under 1500 characters. Return ONLY the summary."""
             return summary
         except Exception as e:
             self.logger.warning("Schema 总结失败: %s", e)
-            # 回退：返回关键表信息
-            return f"Key tables:\n{key_tables_info}\n\n[Schema summary failed, original truncated]\n{schema_markdown[:1500]}"
+            return f"Key tables:\n{key_tables_info}\n\n[schema truncated]\n{schema_markdown[:1500]}"
 
     async def _summarize_context(
         self,
@@ -1682,13 +1379,8 @@ Keep it under 1500 characters. Return ONLY the summary."""
         current_results: Dict[str, Any],
         iteration: int,
     ) -> ContextSummary:
-        """
-        使用 LLM 压缩历史上下文为结构化摘要。
-
-        当上下文过长时，用 LLM 提取关键信息，避免上下文膨胀。
-        """
+        """压缩历史上下文为结构化摘要，避免上下文膨胀。"""
         if not conversation_history or len(conversation_history) <= 2:
-            # 历史记录较短，不需要压缩
             return ContextSummary(
                 key_findings=[],
                 failed_attempts=[],
@@ -1701,23 +1393,19 @@ Keep it under 1500 characters. Return ONLY the summary."""
                 iteration_count=iteration,
             )
 
-        # 构建历史摘要
         history_text = "\n".join(
             [
                 f"- Iter {h['iteration']}: {h['tool']} - {'OK' if h.get('result', {}).get('success') else 'FAILED'}"
-                for h in conversation_history[-10:]  # 最多取最近10条
+                for h in conversation_history[-10:]
             ]
         )
 
-        # 提取关键输出
         outputs_text = ""
-        for name, result in list(current_results.items())[-3:]:  # 最近3个结果
+        for name, result in list(current_results.items())[-3:]:
             if result.get("success") and result.get("stdout"):
                 outputs_text += f"\n**{name}**: {result['stdout'][:300]}...\n"
             elif not result.get("success"):
-                outputs_text += (
-                    f"\n**{name}** FAILED: {str(result.get('error', ''))[:200]}\n"
-                )
+                outputs_text += f"\n**{name}** FAILED: {str(result.get('error', ''))[:200]}\n"
 
         prompt = f"""Summarize the analysis execution history into a structured summary.
 

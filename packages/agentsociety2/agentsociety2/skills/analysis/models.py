@@ -2,10 +2,12 @@
 标准化实验分析数据模型与统一配置。
 """
 
+from dataclasses import dataclass, field
 from datetime import datetime
 from enum import Enum
 from pathlib import Path
 from typing import Any, Dict, List, Optional
+
 from pydantic import BaseModel, ConfigDict, Field, field_validator
 
 
@@ -180,13 +182,14 @@ class ReportContent(BaseModel):
         default=None, description="English HTML report content"
     )
 
-    # 向后兼容：取中文优先的单语版本
     @property
     def full_content_markdown(self) -> Optional[str]:
+        """中文优先，否则英文。"""
         return self.full_content_markdown_zh or self.full_content_markdown_en
 
     @property
     def full_content_html(self) -> Optional[str]:
+        """中文优先，否则英文。"""
         return self.full_content_html_zh or self.full_content_html_en
 
     model_config = ConfigDict(arbitrary_types_allowed=True)
@@ -210,6 +213,44 @@ class ReportAsset(BaseModel):
     dimensions: Optional[Dict[str, int]] = Field(None, description="Dimensions")
 
     model_config = ConfigDict(arbitrary_types_allowed=True)
+
+
+@dataclass
+class ContextSummary:
+    """工具迭代时压缩后的上下文（供策略调整 prompt）。"""
+
+    key_findings: List[str] = field(default_factory=list)
+    failed_attempts: List[str] = field(default_factory=list)
+    successful_tools: List[str] = field(default_factory=list)
+    recommendations: str = ""
+    iteration_count: int = 0
+
+
+class AnalysisJudgment(BaseModel):
+    """洞察阶段 LLM 裁判输出。"""
+
+    success: bool
+    reason: str
+    should_retry: bool = False
+    retry_instruction: str = ""
+
+
+class StrategyJudgment(BaseModel):
+    """分析策略阶段裁判输出。"""
+
+    success: bool
+    reason: str
+    should_retry: bool = False
+    retry_instruction: str = ""
+
+
+class VisualizationJudgment(BaseModel):
+    """可视化计划阶段裁判输出。"""
+
+    success: bool
+    reason: str
+    should_retry: bool = False
+    retry_instruction: str = ""
 
 
 class AnalysisConfig(BaseModel):
@@ -284,22 +325,20 @@ class AnalysisConfig(BaseModel):
     )
     analysis_skill_names: List[str] = Field(
         default_factory=lambda: [
-            "xml_contract",  # Required skill, always loaded
             "subagent_workflow",
             "visualization_reliability",
             "core_skills",
             "advanced_analysis",
         ],
         description=(
-            "Explicitly selected analysis prompt-skill names. "
-            "With strict mode enabled, only these skills are injected into prompts. "
-            "Required skills (like xml_contract) are always loaded regardless of selection."
+            "instruction_md 条目的 name（不含 frontmatter 注入正文）。"
+            "标记 required 的片段（如 xml_contract）始终注入，无需出现在此列表。"
         ),
     )
     analysis_skill_strict_selection: bool = Field(
         default=True,
         description=(
-            "If true, do not auto-load all analysis skills; only load selected names."
+            "True：只注入 required + 本列表中的条目。False：未指定列表时注入全部 instruction_md。"
         ),
     )
 

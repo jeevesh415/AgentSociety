@@ -22,6 +22,9 @@ from agentsociety2.agent.base import AgentBase
 from agentsociety2.agent.skills import SkillRegistry, get_skill_registry
 from agentsociety2.agent.skills.runtime import AgentSkillRuntime
 from agentsociety2.env import RouterBase
+from agentsociety2.logger import get_logger
+
+logger = get_logger()
 
 if TYPE_CHECKING:
     from agentsociety2.storage import ReplayWriter
@@ -34,7 +37,7 @@ class ToolDecision(BaseModel):
     """
     tool_name: str = Field(
         description=(
-            "activate_skill|read_skill|execute_skill|workspace_read|workspace_write|workspace_list|enable_skill|disable_skill|bash|glob|grep|codegen|done"
+            "activate_skill|read_skill|execute_skill|workspace_read|workspace_write|workspace_list|enable_skill|disable_skill|bash|glob|grep|codegen|batch|done"
         )
     )
     arguments: dict[str, Any] = Field(default_factory=dict)
@@ -70,6 +73,7 @@ class PersonAgent(AgentBase):
         ("grep", "pattern, glob, path", "Search file contents"),
         ("enable_skill", "skill_name", "Reveal a hidden skill"),
         ("disable_skill", "skill_name", "Hide a skill"),
+        ("batch", "operations", "Execute multiple operations in one call (e.g., multiple workspace reads/writes)"),
         ("done", "(done=true, summary)", "Finish this step"),
     )
 
@@ -113,7 +117,7 @@ class PersonAgent(AgentBase):
         self._skill_visibility_overrides: dict[str, bool] = {}
         self._activated_skills: set[str] = set()
         self._active_skill_scope: str = ""
-        # Claude-like capability disclosure: only a small core set is visible by default.
+        # Default visible skills; others can be hidden per-agent via disable_skill.
         default_core = {"observation", "needs", "cognition", "plan", "memory"}
         core = self._capability_kwargs.get("core_skills", None)
         if isinstance(core, (list, set, tuple)):
@@ -125,9 +129,80 @@ class PersonAgent(AgentBase):
         self._last_selected_skills: set[str] = set()
         self._max_tool_rounds = max(1, int(self._capability_kwargs.get("max_tool_rounds", 24)))
 
+        # 上下文缓存：避免重复读取相同文件
+        self._workspace_cache: dict[str, str] = {}
+        self._cache_valid_paths: set[str] = set()
+        # 当前 step 的上下文快照（在 step 开始时构建）
+        self._step_context: dict[str, Any] = {}
+        # workspace 状态版本：每次可能改动工作区后递增，避免模型使用过期上下文想当然
+        self._workspace_state_version: int = 0
+
     def _all_visible_skill_names(self) -> set[str]:
         """返回当前 agent 可见技能名集合副本。"""
         return set(self._selectable_skill_names)
+
+    # ── Context Management ────────────────────────────────────────────────────
+
+    def _build_step_context(self) -> dict[str, Any]:
+        """构建当前 step 的上下文快照。
+
+        在 step 开始时调用一次，预读取常用文件，避免后续多次 workspace_read。
+        同时更新缓存，供后续操作使用。
+        """
+        context: dict[str, Any] = {}
+
+        # 常用文件列表
+        common_files = [
+            "observation.txt",
+            "observation_ctx.json",
+            "needs.json",
+            "current_need.txt",
+            "emotion.json",
+            "intention.json",
+            "plan_state.json",
+            "memory.jsonl",
+        ]
+
+        for path in common_files:
+            if self._skill_runtime.workspace_exists(path):
+                content = self._skill_runtime.workspace_read(path)
+                if content:
+                    # JSON 文件尝试解析
+                    if path.endswith(".json"):
+                        try:
+                            context[path] = json.loads(content)
+                        except json.JSONDecodeError:
+                            context[path] = content
+                    else:
+                        context[path] = content
+                    # 同时更新缓存
+                    self._workspace_cache[path] = content
+                    self._cache_valid_paths.add(path)
+
+        self._step_context = context
+        return context
+
+    def _invalidate_workspace_cache(self, path: str) -> None:
+        """失效指定路径的缓存（写入文件后调用）。"""
+        self._cache_valid_paths.discard(path)
+        self._step_context.pop(path, None)
+
+    def _get_cached_workspace_content(self, path: str) -> Optional[str]:
+        """从缓存获取文件内容，缓存未命中返回 None。"""
+        if path in self._cache_valid_paths:
+            return self._workspace_cache.get(path)
+        return None
+
+    def _invalidate_all_workspace_cache(self) -> None:
+        """清空全部 workspace 缓存。"""
+        self._cache_valid_paths.clear()
+        self._workspace_cache.clear()
+        self._step_context = {}
+
+    def _bump_workspace_state_version(self) -> int:
+        """递增 workspace 状态版本号并返回新值。"""
+        self._workspace_state_version += 1
+        return self._workspace_state_version
 
     @staticmethod
     def _truncate_text(text: str, max_len: int = 2000) -> str:
@@ -161,9 +236,10 @@ class PersonAgent(AgentBase):
     # ── System Prompt ──────────────────────────────────────────────────────────
 
     def get_system_prompt(self, tick: int, t: datetime) -> str:
-        """构造本轮 system prompt。
+        """Build the system prompt for the current step.
 
-        包含身份信息、可见技能目录、工具说明与已激活技能列表。
+        Includes agent identity, tool specs, a skill catalog (progressive disclosure),
+        and the list of activated skills.
         """
         base = super().get_system_prompt(tick, t)
 
@@ -173,12 +249,44 @@ class PersonAgent(AgentBase):
             "profile": self.get_profile(),
         }
 
-        catalog = self._skill_runtime.skill_list(sorted(self._all_visible_skill_names()))
+        visible_names = sorted(self._all_visible_skill_names())
+        catalog_names: list[str] = []
+        for n in visible_names:
+            info = self._skill_registry.get_skill_info(n, load_content=False)
+            if info is None:
+                continue
+            if getattr(info, "disable_model_invocation", False):
+                continue
+            patterns = list(getattr(info, "paths", []) or [])
+            if patterns and not self._catalog_paths_match(patterns):
+                continue
+            catalog_names.append(n)
+        catalog = self._skill_runtime.skill_list(catalog_names)
 
         skill_section = (
             f"\n\n# Agent Identity\n"
-            f"{json.dumps(agent_identity, ensure_ascii=False)}\n\n"
-            "# You Are an Autonomous Tool-Using Agent\n"
+            f"{json.dumps(agent_identity, ensure_ascii=False)}\n"
+        )
+
+        # 注入上下文快照：让 LLM 直接看到常用文件内容，减少 workspace_read 调用
+        if self._step_context:
+            # 过滤掉过大的内容
+            context_display = {}
+            for k, v in self._step_context.items():
+                if isinstance(v, str) and len(v) > 2000:
+                    context_display[k] = v[:2000] + "...<truncated>"
+                else:
+                    context_display[k] = v
+            skill_section += (
+                f"\n# Workspace State (pre-loaded)\n"
+                "Below is a snapshot of common workspace files for faster context.\n"
+                "Important: after any write/execute/codegen action, snapshot content may become stale; "
+                "use `workspace_read` to fetch latest source of truth when correctness matters.\n"
+                f"```json\n{json.dumps(context_display, ensure_ascii=False, indent=1)}\n```\n"
+            )
+
+        skill_section += (
+            "\n# You Are an Autonomous Tool-Using Agent\n"
             "Call exactly one tool per round. "
             "Respond ONLY with valid JSON: {tool_name, arguments, done, summary}.\n"
             "For execute_skill use arguments.args as a JSON object; for codegen use arguments.ctx as a JSON object "
@@ -191,7 +299,8 @@ class PersonAgent(AgentBase):
             "# Execution Rules\n"
             "- Do not invent tools or fields.\n"
             "- Prefer skill-driven execution: activate -> read/execute -> workspace operations -> done.\n"
-            "- Keep `summary` concise and factual.\n\n"
+            "- Keep `summary` concise and factual.\n"
+            "- Use `batch` tool to execute multiple workspace operations in one call (more efficient).\n\n"
             "# Tools\n"
             f"{self._render_tool_table()}\n\n"
             f"# Skill Catalog\n{json.dumps(catalog, ensure_ascii=False, indent=1)}\n\n"
@@ -210,15 +319,47 @@ class PersonAgent(AgentBase):
         result_obj: dict[str, Any],
     ) -> None:
         """将工具结果写入 thread（同时写磁盘与内存窗口）。"""
-        payload = json.dumps(result_obj, ensure_ascii=False)
+        enriched = dict(result_obj)
+        enriched.setdefault("workspace_state_version", self._workspace_state_version)
+        payload = json.dumps(enriched, ensure_ascii=False)
         content = "TOOL_RESULT_JSON:\n" + self._truncate_text(payload, max_len=12000)
         self._skill_runtime.append_thread_message("user", content, tick=tick, t=t)
         thread_messages.append({"role": "user", "content": content})
         if len(thread_messages) > 40:
             del thread_messages[:-40]
 
+    def _catalog_paths_match(self, patterns: list[str]) -> bool:
+        """Return whether any pattern matches the current working set.
+
+        If no working-set signal is available, returns True to avoid hiding skills
+        unexpectedly.
+        """
+        if not patterns:
+            return True
+
+        candidates: list[str] = []
+        obs = self._observation_ctx or {}
+        if isinstance(obs, dict):
+            for key in ("path", "paths", "file", "files", "working_dir", "cwd"):
+                v = obs.get(key)
+                if isinstance(v, str) and v.strip():
+                    candidates.append(v.strip())
+                elif isinstance(v, list):
+                    candidates.extend(str(x).strip() for x in v if str(x).strip())
+
+        if not candidates:
+            return True
+
+        from fnmatch import fnmatch
+
+        for c in candidates:
+            for p in patterns:
+                if fnmatch(c, p):
+                    return True
+        return False
+
     def _is_model_invocable_skill(self, skill_name: str) -> bool:
-        """模型可调用 skill：disable_model_invocation=True 的 skill 一律拒绝工具侧激活/读取/执行。"""
+        """Return True if the skill can be auto-invoked by the model."""
         info = self._skill_registry.get_skill_info(skill_name, load_content=False)
         if info is None:
             return False
@@ -466,9 +607,10 @@ class PersonAgent(AgentBase):
             return {"ok": False, "stdout": "", "stderr": "environment not initialized"}
         if not instruction.strip():
             return {"ok": False, "stdout": "", "stderr": "empty instruction"}
+        merged_ctx = {**ctx, **self.env_codegen_ctx_overlay()}
         try:
             updated_ctx, answer = await self._env.ask(
-                ctx=ctx,
+                ctx=merged_ctx,
                 instruction=instruction,
                 readonly=False,
                 template_mode=template_mode,
@@ -524,14 +666,15 @@ class PersonAgent(AgentBase):
     # ── Skill Visibility ──────────────────────────────────────────────────────
 
     def _refresh_selectable_skills(self) -> None:
-        """根据 enabled/core/override 三类条件刷新可见技能集合。"""
+        """根据 enabled/override 条件刷新可见技能集合。
+        
+        所有启用的 skill 默认可见，除非被 override 显式禁用。
+        """
         enabled = self._skill_registry.list_enabled()
         visible = []
         for s in enabled:
             override = self._skill_visibility_overrides.get(s.name)
             if override is False:
-                continue
-            if override is not True and s.name not in self._core_skill_names:
                 continue
             visible.append(s)
         self._selectable_skill_names = {s.name for s in visible}
@@ -559,6 +702,12 @@ class PersonAgent(AgentBase):
         """初始化运行时目录，加载持久配置并扫描 custom/env skills。"""
         await super().init(env=env)
         self._skill_runtime.ensure_agent_work_dir(self._env)
+
+        # ── Seed workspace from init_state (first run only) ──────────────────
+        # init_state 用于“出生时”的初始内在状态设定。
+        # 仅在对应文件不存在时写入，避免覆盖实验过程中已经演化出的状态。
+        self._seed_workspace_from_init_state()
+
         existing_cfg = self._skill_runtime.read_json("agent_config.json", {})
         if isinstance(existing_cfg, dict):
             raw = existing_cfg.get("skill_overrides", {})
@@ -574,19 +723,55 @@ class PersonAgent(AgentBase):
                     self._core_skill_names = loaded
         self._persist_agent_config()
 
-        # 扫描 custom/skills/ 和环境模块提供的 skills
+        # 扫描环境模块提供的 skills
         for module in env.env_modules:
-            workspace_path = getattr(module, "workspace_path", None)
-            if workspace_path:
-                self._skill_registry.scan_custom(workspace_path)
-                break
-        for module in env.env_modules:
-            skills_dir = module.get_agent_skills_dir()
-            if skills_dir:
+            skills_dirs = module.get_agent_skills_dirs()
+            for skills_dir in skills_dirs:
                 added = self._skill_registry.scan_env_skills(skills_dir, type(module).__name__)
-                # 环境 skill 
                 self._core_skill_names.update(added)
+                if added:
+                    logger.info(f"Agent {self.id}: loaded skills from {skills_dir}: {added}")
+
         self._refresh_selectable_skills()
+
+        # 激活环境模块声明的默认技能
+        for module in env.env_modules:
+            skill_name = module.get_default_skill()
+            if skill_name and skill_name in self._all_visible_skill_names():
+                self._activated_skills.add(skill_name)
+                self._core_skill_names.add(skill_name)
+                logger.info(f"Agent {self.id}: activated default skill '{skill_name}'")
+            elif skill_name:
+                logger.warning(f"Agent {self.id}: default skill '{skill_name}' not found in visible skills")
+        self._persist_agent_config()
+
+    def _seed_workspace_from_init_state(self) -> None:
+        state = self._agent_state if isinstance(self._agent_state, dict) else {}
+        if not state:
+            return
+
+        force = bool(state.get("init_state_force", False))
+
+        if force or not self._skill_runtime.workspace_exists("init_state.json"):
+            self._skill_runtime.workspace_write(
+                "init_state.json", json.dumps(state, ensure_ascii=False, indent=2)
+            )
+
+        seed = state.get("workspace_seed", {})
+        if not isinstance(seed, dict) or not seed:
+            return
+
+        for rel_path, value in seed.items():
+            rel_path = str(rel_path).strip()
+            if not rel_path:
+                continue
+            if (not force) and self._skill_runtime.workspace_exists(rel_path):
+                continue
+            if isinstance(value, (dict, list)):
+                content = json.dumps(value, ensure_ascii=False, indent=2)
+            else:
+                content = str(value)
+            self._skill_runtime.workspace_write(rel_path, content)
 
     # ── Context Compaction (sliding summary) ─────────────────────────────────
 
@@ -642,9 +827,176 @@ class PersonAgent(AgentBase):
         except Exception:
             summary_text = f"[Compacted {len(old_messages)} earlier messages]"
 
+        # 关键状态固定保留，避免摘要后模型丢失真实状态而“补脑”
+        key_state_files = ("observation.txt", "needs.json", "current_need.txt", "intention.json", "plan_state.json")
+        key_state: dict[str, Any] = {}
+        for p in key_state_files:
+            cached = self._get_cached_workspace_content(p)
+            if cached is None and self._skill_runtime.workspace_exists(p):
+                cached = self._skill_runtime.workspace_read(p)
+                self._workspace_cache[p] = cached
+                self._cache_valid_paths.add(p)
+            if cached:
+                if p.endswith(".json"):
+                    try:
+                        key_state[p] = json.loads(cached)
+                    except json.JSONDecodeError:
+                        key_state[p] = self._truncate_text(cached, max_len=2000)
+                else:
+                    key_state[p] = self._truncate_text(cached, max_len=2000)
+
         compacted = [{"role": "user", "content": f"CONVERSATION_SUMMARY:\n{summary_text}"}]
+        if key_state:
+            compacted.append(
+                {
+                    "role": "user",
+                    "content": "KEY_STATE_JSON:\n" + json.dumps(
+                        {"workspace_state_version": self._workspace_state_version, "files": key_state},
+                        ensure_ascii=False,
+                    ),
+                }
+            )
         compacted.extend(recent_messages)
         return compacted
+
+    # ── Batch Tool Handler ─────────────────────────────────────────────────────
+
+    async def _handle_batch_tool(
+        self,
+        operations: list[dict[str, Any]],
+        tick: int,
+        t: datetime,
+        thread_messages: list[dict[str, str]],
+    ) -> dict[str, Any]:
+        """批量执行多个操作，减少 LLM 调用次数。
+
+        支持的批量操作类型：
+        - workspace_read: 批量读取多个文件
+        - workspace_write: 批量写入多个文件
+        - workspace_list: 批量列出多个目录
+
+        Args:
+            operations: 操作列表，每个操作包含 tool_name 和 arguments
+            tick: 当前 tick
+            t: 当前时间
+            thread_messages: thread 消息列表
+
+        Returns:
+            包含所有操作结果的字典
+        """
+        results: list[dict[str, Any]] = []
+
+        for op in operations:
+            tool_name = op.get("tool_name", "")
+            args = op.get("arguments", {})
+            blocked_obj = self._check_allowed_tools_for_action(str(tool_name).strip())
+            if blocked_obj is not None:
+                results.append({
+                    "tool_name": tool_name,
+                    "ok": False,
+                    "error": blocked_obj.get("error", "blocked"),
+                })
+                continue
+
+            if tool_name == "workspace_read":
+                # 支持批量读取
+                paths = args.get("paths", [])
+                if not paths:
+                    path = args.get("path", "")
+                    if path:
+                        paths = [path]
+
+                read_results: dict[str, Any] = {}
+                for p in paths:
+                    p = str(p).strip()
+                    if not p:
+                        continue
+                    # 先检查缓存
+                    cached = self._get_cached_workspace_content(p)
+                    if cached is not None:
+                        read_results[p] = {"ok": True, "content": cached, "cached": True}
+                    elif self._skill_runtime.workspace_exists(p):
+                        content = self._skill_runtime.workspace_read(p)
+                        self._workspace_cache[p] = content
+                        self._cache_valid_paths.add(p)
+                        read_results[p] = {"ok": True, "content": self._truncate_text(content, max_len=8000)}
+                    else:
+                        read_results[p] = {"ok": False, "error": "file not found"}
+
+                results.append({
+                    "tool_name": "workspace_read",
+                    "ok": all(r.get("ok", False) for r in read_results.values()),
+                    "files": read_results,
+                    "count": len(read_results),
+                })
+
+            elif tool_name == "workspace_write":
+                # 支持批量写入
+                writes = args.get("writes", {})
+                if not writes:
+                    path = args.get("path", "")
+                    content = args.get("content", "")
+                    if path:
+                        writes = {path: content}
+
+                written_paths: list[str] = []
+                write_errors: list[str] = []
+                for p, content in writes.items():
+                    p = str(p).strip()
+                    if not p:
+                        continue
+                    try:
+                        self._skill_runtime.workspace_write(p, str(content))
+                        written_paths.append(p)
+                        # 失效缓存
+                        self._invalidate_workspace_cache(p)
+                        self._bump_workspace_state_version()
+                    except Exception as e:
+                        write_errors.append(f"{p}: {str(e)}")
+
+                results.append({
+                    "tool_name": "workspace_write",
+                    "ok": len(write_errors) == 0,
+                    "written_paths": written_paths,
+                    "errors": write_errors if write_errors else None,
+                    "count": len(written_paths),
+                })
+
+            elif tool_name == "workspace_list":
+                paths = args.get("paths", [])
+                if not paths:
+                    path = args.get("path", ".")
+                    paths = [path]
+
+                list_results: dict[str, Any] = {}
+                for p in paths:
+                    p = str(p).strip() or "."
+                    try:
+                        files = self._skill_runtime.workspace_list(p)
+                        list_results[p] = {"ok": True, "files": files[:100], "count": len(files)}
+                    except Exception as e:
+                        list_results[p] = {"ok": False, "error": str(e)}
+
+                results.append({
+                    "tool_name": "workspace_list",
+                    "ok": all(r.get("ok", False) for r in list_results.values()),
+                    "directories": list_results,
+                })
+
+            else:
+                results.append({
+                    "tool_name": tool_name,
+                    "ok": False,
+                    "error": f"unsupported tool in batch: {tool_name}",
+                })
+
+        return {
+            "action": "batch",
+            "ok": all(r.get("ok", False) for r in results),
+            "results": results,
+            "total_operations": len(results),
+            "workspace_state_version": self._workspace_state_version,
+        }
 
     # ── Tool Loop ─────────────────────────────────────────────────────────────
 
@@ -733,12 +1085,17 @@ class PersonAgent(AgentBase):
                     self._append_tool_result_to_thread(thread_messages, tick, t, result_obj)
                     logs.append("enable_skill:empty")
                     continue
-                if skill_name not in self._all_visible_skill_names():
-                    self._skill_visibility_overrides[skill_name] = True
-                    self._persist_agent_config()
-                    self._refresh_selectable_skills()
+                if self._skill_visibility_overrides.get(skill_name) is False:
+                    del self._skill_visibility_overrides[skill_name]
+                self._persist_agent_config()
+                self._refresh_selectable_skills()
                 if skill_name in self._all_visible_skill_names():
-                    result_obj = {"action": action, "skill_name": skill_name, "ok": True}
+                    result_obj = {
+                        "action": action,
+                        "skill_name": skill_name,
+                        "ok": True,
+                        "note": "enabled (override cleared)",
+                    }
                     history.append(result_obj)
                     self._skill_runtime.append_tool_log({"tick": tick, "time": t.isoformat(), **result_obj})
                     self._append_tool_result_to_thread(thread_messages, tick, t, result_obj)
@@ -770,20 +1127,6 @@ class PersonAgent(AgentBase):
                 self._append_tool_result_to_thread(thread_messages, tick, t, result_obj)
                 logs.append(f"{action}:{skill_name}:rejected")
                 continue
-
-            # ── user-only skill gate (disable_model_invocation) ──
-            if action in {"activate_skill", "read_skill", "execute_skill"} and skill_name:
-                if not self._is_model_invocable_skill(skill_name):
-                    result_obj = {
-                        "action": action,
-                        "skill_name": skill_name,
-                        "ok": False,
-                        "error": "skill is user-only (disable_model_invocation=true)",
-                    }
-                    history.append(result_obj)
-                    self._append_tool_result_to_thread(thread_messages, tick, t, result_obj)
-                    logs.append(f"{action}:{skill_name}:user_only")
-                    continue
 
             # ── allowed-tools gate ──
             blocked_obj = self._check_allowed_tools_for_action(action)
@@ -897,6 +1240,9 @@ class PersonAgent(AgentBase):
                 except Exception as e:
                     out = {"ok": False, "error_type": type(e).__name__, "stderr": str(e), "stdout": ""}
                 ok = bool(out.get("ok"))
+                # skill 执行可能修改多个文件：统一失效缓存并更新版本
+                self._invalidate_all_workspace_cache()
+                self._bump_workspace_state_version()
                 if ok:
                     self._active_skill_scope = skill_name
                 result_obj = {
@@ -908,6 +1254,7 @@ class PersonAgent(AgentBase):
                     "artifacts": out.get("artifacts", []),
                     "stdout": self._truncate_text(str(out.get("stdout", "")), max_len=4000),
                     "stderr": self._truncate_text(str(out.get("stderr", "")), max_len=2000),
+                    "workspace_state_version": self._workspace_state_version,
                 }
                 history.append(result_obj)
                 self._skill_runtime.append_tool_log(
@@ -931,12 +1278,21 @@ class PersonAgent(AgentBase):
                             "error": "file not found",
                         }
                     else:
-                        content = self._skill_runtime.workspace_read(ws_read_path)
+                        cached = self._get_cached_workspace_content(ws_read_path)
+                        if cached is not None:
+                            content = cached
+                            cached_hit = True
+                        else:
+                            content = self._skill_runtime.workspace_read(ws_read_path)
+                            self._workspace_cache[ws_read_path] = content
+                            self._cache_valid_paths.add(ws_read_path)
+                            cached_hit = False
                         result_obj = {
                             "action": action,
                             "path": ws_read_path,
                             "ok": True,
                             "content": self._truncate_text(content, max_len=8000),
+                            "cached": cached_hit,
                         }
                 except Exception as e:
                     result_obj = {"action": action, "path": ws_read_path, "ok": False, "error": str(e)}
@@ -952,6 +1308,9 @@ class PersonAgent(AgentBase):
                 content = str(args.get("content", ""))
                 try:
                     self._skill_runtime.workspace_write(path, content)
+                    # 失效缓存，确保下次读取时获取最新内容
+                    self._invalidate_workspace_cache(path)
+                    self._bump_workspace_state_version()
                     result_obj = {"action": action, "path": path, "ok": True, "size": len(content)}
                 except Exception as e:
                     result_obj = {"action": action, "path": path, "ok": False, "error": str(e)}
@@ -982,6 +1341,28 @@ class PersonAgent(AgentBase):
                     logs.append(f"workspace_list:{path}:{result_obj.get('count', 0)}")
                 else:
                     logs.append(f"workspace_list:{path}:fail")
+                continue
+
+            # ── batch ──
+            if action == "batch":
+                operations = args.get("operations", [])
+                if not isinstance(operations, list) or not operations:
+                    result_obj = {"action": action, "ok": False, "error": "empty or invalid operations list"}
+                    history.append(result_obj)
+                    self._append_tool_result_to_thread(thread_messages, tick, t, result_obj)
+                    logs.append("batch:empty")
+                    continue
+
+                result_obj = await self._handle_batch_tool(
+                    operations=operations,
+                    tick=tick,
+                    t=t,
+                    thread_messages=thread_messages,
+                )
+                history.append(result_obj)
+                self._skill_runtime.append_tool_log({"tick": tick, "time": t.isoformat(), **result_obj})
+                self._append_tool_result_to_thread(thread_messages, tick, t, result_obj)
+                logs.append(f"batch:{result_obj.get('total_operations', 0)}:{'ok' if result_obj.get('ok') else 'partial'}")
                 continue
 
             # ── bash ──
@@ -1056,11 +1437,15 @@ class PersonAgent(AgentBase):
                     instruction=instruction, ctx=ctx, template_mode=template_mode,
                 )
                 ok = bool(out.get("ok"))
+                # codegen 可能触发环境侧写入产物：统一失效缓存并更新版本
+                self._invalidate_all_workspace_cache()
+                self._bump_workspace_state_version()
                 result_obj: dict[str, Any] = {
                     "action": action,
                     "ok": ok,
                     "stdout": self._truncate_text(str(out.get("stdout", "")), max_len=5000),
                     "stderr": self._truncate_text(str(out.get("stderr", "")), max_len=2000),
+                    "workspace_state_version": self._workspace_state_version,
                 }
                 if out.get("ctx"):
                     try:
@@ -1104,6 +1489,11 @@ class PersonAgent(AgentBase):
         # 每步重新进入自由工具选择，避免上一步 skill 的 allowed-tools 作用域跨步泄漏。
         self._active_skill_scope = ""
         self._last_selected_skills = set(self._selectable_skill_names)
+
+        # 构建上下文快照：预读取常用文件，注入到 system prompt
+        # 这样 LLM 可以直接看到这些内容，减少 workspace_read 调用
+        self._build_step_context()
+
         logs, tool_history = await self._tool_loop(tick=tick, t=t)
 
         # 使用 tool loop 结束后的最终技能状态

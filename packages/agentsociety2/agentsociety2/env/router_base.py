@@ -44,6 +44,7 @@ from typing import (
     Type,
     TypeVar,
 )
+from pathlib import Path
 
 if TYPE_CHECKING:
     from agentsociety2.storage import ReplayWriter
@@ -190,6 +191,7 @@ class RouterBase(ABC):
         self.max_steps = max_steps
         self.max_llm_call_retry = max(max_llm_call_retry, 1)
         self._replay_writer = replay_writer
+        self.run_dir: Path | None = None  # 由 cli.py 设置
         if replay_writer is not None:
             for env_module in env_modules:
                 env_module.set_replay_writer(replay_writer)
@@ -221,6 +223,15 @@ class RouterBase(ABC):
             "weekday": self.t.strftime("%A"),
             "timestamp": self.t.timestamp(),
         }
+
+    def sync_simulation_clock(self, t: datetime) -> None:
+        """与编排器当前仿真时刻对齐。
+
+        ``ask``/codegen 的 InitStage 用 ``self.t`` 写入 ``ctx['current_time']``。
+        若仅在 ``env_router.step`` 末尾才更新 ``self.t``，而 agent 先执行，则整步内时钟落后一步。
+        任何复制 ``AgentSociety.step`` 顺序（先 agent 后 env.step）的代码都应在 agent 开始前调用本方法。
+        """
+        self.t = t
 
     @abstractmethod
     async def ask(

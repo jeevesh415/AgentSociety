@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import json
+from collections import deque
 from datetime import datetime
 from pathlib import Path
 from typing import Any, Awaitable, Callable
@@ -25,20 +26,14 @@ class AgentSkillRuntime:
         if self._agent_work_dir is not None:
             return self._agent_work_dir
 
-        base_path: Path | None = None
-        if env_obj is not None:
-            for module in getattr(env_obj, "env_modules", []):
-                workspace_path = getattr(module, "workspace_path", None)
-                if workspace_path:
-                    base_path = Path(workspace_path)
-                    break
-
-        if base_path is None:
+        # 优先从 env_router 获取 run_dir
+        run_dir = getattr(env_obj, "run_dir", None)
+        if run_dir is not None:
+            base_path = Path(run_dir)
+        else:
             base_path = Path.cwd()
 
-        self._agent_work_dir = (
-            base_path / "run_dir" / "agents" / f"agent_{self._agent_id:04d}"
-        ).resolve()
+        self._agent_work_dir = (base_path / "agents" / f"agent_{self._agent_id:04d}").resolve()
         self._agent_work_dir.mkdir(parents=True, exist_ok=True)
         return self._agent_work_dir
 
@@ -182,9 +177,17 @@ class AgentSkillRuntime:
         path = self._agent_work_dir / "tool_calls.jsonl"
         if not path.exists():
             return []
-        lines = path.read_text(encoding="utf-8").splitlines()
-        recent = lines[-limit:] if limit > 0 else lines
-        return [json_repair.loads(line) for line in recent if line.strip()]
+        if limit > 0:
+            recent_lines: deque[str] = deque(maxlen=limit)
+            with path.open("r", encoding="utf-8") as f:
+                for line in f:
+                    if line.strip():
+                        recent_lines.append(line)
+            source = list(recent_lines)
+        else:
+            with path.open("r", encoding="utf-8") as f:
+                source = [line for line in f if line.strip()]
+        return [json_repair.loads(line) for line in source]
 
     def append_thread_message(self, role: str, content: str, tick: int, t: datetime) -> None:
         if self._agent_work_dir is None:
@@ -205,8 +208,16 @@ class AgentSkillRuntime:
         path = self._agent_work_dir / "thread_messages.jsonl"
         if not path.exists():
             return []
-        lines = path.read_text(encoding="utf-8").splitlines()
-        recent = lines[-limit:] if limit > 0 else lines
+        if limit > 0:
+            recent_lines: deque[str] = deque(maxlen=limit)
+            with path.open("r", encoding="utf-8") as f:
+                for line in f:
+                    if line.strip():
+                        recent_lines.append(line)
+            recent = list(recent_lines)
+        else:
+            with path.open("r", encoding="utf-8") as f:
+                recent = [line.rstrip("\n") for line in f if line.strip()]
         messages: list[dict[str, str]] = []
         for line in recent:
             if not line.strip():

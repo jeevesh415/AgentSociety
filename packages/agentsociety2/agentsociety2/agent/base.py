@@ -241,6 +241,11 @@ class AgentBase(ABC):
     def id(self) -> int:
         return self._id
 
+    def env_codegen_ctx_overlay(self) -> dict[str, Any]:
+        """并入 CodeGenRouter.ask 的 ctx：稳定身份键，由框架提供；与具体 skill 无关。后合并时覆盖模型误传。"""
+        i = self.id
+        return {"id": i, "agent_id": i, "person_id": i}
+
     @property
     def logger(self) -> logging.Logger:
         return self._logger
@@ -562,9 +567,10 @@ Remember: You are simulating a real person living in a simulated world. Your beh
                 - answer: The answer from the environment.
         """
         assert self._env is not None, "Environment is not initialized"
-        if "id" not in ctx:
-            ctx["id"] = self._id
-        ctx, answer = await self._env.ask(ctx, message, readonly=readonly, template_mode=template_mode)
+        merged_ctx = {**ctx, **self.env_codegen_ctx_overlay()}
+        ctx, answer = await self._env.ask(
+            merged_ctx, message, readonly=readonly, template_mode=template_mode
+        )
         return ctx, answer
 
     async def init(

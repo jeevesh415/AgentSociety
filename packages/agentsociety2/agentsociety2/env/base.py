@@ -450,29 +450,101 @@ It contains no functions or methods.
 **Note:** This subclass has not provided a detailed description. Please refer to the class documentation or source code for initialization parameters and usage.
 """
 
+    # ---- Skill Discovery ----
+
     @classmethod
-    def get_agent_skills_dir(cls) -> "Path | None":
-        """返回此 env 模块附带的 agent skill 目录。
+    def get_agent_skills_dirs(cls) -> list[Path]:
+        """Return directories containing agent skills provided by this environment module.
 
-        Env 模块可以在自身目录下放置 agent skill，当 PersonAgent
-        初始化时会自动扫描并注册，使 agent 在该环境中获得特定认知能力。
+        This method enables environment modules to bundle specialized skills that agents
+        should use when operating within that environment. Skills are discovered by scanning
+        the returned directories for SKILL.md files.
 
-        约定（按优先级）：
-          1. 目录型模块（如 mobility_space/）→ ``<dir>/agent_skills/``
-          2. 单文件模块（如 economy_space.py）→ ``<stem>_agent_skills/``
+        **Default Discovery Convention:**
 
-        子类可重写此方法指定自定义路径。
+        The base implementation automatically discovers skills from:
+
+        1. Package modules (e.g., ``mobility_space/__init__.py``):
+           Scans ``<module_dir>/agent_skills/`` directory.
+
+        2. Single-file modules (e.g., ``economy_space.py``):
+           Scans ``<module_dir>/<stem>_agent_skills/`` directory.
+
+        **Override for Custom Paths:**
+
+        Subclasses can override this method to specify custom skill directories:
+
+        ```python
+        @classmethod
+        def get_agent_skills_dirs(cls) -> list[Path]:
+            from pathlib import Path
+            # Point to a shared skills directory
+            skills_dir = Path(__file__).parent.parent / "skills"
+            return [skills_dir] if skills_dir.is_dir() else []
+        ```
+
+        **Skill Directory Structure:**
+
+        Each skill directory should contain subdirectories with SKILL.md files:
+
+        ```
+        agent_skills/
+        ├── navigation/
+        │   ├── SKILL.md          # Required: skill definition with YAML frontmatter
+        │   └── scripts/          # Optional: executable scripts
+        └── spatial_reasoning/
+            └── SKILL.md
+        ```
+
+        Returns:
+            List of Path objects pointing to directories containing skill subdirectories.
+            Empty list if no skills are provided.
         """
         import inspect
         module_file = Path(inspect.getfile(cls))
         parent = module_file.parent
-        # 单文件模块：economy_space.py → economy_space_agent_skills/
+        dirs: list[Path] = []
+
+        # Single-file module: economy_space.py → economy_space_agent_skills/
         stem_dir = parent / f"{module_file.stem}_agent_skills"
         if stem_dir.is_dir():
-            return stem_dir
-        # 目录型模块：mobility_space/ → mobility_space/agent_skills/
+            dirs.append(stem_dir)
+
+        # Package module: mobility_space/ → mobility_space/agent_skills/
         pkg_dir = parent / "agent_skills"
-        return pkg_dir if pkg_dir.is_dir() else None
+        if pkg_dir.is_dir():
+            dirs.append(pkg_dir)
+
+        return dirs
+
+    def get_default_skill(self) -> str | None:
+        """Return the default skill that should be auto-activated for agents in this environment.
+
+        When PersonAgent initializes within an environment, it automatically activates
+        the specified skill. This allows environments to override the default
+        observation-needs-cognition-plan decision flow with specialized behavior.
+
+        **Use Cases:**
+
+        - Game/experiment environments requiring specific decision protocols
+        - Domain-specific environments with specialized reasoning patterns
+        - Tutorial or guided scenarios with constrained agent behavior
+
+        **Example:**
+
+        ```python
+        def get_default_skill(self) -> str | None:
+            return "public-goods-experiment"  # Auto-activate experiment skill
+        ```
+
+        **Note:** The skill must be available (either built-in or discovered via
+        :meth:`get_agent_skills_dirs`). If the skill is not found, a warning is logged
+        and the agent uses the default skill set.
+
+        Returns:
+            Skill name to auto-activate, or None for default behavior.
+        """
+        return None
 
     async def init(self, start_datetime: datetime):
         """

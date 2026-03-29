@@ -366,11 +366,8 @@ def _ensure_custom_scanned(reg) -> None:
 
 def _ensure_env_skills_scanned(reg) -> None:
     """扫描已注册环境模块附带的 agent skill 到全局 registry。"""
-    try:
-        from agentsociety2.registry import get_registered_env_modules
-        for _module_type, env_class in get_registered_env_modules():
-            skills_dir = env_class.get_agent_skills_dir()
-            if skills_dir and skills_dir.is_dir():
+    from agentsociety2.registry import get_registered_env_modules
+    for _module_type, env_class in get_registered_env_modules():
+        for skills_dir in env_class.get_agent_skills_dirs():
+            if skills_dir.is_dir():
                 reg.scan_env_skills(skills_dir, env_class.__name__)
-    except Exception:
-        pass

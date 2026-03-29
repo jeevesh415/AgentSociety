@@ -1,6 +1,7 @@
 """
-分析模块通用工具。分析相关 LLM 输出统一使用 XML 格式解析；
-为 generate_paper 工具提供 parse_llm_json_response。
+分析模块工具：路径、`instruction_md` 发现、SQLite schema、LLM XML/报告解析。
+
+行为与目录约定见同包 `README.md`。
 """
 
 import re
@@ -44,13 +45,13 @@ class XmlParseError(Exception):
         self.raw_content = raw_content
 
 
-_SKILLS_DIR = Path(__file__).resolve().parent / "skills"
+_INSTRUCTION_MD_DIR = Path(__file__).resolve().parent / "instruction_md"
 T = TypeVar("T", bound=BaseModel)
 
 
 @dataclass(frozen=True)
 class AnalysisSkillMeta:
-    """Analysis prompt-skill metadata used for explicit selection."""
+    """`instruction_md/*.md` 条目的元数据（供按名筛选并注入 LLM 系统上下文）。"""
 
     name: str
     priority: int
@@ -152,16 +153,24 @@ def _parse_skill_frontmatter(path: Path) -> Dict[str, Any]:
     return result
 
 
-def list_analysis_skills() -> List[AnalysisSkillMeta]:
-    """Discover analysis prompt-skills and return metadata only.
+def _strip_md_frontmatter(text: str) -> str:
+    """去掉 YAML frontmatter，只保留注入 LLM 的正文。"""
+    lines = text.strip().splitlines()
+    if not lines or lines[0].strip() != "---":
+        return text.strip()
+    for i in range(1, len(lines)):
+        if lines[i].strip() == "---":
+            return "\n".join(lines[i + 1 :]).strip()
+    return text.strip()
 
-    This function is metadata-only and does not load full markdown skill bodies.
-    """
+
+def list_analysis_skills() -> List[AnalysisSkillMeta]:
+    """扫描 `instruction_md/` 下 Markdown，返回元数据（不读取正文）。"""
     result: List[AnalysisSkillMeta] = []
-    if not _SKILLS_DIR.exists():
+    if not _INSTRUCTION_MD_DIR.exists():
         return result
 
-    for idx, path in enumerate(sorted(_SKILLS_DIR.glob("*.md"))):
+    for idx, path in enumerate(sorted(_INSTRUCTION_MD_DIR.glob("*.md"))):
         meta = _parse_skill_frontmatter(path)
         name = meta.get("name") or path.stem
         priority = int(meta.get("priority", idx + 1))
@@ -185,11 +194,10 @@ def get_analysis_skills(
     selected_names: Optional[List[str]] = None,
     strict_selection: bool = True,
 ) -> str:
-    """Load selected analysis prompt-skills.
+    """加载选中的 `instruction_md/*.md` 全文并拼接为 LLM 上下文片段。
 
-    strict_selection=True means only explicitly selected skills will be loaded.
-    Required skills are ALWAYS loaded regardless of selection.
-    If no skills are selected and no required skills exist, returns empty string.
+    strict_selection=True：仅加载 required 条目 + 显式点名的条目。
+    标记为 required 的片段始终会加载。
     """
     metas = list_analysis_skills()
     if not metas:
@@ -226,9 +234,10 @@ def get_analysis_skills(
 
     parts: List[str] = []
     for m in unique_targets:
-        txt = m.path.read_text(encoding="utf-8").strip()
-        if txt:
-            parts.append(txt)
+        raw = m.path.read_text(encoding="utf-8")
+        body = _strip_md_frontmatter(raw).strip()
+        if body:
+            parts.append(body)
     return "\n\n---\n\n".join(parts).strip()
 
 
@@ -280,10 +289,17 @@ def _parse_xml_to_root(xml_str: str) -> ET.Element:
 
 
 def parse_llm_xml_response(content: str, root_tag: str = "result") -> Dict[str, Any]:
-    """
-    解析 LLM 返回的 XML，转为 dict。
-    解析失败抛出 XmlParseError，供调用方捕获并触发 LLM 重试。
-    root_tag: 根标签名，用于提取顶层 dict（若根为 <judgment>，则取其子节点为 dict）。
+    """解析 LLM 返回的 XML 为字典。
+
+    Args:
+        content: LLM 返回的原始内容（可包含 ```xml 代码块）
+        root_tag: 根标签名，用于提取顶层 dict
+
+    Returns:
+        解析后的字典
+
+    Raises:
+        XmlParseError: XML 解析失败
     """
     xml_str = _extract_xml_from_content(content)
     if not xml_str:
@@ -345,9 +361,9 @@ def parse_llm_json_response(content: str) -> Dict[str, Any]:
 
 
 def parse_llm_report_response(content: str) -> Dict[str, str]:
-    """解析报告类 LLM 输出（XML 格式），仅支持双语 tag 结构。
+    """解析报告类 LLM 输出（XML 格式，双语）。
 
-    双语格式（优先）::
+    格式::
         <report>
           <markdown_zh><![CDATA[...]]></markdown_zh>
           <html_zh><![CDATA[...]]></html_zh>
@@ -357,7 +373,7 @@ def parse_llm_report_response(content: str) -> Dict[str, str]:
 
     Returns dict with keys: markdown_zh, html_zh, markdown_en, html_en, markdown, html.
 
-    - 缺少必须的双语字段（至少 markdown_zh/markdown_en + html_zh/html_en）：抛出 XmlParseError。
+    - 缺少必须的字段（至少 markdown_zh/markdown_en + html_zh/html_en）：抛出 XmlParseError。
     """
     raw = (content or "").strip()
     if not raw:
@@ -381,10 +397,17 @@ def parse_llm_report_response(content: str) -> Dict[str, str]:
     html_zh = _text("html_zh")
     md_en = _text("markdown_en")
     html_en = _text("html_en")
+
     if not md_zh and not md_en:
-        raise XmlParseError("Report must include markdown_zh or markdown_en", raw_content=content)
+        raise XmlParseError(
+            "Report must include markdown_zh or markdown_en",
+            raw_content=content
+        )
     if not html_zh and not html_en:
-        raise XmlParseError("Report must include html_zh or html_en", raw_content=content)
+        raise XmlParseError(
+            "Report must include html_zh or html_en",
+            raw_content=content
+        )
 
     return {
         "markdown_zh": md_zh,
@@ -399,6 +422,11 @@ def parse_llm_report_response(content: str) -> Dict[str, str]:
 # ---------- 先读结构再处理：DB schema 与实验文件 ----------
 
 
+def _quote_identifier(name: str) -> str:
+    """安全引用 SQLite 标识符（表名、列名）。"""
+    return '"' + str(name).replace('"', '""') + '"'
+
+
 def extract_database_schema(db_path: Path) -> Dict[str, Any]:
     """提取 SQLite 表结构；先查 sqlite_master 再按表取 PRAGMA。"""
     if not db_path or not db_path.exists():
@@ -411,7 +439,7 @@ def extract_database_schema(db_path: Path) -> Dict[str, Any]:
     tables = cursor.fetchall()
     schema = {}
     for (table_name,) in tables:
-        cursor.execute(f"PRAGMA table_info({table_name})")
+        cursor.execute(f"PRAGMA table_info({_quote_identifier(table_name)})")
         columns = cursor.fetchall()
         schema[table_name] = [
             {
@@ -447,7 +475,7 @@ def format_database_schema_markdown(
         cursor = conn.cursor()
         lines.append("### Table Row Counts")
         for table_name in schema:
-            cursor.execute(f"SELECT COUNT(*) FROM {table_name}")
+            cursor.execute(f"SELECT COUNT(*) FROM {_quote_identifier(table_name)}")
             count = cursor.fetchone()[0]
             lines.append(f"- `{table_name}`: {count} rows")
         conn.close()

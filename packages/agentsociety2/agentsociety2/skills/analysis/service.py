@@ -1,4 +1,4 @@
-"""分析子智能体编排：Analyzer（单实验）、Synthesizer（多实验综合）。"""
+"""编排层：单实验 `Analyzer`、多实验 `Synthesizer`、统一入口 `run_analysis_workflow`。"""
 
 import json
 import re
@@ -32,8 +32,8 @@ from .models import (
     FILE_SYNTHESIS_REPORT_PREFIX,
 )
 from .agents import AnalysisAgent
-from .report_generator import Reporter, AssetProcessor
-from .prompts import judgment_prompt, report_xml_instruction
+from .output import EDAGenerator, Reporter, AssetProcessor
+from .llm_contracts import judgment_prompt, report_xml_instruction
 from .utils import (
     XmlParseError,
     parse_llm_xml_response,
@@ -161,20 +161,13 @@ class Analyzer:
         if db_path and (eda_profile_path is None or eda_sweetviz_path is None):
             data_dir = pres.output_dir / DIR_DATA
             data_dir.mkdir(parents=True, exist_ok=True)
+            eda_gen = EDAGenerator(self.config)
             if eda_profile_path is None:
-                from .eda import generate_eda_profile
-
-                eda_profile_path = generate_eda_profile(
-                    db_path, data_dir, config=self.config
-                )
+                eda_profile_path = eda_gen.generate_ydata_profile(db_path, data_dir)
                 if eda_profile_path:
                     self.logger.info("EDA 概览备选生成: %s", eda_profile_path)
             if eda_sweetviz_path is None:
-                from .eda import generate_sweetviz_profile
-
-                eda_sweetviz_path = generate_sweetviz_profile(
-                    db_path, data_dir, config=self.config
-                )
+                eda_sweetviz_path = eda_gen.generate_sweetviz_profile(db_path, data_dir)
                 if eda_sweetviz_path:
                     self.logger.info("Sweetviz EDA 概览备选生成: %s", eda_sweetviz_path)
 
@@ -183,9 +176,7 @@ class Analyzer:
 
         quick_stats_md = None
         if db_path:
-            from .eda import generate_quick_stats
-
-            quick_stats_md = generate_quick_stats(db_path, config=self.config)
+            quick_stats_md = EDAGenerator(self.config).generate_quick_stats(db_path)
 
         await progress("Writing report...")
         reporter = Reporter(agent=self.agent, config=self.config)
@@ -200,6 +191,12 @@ class Analyzer:
             quick_stats_md=quick_stats_md,
             data_summary=data_analysis_result.get("data_summary"),
             on_progress=on_progress,
+        )
+
+        self.logger.info(
+            "报告生成完成: report_complete=%s, files=%s",
+            report_complete,
+            list(generated_files.keys()),
         )
 
         if eda_profile_path:
