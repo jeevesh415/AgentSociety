@@ -209,38 +209,109 @@ class EDAGenerator:
         output_dir: Path,
         max_rows: int = 10000,
     ) -> Optional[Path]:
-        """生成 ydata-profiling EDA 报告"""
+        """生成 ydata-profiling EDA 报告
+
+        为所有非空表生成 EDA 报告，合并为一个 HTML 文件。
+        如果只有一张表，直接生成单表报告；多张表则生成索引页面。
+        """
         if not db_path.exists():
             return None
 
         from .data import DataReader
         reader = DataReader(db_path)
+        schema = reader.read_schema()
         sample = reader.read_sample_data(limit=max_rows)
 
         if not sample:
             return None
 
-        # 取第一个有数据的表
-        first_table = next(iter(sample.keys()))
-        df = pd.DataFrame(sample[first_table])
+        # 过滤出有数据的表
+        non_empty_tables = {
+            t: data for t, data in sample.items()
+            if data and len(data) > 0
+        }
 
-        if df.empty:
+        if not non_empty_tables:
             return None
+
+        output_dir.mkdir(parents=True, exist_ok=True)
 
         try:
             from ydata_profiling import ProfileReport
 
-            output_dir.mkdir(parents=True, exist_ok=True)
-            out_file = output_dir / "eda_profile.html"
+            if len(non_empty_tables) == 1:
+                # 单表：直接生成报告
+                table_name = next(iter(non_empty_tables.keys()))
+                df = pd.DataFrame(non_empty_tables[table_name])
+                out_file = output_dir / "eda_profile.html"
+                profile = ProfileReport(df, title=f"EDA: {table_name}", minimal=True)
+                profile.to_file(str(out_file))
+                self.logger.info("生成 ydata-profiling 报告: %s (表: %s, %d 行)", out_file, table_name, len(df))
+                return out_file
 
-            profile = ProfileReport(df, title=f"EDA: {first_table}", minimal=True)
-            profile.to_file(str(out_file))
+            # 多表：为每张表生成独立报告，并创建索引页
+            generated_files = []
+            for table_name, data in non_empty_tables.items():
+                df = pd.DataFrame(data)
+                if df.empty:
+                    continue
+                # 每张表的报告文件名
+                safe_name = "".join(c if c.isalnum() or c in "_-" else "_" for c in table_name)
+                table_file = output_dir / f"eda_profile_{safe_name}.html"
+                try:
+                    profile = ProfileReport(df, title=f"EDA: {table_name}", minimal=True)
+                    profile.to_file(str(table_file))
+                    generated_files.append((table_name, table_file.name, len(df)))
+                    self.logger.info("生成 ydata-profiling 表报告: %s (表: %s, %d 行)", table_file, table_name, len(df))
+                except Exception as e:
+                    self.logger.warning("生成表 %s 的 EDA 报告失败: %s", table_name, e)
 
-            self.logger.info("生成 ydata-profiling 报告: %s", out_file)
-            return out_file
+            if not generated_files:
+                return None
+
+            # 创建索引页面
+            index_file = output_dir / "eda_profile.html"
+            index_content = self._build_eda_index_html(generated_files, "ydata-profiling")
+            index_file.write_text(index_content, encoding="utf-8")
+            self.logger.info("生成 EDA 索引页: %s (%d 张表)", index_file, len(generated_files))
+            return index_file
+
         except Exception as e:
             self.logger.debug("ydata-profiling 生成失败: %s", e)
             return None
+
+    def _build_eda_index_html(self, table_files: List[Tuple[str, str, int]], tool_name: str) -> str:
+        """构建 EDA 索引页面 HTML"""
+        rows = "\n".join(
+            f'<tr><td><a href="{filename}">{name}</a></td><td>{rows}</td></tr>'
+            for name, filename, rows in table_files
+        )
+        return f"""<!DOCTYPE html>
+<html>
+<head>
+    <meta charset="utf-8">
+    <title>EDA Reports Index</title>
+    <style>
+        body {{ font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif; margin: 40px; }}
+        h1 {{ color: #333; }}
+        table {{ border-collapse: collapse; width: 100%; max-width: 600px; margin-top: 20px; }}
+        th, td {{ border: 1px solid #ddd; padding: 12px; text-align: left; }}
+        th {{ background-color: #f5f5f5; }}
+        tr:hover {{ background-color: #f9f9f9; }}
+        a {{ color: #1890ff; text-decoration: none; }}
+        a:hover {{ text-decoration: underline; }}
+        .info {{ color: #666; margin-top: 10px; }}
+    </style>
+</head>
+<body>
+    <h1>EDA Reports Index ({tool_name})</h1>
+    <p class="info">Click on a table name to view its EDA report.</p>
+    <table>
+        <tr><th>Table</th><th>Rows</th></tr>
+{rows}
+    </table>
+</body>
+</html>"""
 
     def generate_sweetviz_profile(
         self,
@@ -248,35 +319,76 @@ class EDAGenerator:
         output_dir: Path,
         max_rows: int = 10000,
     ) -> Optional[Path]:
-        """生成 Sweetviz EDA 报告"""
+        """生成 Sweetviz EDA 报告
+
+        为所有非空表生成 EDA 报告。
+        如果只有一张表，直接生成单表报告；多张表则生成索引页面。
+        """
         if not db_path.exists():
             return None
 
         from .data import DataReader
         reader = DataReader(db_path)
+        schema = reader.read_schema()
         sample = reader.read_sample_data(limit=max_rows)
 
         if not sample:
             return None
 
-        first_table = next(iter(sample.keys()))
-        df = pd.DataFrame(sample[first_table])
+        # 过滤出有数据的表
+        non_empty_tables = {
+            t: data for t, data in sample.items()
+            if data and len(data) > 0
+        }
 
-        if df.empty:
+        if not non_empty_tables:
             return None
+
+        output_dir.mkdir(parents=True, exist_ok=True)
 
         try:
             import sweetviz as sv
 
-            output_dir.mkdir(parents=True, exist_ok=True)
-            out_file = output_dir / "eda_sweetviz.html"
+            if len(non_empty_tables) == 1:
+                # 单表：直接生成报告
+                table_name = next(iter(non_empty_tables.keys()))
+                df = pd.DataFrame(non_empty_tables[table_name])
+                out_file = output_dir / "eda_sweetviz.html"
+                report = sv.analyze(df)
+                report.show_html(str(out_file), open_browser=False)
+                if out_file.exists():
+                    self.logger.info("生成 Sweetviz 报告: %s (表: %s, %d 行)", out_file, table_name, len(df))
+                    return out_file
+                return None
 
-            report = sv.analyze(df)
-            report.show_html(str(out_file), open_browser=False)
+            # 多表：为每张表生成独立报告，并创建索引页
+            generated_files = []
+            for table_name, data in non_empty_tables.items():
+                df = pd.DataFrame(data)
+                if df.empty:
+                    continue
+                # 每张表的报告文件名
+                safe_name = "".join(c if c.isalnum() or c in "_-" else "_" for c in table_name)
+                table_file = output_dir / f"eda_sweetviz_{safe_name}.html"
+                try:
+                    report = sv.analyze(df)
+                    report.show_html(str(table_file), open_browser=False)
+                    if table_file.exists():
+                        generated_files.append((table_name, table_file.name, len(df)))
+                        self.logger.info("生成 Sweetviz 表报告: %s (表: %s, %d 行)", table_file, table_name, len(df))
+                except Exception as e:
+                    self.logger.warning("生成表 %s 的 Sweetviz 报告失败: %s", table_name, e)
 
-            if out_file.exists():
-                self.logger.info("生成 Sweetviz 报告: %s", out_file)
-                return out_file
+            if not generated_files:
+                return None
+
+            # 创建索引页面
+            index_file = output_dir / "eda_sweetviz.html"
+            index_content = self._build_eda_index_html(generated_files, "Sweetviz")
+            index_file.write_text(index_content, encoding="utf-8")
+            self.logger.info("生成 Sweetviz EDA 索引页: %s (%d 张表)", index_file, len(generated_files))
+            return index_file
+
         except Exception as e:
             self.logger.debug("Sweetviz 生成失败: %s", e)
 

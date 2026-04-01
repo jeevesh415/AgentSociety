@@ -35,6 +35,9 @@ const DEFAULT_VALUES: ConfigValues = {
   nanoLlmApiKey: '',
   nanoLlmApiBase: '',
   nanoLlmModel: 'qwen3-next-80b-a3b-instruct',
+  analysisLlmApiKey: '',
+  analysisLlmApiBase: '',
+  analysisLlmModel: 'glm-5',
   embeddingApiKey: '',
   embeddingApiBase: '',
   embeddingModel: 'bge-m3',
@@ -73,6 +76,7 @@ export const ConfigPageApp: React.FC<ConfigPageAppProps> = ({ vscode }) => {
     default: { validating: false, valid: null, error: null },
     coder: { validating: false, valid: null, error: null },
     nano: { validating: false, valid: null, error: null },
+    analysis: { validating: false, valid: null, error: null },
     embedding: { validating: false, valid: null, error: null },
     easypaperVlm: { validating: false, valid: null, error: null },
     python: { validating: false, valid: null, error: null },
@@ -92,8 +96,8 @@ export const ConfigPageApp: React.FC<ConfigPageAppProps> = ({ vscode }) => {
       return;
     }
 
-    // For coder/nano/embedding, check if default LLM config is filled in the form
-    if (['coder', 'nano', 'embedding'].includes(llmType)) {
+    // For coder/nano/analysis/embedding, check if default LLM config is filled in the form
+    if (['coder', 'nano', 'analysis', 'embedding'].includes(llmType)) {
       if (!values.llmApiKey) {
         notification.warning({
           message: t('configPage.validationFailed'),
@@ -376,6 +380,22 @@ export const ConfigPageApp: React.FC<ConfigPageAppProps> = ({ vscode }) => {
                 {validationState.nano.error && <Alert type="error" message={validationState.nano.error} style={{ marginBottom: 8 }} />}
                 {validationState.nano.valid && <Alert type="success" message="验证成功" style={{ marginBottom: 8 }} />}
                 <Button size="small" icon={<CheckCircleOutlined />} onClick={() => handleValidate('nano')} loading={validationState.nano?.validating}>验证</Button>
+              </Card>
+
+              {/* 分析 LLM */}
+              <Card size="small" title="数据分析 LLM（洞察生成、报告撰写）" style={{ marginBottom: 12 }}>
+                <Form.Item name="analysisLlmApiKey" label="API 密钥">
+                  <Input.Password placeholder="留空使用默认" autoComplete="off" />
+                </Form.Item>
+                <Form.Item name="analysisLlmApiBase" label="API URL">
+                  <Input placeholder="留空使用默认" />
+                </Form.Item>
+                <Form.Item name="analysisLlmModel" label="模型">
+                  <Input placeholder="建议使用较强模型" />
+                </Form.Item>
+                {validationState.analysis?.error && <Alert type="error" message={validationState.analysis.error} style={{ marginBottom: 8 }} />}
+                {validationState.analysis?.valid && <Alert type="success" message="验证成功" style={{ marginBottom: 8 }} />}
+                <Button size="small" icon={<CheckCircleOutlined />} onClick={() => handleValidate('analysis')} loading={validationState.analysis?.validating}>验证</Button>
               </Card>
 
               {/* Embedding */}

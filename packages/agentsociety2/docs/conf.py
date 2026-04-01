@@ -8,11 +8,11 @@ from datetime import datetime
 # -- Project information -----------------------------------------------------
 # https://www.sphinx-doc.org/en/master/usage/configuration.html#project-information
 
-project = 'AgentSociety 2'
+project = "AgentSociety 2"
 copyright = f'{datetime.now().year}, FIBLAB'
 author = 'AgentSociety Team'
-release = '2.0.0'
-version = '2.0.0'
+release = "2.0.0"
+version = "2.0.0"
 
 # -- General configuration ---------------------------------------------------
 # https://www.sphinx-doc.org/en/master/usage/configuration.html#general-configuration

@@ -74,7 +74,11 @@ def _llm_content_to_parsed_json(content: str) -> Any:
 
 
 def _is_rate_limit_like_error(error: Exception) -> bool:
-    """Check if the error is a rate-limit related exception."""
+    """判断异常是否“类似速率限制”。
+
+    :param error: 捕获到的异常对象。
+    :returns: 若可判定为 429/无可用 deployment 等限流相关错误则返回 ``True``。
+    """
     if isinstance(error, (RateLimitError, RouterRateLimitError)):
         return True
     # Fallback for version differences where RouterRateLimitError class is not importable.
@@ -170,14 +174,10 @@ class AgentBase(ABC):
     ):
         """初始化 Agent 实例。
 
-        Args:
-            id: 智能体唯一标识符。
-            profile: 智能体画像对象，可以是 dict 或任意可解析类型。
-                Agent 子类应负责解析 profile 到自身属性。
-            name: 可选显示名称。如未提供，则从 profile["name"] 或
-                "Agent_{id}" 自动推导。
-            replay_writer: 可选的 ReplayWriter，用于存储仿真状态。
-                也可通过 set_replay_writer() 后续设置。
+        :param id: 智能体唯一标识符。
+        :param profile: 智能体画像对象（dict 或任意可解析类型）。子类应负责把 profile 解析为自身状态。
+        :param name: 可选显示名称；为空时按 ``profile["name"]`` 或 ``Agent_{id}`` 推导。
+        :param replay_writer: 可选回放写入器（也可后续通过 :meth:`set_replay_writer` 注入）。
         """
         self._id = id
         self._profile = profile
@@ -202,19 +202,12 @@ class AgentBase(ABC):
 
     @classmethod
     def mcp_description(cls) -> str:
-        """
-        Return a description text for MCP agent module candidate list.
-        Includes parameter descriptions.
+        """返回用于 MCP 候选列表展示的描述文本（Markdown）。
 
-        Returns:
-            A string description of the agent class for MCP registration.
+        :returns: Markdown 文本，通常包含类简介、初始化参数说明与示例配置。
 
-        Format:
-            The description uses Markdown format with the following structure:
-            - Class name and brief description
-            - Detailed description section
-            - Initialization parameters
-            - Example config or JSON schema (if applicable)
+        .. note::
+           该返回值的目标受众是“工具/模块发现界面”，因此采用 Markdown 而非 reST。
         """
         # Check if this is the base class being called directly
         if cls is AgentBase:

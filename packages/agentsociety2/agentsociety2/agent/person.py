@@ -1,7 +1,13 @@
-"""PersonAgent — 每个 Person 就是一个独立的 Claude-like tool-using agent。
+"""PersonAgent：skills-first 的工具代理实现。
 
-每个 agent 拥有独立工作区、独立会话线程，通过 skill catalog + 工具调用自主完成任务。
-skill 作者只需要写 SKILL.md（+ 可选脚本），无需了解 PersonAgent 内部。
+该模块的核心类是 :class:`~agentsociety2.agent.person.PersonAgent`，它将每个 Person 视作一个拥有：
+
+- **独立工作区**：每个 agent 的文件与日志隔离在自身 workspace；
+- **独立会话线程**：通过 thread_messages 维护短上下文，并在必要时做摘要压缩；
+- **渐进式 skill 发现**：模型先看到 skill catalog（名称+摘要），再通过 ``activate_skill`` 加载完整指令；
+- **工具循环**：每个 step 内循环产出 ``ToolDecision``，执行工具并回写 ``TOOL_RESULT_JSON``，直到 done。
+
+Skill 作者通常只需要提供 ``SKILL.md``（以及可选脚本），无需理解 PersonAgent 内部实现细节。
 """
 
 from __future__ import annotations
@@ -121,19 +127,18 @@ class PersonAgent(AgentBase):
     ):
         """初始化 PersonAgent。
 
-        Args:
-            id: Agent 唯一标识。
-            profile: 画像对象（dict 或可序列化对象）。
-            name: 可选显示名。
-            replay_writer: 可选回放写入器。
-            init_state: 初始状态。
-            **capability_kwargs: 含 ``max_tool_rounds`` 等；与 workspace 相关的可选项：
-                ``preload_workspace_paths`` — 相对工作区路径列表，注入 system prompt 的预载快照；
-                ``thread_key_state_paths`` — thread 压缩时写入 KEY_STATE_JSON 的路径列表；
-                ``catalog_working_set_json`` — 若设置（如 ``\"working_set.json\"``），用于带 ``paths`` 的 skill
-                的目录可见性匹配；不设则不做基于文件的 paths 过滤（有 patterns 时视为全部可见）。
-                ``system_prompt_max_identity_chars`` — ``# Agent Identity`` 中 JSON 总长度上限（默认 10000），
-                超出时截断 ``profile`` 字段，避免超大画像撑爆上下文。
+        :param id: Agent 唯一标识。
+        :param profile: 画像对象（dict 或可序列化对象）。
+        :param name: 可选显示名。
+        :param replay_writer: 可选回放写入器。
+        :param init_state: 可选初始状态（会写入 workspace，默认不覆盖已存在文件）。
+        :param capability_kwargs: 行为/能力参数（节选）：
+
+            - ``max_tool_rounds``：单步最大工具轮数（默认 24）
+            - ``preload_workspace_paths``：预读文件列表（注入 system prompt 的 workspace 快照）
+            - ``thread_key_state_paths``：thread 压缩时附带的 KEY_STATE_JSON 文件路径列表
+            - ``catalog_working_set_json``：用于 skill 的 ``paths`` 匹配信号文件（如 ``working_set.json``）
+            - ``system_prompt_max_identity_chars``：Agent Identity JSON 总长度上限（默认 10000）
         """
         super().__init__(id=id, profile=profile, name=name, replay_writer=replay_writer)
         self._agent_state: dict[str, Any] = self._coerce_llm_dict(init_state)
@@ -314,10 +319,19 @@ class PersonAgent(AgentBase):
     # ── System Prompt ──────────────────────────────────────────────────────────
 
     def get_system_prompt(self, tick: int, t: datetime) -> str:
-        """Build the system prompt for the current step.
+        """构建本步 system prompt（在 :class:`~agentsociety2.agent.base.AgentBase` 基础上扩展）。
 
-        Includes world description (when available), agent identity, tool specs,
-        a skill catalog (progressive disclosure), and activated skills.
+        该 prompt 主要注入：
+
+        - world description（若环境提供）
+        - agent identity（含 profile，带长度上限保护）
+        - 工具协议与工具表
+        - skill catalog（渐进披露）
+        - 已激活技能列表
+
+        :param tick: 当前仿真步时间跨度（秒）。
+        :param t: 当前仿真时间。
+        :returns: system prompt 文本。
         """
         base = super().get_system_prompt(tick, t)
 
@@ -776,7 +790,12 @@ class PersonAgent(AgentBase):
     ) -> dict[str, Any]:
         """在 agent workspace 执行 bash 命令并施加安全限制。
 
-        限制包括：禁止绝对路径、禁止父目录遍历、危险 token 黑名单、超时终止。
+        :param command: bash 命令（在 workspace 根目录执行）。
+        :param timeout_sec: 超时秒数。
+        :returns: ``{ok, exit_code, stdout, stderr}``。
+
+        .. note::
+           这里的护栏是“轻量”的：主要避免越界路径与明显危险 token。
         """
         command = command.strip()
         if not command:
@@ -840,7 +859,13 @@ class PersonAgent(AgentBase):
     async def _run_codegen(
         self, instruction: str, ctx: dict[str, Any], template_mode: bool
     ) -> dict[str, Any]:
-        """调用环境路由器执行 codegen 指令。"""
+        """调用环境路由器执行 codegen 指令。
+
+        :param instruction: 指令文本。
+        :param ctx: 上下文对象（会与 agent identity overlay 合并）。
+        :param template_mode: 是否启用模板模式（由 RouterBase 决定如何解释指令）。
+        :returns: ``{ok, stdout, stderr, ctx?}``。
+        """
         if self._env is None:
             return {"ok": False, "stdout": "", "stderr": "environment not initialized"}
         if not instruction.strip():
@@ -1973,12 +1998,9 @@ class PersonAgent(AgentBase):
     async def execute(self, skill_name: str, args: dict[str, Any]) -> dict[str, Any]:
         """执行技能（转发到 runtime/registry）。
 
-        Args:
-            skill_name: 技能名称。
-            args: 技能参数。
-
-        Returns:
-            执行结果字典。
+        :param skill_name: 技能名称。
+        :param args: 技能参数。
+        :returns: 执行结果字典。
         """
         return await self._skill_runtime.execute(skill_name=skill_name, args=args)
 
@@ -1992,12 +2014,9 @@ class PersonAgent(AgentBase):
         4. 执行工具循环
         5. 持久化会话状态和回放记录
 
-        Args:
-            tick: 当前仿真步的时间尺度（秒）。
-            t: 当前仿真时间。
-
-        Returns:
-            工具执行日志的拼接字符串，如无操作返回 "no-action"。
+        :param tick: 当前仿真步时间跨度（秒）。
+        :param t: 当前仿真时间。
+        :returns: 工具执行日志拼接字符串；如无操作返回 ``"no-action"``。
         """
         self._step_count += 1
         # 每步重新进入自由工具选择，避免上一步 skill 的 allowed-tools 作用域跨步泄漏。
@@ -2034,14 +2053,23 @@ class PersonAgent(AgentBase):
         return " | ".join(logs)
 
     async def ask(self, message: str, readonly: bool = True) -> str:
-        """通过环境路由器问答；须已 ``init(env)``。"""
+        """通过环境路由器问答（须已 :meth:`init`）。
+
+        :param message: 问题文本。
+        :param readonly: 是否只读（只读时应避免改变环境状态）。
+        :returns: 环境/系统返回的答案文本。
+        :raises RuntimeError: 未初始化环境时抛出。
+        """
         if self._env is None:
             raise RuntimeError("PersonAgent.ask requires an initialized environment")
         _, answer = await self.ask_env({"id": self.id}, message, readonly=readonly)
         return answer
 
     async def dump(self) -> dict:
-        """导出最小运行状态快照（用于外部持久化/调试）。"""
+        """导出最小运行状态快照（用于外部持久化/调试）。
+
+        :returns: 可序列化字典。
+        """
         return {
             "id": self.id,
             "name": self._name,
@@ -2051,6 +2079,9 @@ class PersonAgent(AgentBase):
         }
 
     async def load(self, dump_data: dict):
-        """从 `dump` 结果恢复轻量运行状态。"""
+        """从 :meth:`dump` 结果恢复轻量运行状态。
+
+        :param dump_data: dump 数据。
+        """
         self._step_count = int(dump_data.get("step_count", 0))
         self._last_selected_skills = set(dump_data.get("last_selected_skills", []))

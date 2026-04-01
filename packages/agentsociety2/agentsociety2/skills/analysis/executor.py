@@ -130,37 +130,39 @@ class CodeExecutor:
         work_dir = Path(tempfile.mkdtemp(prefix="analysis_", dir=self.output_dir))
         files_before = {p for p in work_dir.rglob("*") if p.is_file()}
 
-        # 准备工作目录
-        db_filename = self._prepare_work_dir(work_dir, db_path, extra_files)
+        try:
+            # 准备工作目录
+            db_filename = self._prepare_work_dir(work_dir, db_path, extra_files)
 
-        # 构建 prompt
-        full_description = self._build_prompt(description, db_path, db_filename, extra_files)
+            # 构建 prompt
+            full_description = self._build_prompt(description, db_path, db_filename, extra_files)
 
-        # 迭代执行
-        messages = [{"role": "user", "content": full_description}]
-        max_retries = self.config.max_code_gen_retries
+            # 迭代执行
+            messages = [{"role": "user", "content": full_description}]
+            max_retries = self.config.max_code_gen_retries
 
-        for attempt in range(max_retries):
-            result = await self._generate_and_execute(
-                messages, work_dir, db_path, timeout, attempt
-            )
+            for attempt in range(max_retries):
+                result = await self._generate_and_execute(
+                    messages, work_dir, db_path, timeout, attempt
+                )
 
-            if result.success:
-                # 收集生成的文件
-                artifacts = self._collect_artifacts(work_dir, files_before)
-                result.artifacts = artifacts
-                shutil.rmtree(work_dir, ignore_errors=True)
-                return result
+                if result.success:
+                    # 收集生成的文件
+                    artifacts = self._collect_artifacts(work_dir, files_before)
+                    result.artifacts = artifacts
+                    return result
 
-            if not result.success and attempt < max_retries - 1:
-                # 添加错误反馈
-                messages.append({
-                    "role": "user",
-                    "content": self._build_error_feedback(result, attempt)
-                })
+                if not result.success and attempt < max_retries - 1:
+                    # 添加错误反馈
+                    messages.append({
+                        "role": "user",
+                        "content": self._build_error_feedback(result, attempt)
+                    })
 
-        shutil.rmtree(work_dir, ignore_errors=True)
-        return result
+            return result
+        finally:
+            # 确保临时目录总是被清理
+            shutil.rmtree(work_dir, ignore_errors=True)
 
     async def _generate_and_execute(
         self,

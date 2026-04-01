@@ -1,5 +1,12 @@
 from __future__ import annotations
 
+"""Agent 技能运行时（workspace + skill 执行）。
+
+该模块提供 :class:`~agentsociety2.agent.skills.runtime.AgentSkillRuntime`，用于把 PersonAgent 的
+“工作目录隔离、文件读写、thread/tool 日志、skill 激活与执行”等细节集中在一个组件内，
+避免 agent 主体过度膨胀。
+"""
+
 import json
 from collections import deque
 from datetime import datetime
@@ -23,6 +30,12 @@ class AgentSkillRuntime:
         self._agent_work_dir: Path | None = None
 
     def ensure_agent_work_dir(self, env_obj: Any) -> Path:
+        """确保 agent 工作目录已初始化并返回其路径。
+
+        :param env_obj: 通常为 env_router；若其包含 ``run_dir`` 属性则以其为基准目录，
+            否则退化为当前工作目录。
+        :returns: agent 工作目录路径（形如 ``<run_dir>/agents/agent_0001``）。
+        """
         if self._agent_work_dir is not None:
             return self._agent_work_dir
 
@@ -38,6 +51,7 @@ class AgentSkillRuntime:
         return self._agent_work_dir
 
     def _resolve_workspace_path(self, relative_path: str) -> Path:
+        """将相对路径解析到 workspace 内并做越界保护。"""
         if self._agent_work_dir is None:
             raise RuntimeError("Agent workspace is not initialized")
         work_dir = self._agent_work_dir
@@ -47,27 +61,41 @@ class AgentSkillRuntime:
         return target
 
     def workspace_root(self) -> Path:
+        """:returns: workspace 根目录路径。"""
         if self._agent_work_dir is None:
             raise RuntimeError("Agent workspace is not initialized")
         return self._agent_work_dir
 
     def workspace_read(self, relative_path: str) -> str:
+        """读取 workspace 内文件内容。
+
+        :param relative_path: 相对 workspace 的路径。
+        :returns: 文件文本内容；若文件不存在则返回空字符串。
+        """
         target = self._resolve_workspace_path(relative_path)
         if not target.exists() or not target.is_file():
             return ""
         return target.read_text(encoding="utf-8")
 
     def workspace_write(self, relative_path: str, content: str) -> str:
+        """写入 workspace 内文件（UTF-8）。
+
+        :param relative_path: 相对 workspace 的路径。
+        :param content: 写入内容。
+        :returns: 实际写入的绝对路径字符串。
+        """
         target = self._resolve_workspace_path(relative_path)
         target.parent.mkdir(parents=True, exist_ok=True)
         target.write_text(content, encoding="utf-8")
         return str(target)
 
     def workspace_exists(self, relative_path: str) -> bool:
+        """:returns: workspace 内路径是否存在。"""
         target = self._resolve_workspace_path(relative_path)
         return target.exists()
 
     def workspace_delete(self, relative_path: str) -> bool:
+        """删除 workspace 内文件（仅文件，目录不删除）。"""
         target = self._resolve_workspace_path(relative_path)
         if not target.exists() or target.is_dir():
             return False
@@ -75,6 +103,11 @@ class AgentSkillRuntime:
         return True
 
     def workspace_list(self, relative_path: str = ".") -> list[str]:
+        """列出 workspace 内文件（递归）。
+
+        :param relative_path: 相对 workspace 的根路径。
+        :returns: 文件相对路径列表（相对 workspace 根）。
+        """
         work_dir = self.workspace_root()  # raises RuntimeError if not initialized
         root = self._resolve_workspace_path(relative_path)
         if not root.exists():
@@ -98,6 +131,14 @@ class AgentSkillRuntime:
         args: dict[str, Any],
         codegen_executor: Callable[[dict[str, Any]], Awaitable[dict[str, Any]]] | None = None,
     ) -> dict[str, Any]:
+        """执行某个 skill（转发到 registry）。
+
+        :param skill_name: skill 名称。
+        :param args: 执行参数（由 skill 脚本/协议自行定义）。
+        :param codegen_executor: 可选。用于把 skill 内部的 codegen 调度回 env 的执行器。
+        :returns: 执行结果字典（由 :class:`~agentsociety2.agent.skills.SkillRegistry` 约定）。
+        :raises RuntimeError: workspace 未初始化时抛出。
+        """
         if self._agent_work_dir is None:
             raise RuntimeError("Agent workspace is not initialized")
         work_dir = self._agent_work_dir
@@ -115,6 +156,13 @@ class AgentSkillRuntime:
         selected_skills: set[str],
         activated_skills: set[str] | None = None,
     ) -> None:
+        """落地当前会话状态到 workspace，并追加到历史记录。
+
+        :param tick: 当前 tick。
+        :param t: 当前仿真时间。
+        :param selected_skills: 本步可见/可选技能集合。
+        :param activated_skills: 可选。已激活技能集合。
+        """
         state = {
             "agent_id": self._agent_id,
             "tick": tick,
@@ -129,6 +177,7 @@ class AgentSkillRuntime:
         self.append_session_state_event(state)
 
     def append_session_state_event(self, state: dict[str, Any]) -> None:
+        """追加 session_state 事件到 ``session_state_history.jsonl``。"""
         if self._agent_work_dir is None:
             raise RuntimeError("Agent workspace is not initialized")
         path = self._agent_work_dir / "session_state_history.jsonl"
@@ -190,6 +239,7 @@ class AgentSkillRuntime:
         return [json_repair.loads(line) for line in source]
 
     def append_thread_message(self, role: str, content: str, tick: int, t: datetime) -> None:
+        """追加 thread 消息到 ``thread_messages.jsonl``。"""
         if self._agent_work_dir is None:
             raise RuntimeError("Agent workspace is not initialized")
         path = self._agent_work_dir / "thread_messages.jsonl"
@@ -203,6 +253,7 @@ class AgentSkillRuntime:
             f.write(json.dumps(entry, ensure_ascii=False) + "\n")
 
     def read_recent_thread_messages(self, limit: int = 40) -> list[dict[str, str]]:
+        """读取最近 N 条 thread 消息并转换为 LLM messages 结构。"""
         if self._agent_work_dir is None:
             raise RuntimeError("Agent workspace is not initialized")
         path = self._agent_work_dir / "thread_messages.jsonl"

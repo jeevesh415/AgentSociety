@@ -317,7 +317,11 @@ class AnalysisConfig(BaseModel):
     )
     llm_profile_default: str = Field(
         default="default",
-        description="LLM profile for insight, report, strategy (non-code)",
+        description="LLM profile for simple tasks (fallback)",
+    )
+    llm_profile_analysis: str = Field(
+        default="analysis",
+        description="LLM profile for analysis, insight generation, and report writing. Use a capable model.",
     )
     llm_profile_coder: str = Field(
         default="coder",
@@ -325,6 +329,7 @@ class AnalysisConfig(BaseModel):
     )
     analysis_skill_names: List[str] = Field(
         default_factory=lambda: [
+            "tool_catalog",
             "subagent_workflow",
             "visualization_reliability",
             "core_skills",
@@ -349,6 +354,11 @@ class AnalysisConfig(BaseModel):
         if not path.exists():
             raise ValueError(f"Workspace path does not exist: {v}")
         return str(path.absolute())
+
+    model_config = ConfigDict(
+        arbitrary_types_allowed=True,
+        validate_assignment=True,
+    )
 
 
 class HypothesisSummary(BaseModel):

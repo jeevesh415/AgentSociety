@@ -151,26 +151,19 @@ def tool(
     description: str | None = None,
     kind: Literal["observe", "statistics"] | None = None,
 ) -> Callable[[F], F]:
-    """
-    Register a tool method to the environment module.
+    """将环境方法注册为可调用工具（供 Router/LLM 调用）。
 
-    Args:
-        readonly: If the tool is readonly. **Must be True when kind is 'observe' or 'statistics'.**
-        name: The name of the tool.
-        description: The description of the tool.
-        kind: The kind of tool. Can be "observe" (for observation functions that can accept
-            at most one parameter besides self, typically agent_id) or "statistics" (for
-            statistics functions that can only have self parameter). Default is None for
-            regular tools.
+    :param readonly: 是否只读。
+        当 ``kind`` 为 ``observe`` 或 ``statistics`` 时必须为 ``True``（运行时强校验）。
+    :param name: 可选。工具名（默认使用函数名）。
+    :param description: 可选。工具描述（用于模型函数调用 schema）。
+    :param kind: 可选。工具类型：
 
-            **Important**: When kind is 'observe' or 'statistics', readonly must be True.
-            This is enforced at runtime and will raise a ValueError if violated.
-
-    Returns:
-        The decorator function.
-
-    Raises:
-        ValueError: If kind is 'observe' or 'statistics' but readonly is False.
+        - ``observe``：观测工具（通常每步自动调用），除 ``self`` 外最多 1 个参数
+        - ``statistics``：统计工具，除 ``self`` 外不能有参数
+        - ``None``：普通工具
+    :returns: 装饰器函数。
+    :raises ValueError: ``kind`` 与 ``readonly``/参数签名不匹配时抛出。
     """
 
     def tool_decorator(func: F) -> F:
@@ -378,9 +371,7 @@ def _serialize_to_literal(value: Any) -> Any:
 
 
 class EnvMeta(type):
-    """
-    Metaclass: Automatically collect the methods decorated with @tool and register them to tool_manager
-    """
+    """元类：收集 ``@tool`` 装饰的方法并注册到 tool_manager。"""
 
     def __new__(cls, name, bases, namespace, **kwargs):
         new_class = super().__new__(cls, name, bases, namespace, **kwargs)
@@ -631,43 +622,38 @@ It contains no functions or methods.
         return None
 
     async def init(self, start_datetime: datetime):
-        """
-        Initialize the environment module.
+        """初始化环境模块。
+
+        :param start_datetime: 仿真起始时间。
         """
         self.t = start_datetime
 
     async def step(self, tick: int, t: datetime):
-        """
-        Run forward one step.
+        """推进环境模块一个仿真步。
 
-        - **Args**:
-            - tick: The number of ticks of this simulation step.
-            - t: The current datetime of the simulation after this step with the ticks.
+        :param tick: 本步时间跨度（秒）。
+        :param t: 本步结束后的仿真时间。
+        :raises NotImplementedError: 基类不提供默认实现。
         """
         raise NotImplementedError
 
     async def close(self):
-        """
-        Close the environment module.
-        """
+        """关闭环境模块并释放资源（可选重写）。"""
         ...
 
     # ---- Dump & Load ----
     def _dump_state(self) -> dict:
-        """
-        Hook for subclasses to dump internal state. Override if needed.
-        """
+        """子类钩子：导出内部状态（如需持久化请重写）。"""
         return {}
 
     def _load_state(self, state: dict):
-        """
-        Hook for subclasses to load internal state. Override if needed.
-        """
+        """子类钩子：加载内部状态（与 :meth:`_dump_state` 配对）。"""
         return None
 
     async def dump(self) -> dict:
-        """
-        Dump the environment module state to a serializable dict.
+        """序列化环境模块状态。
+
+        :returns: 可序列化字典，包含 ``name``、``t`` 与 ``state``。
         """
         return {
             "name": self.name,
@@ -676,8 +662,9 @@ It contains no functions or methods.
         }
 
     async def load(self, dump_data: dict):
-        """
-        Load the environment module state from a dict produced by dump().
+        """从 :meth:`dump` 的输出恢复环境模块状态。
+
+        :param dump_data: 由 :meth:`dump` 产生的字典。
         """
         try:
             t_str = dump_data.get("t")
@@ -693,37 +680,23 @@ It contains no functions or methods.
             self._load_state(state)
 
     def get_tool_call_history(self) -> list[dict[str, Any]]:
-        """
-        Get the tool call history for this environment module.
+        """获取工具调用历史（浅拷贝）。
 
-        Returns:
-            A list of call records, each containing:
-            - function_name: str
-            - kwargs: dict (serialized, unified kwargs dict including both positional and keyword arguments)
-            - return_value: Any (serialized, None if exception occurred)
-            - exception_occurred: bool
-            - exception_info: dict | None (type and message if exception occurred)
-            - timestamp: str (ISO format)
-
-        Note:
-            The kwargs dict contains all arguments (both positional and keyword) unified into
-            a single dict with parameter names as keys, according to the function signature.
+        :returns: 调用记录列表。每条包含 ``function_name``、``kwargs``、``return_value``、
+            ``exception_occurred``、``exception_info``、``timestamp``。
         """
         return self._tool_call_history.copy()
 
     def reset_tool_call_history(self):
-        """
-        Reset the tool call history for this environment module.
-        """
+        """清空工具调用历史。"""
         self._tool_call_history.clear()
 
     # ==================== Replay Data Methods ====================
 
     def set_replay_writer(self, writer: "ReplayWriter") -> None:
-        """Set the replay data writer for this environment module.
+        """设置回放写入器（用于自动建表与写入状态）。
 
-        Args:
-            writer: The ReplayWriter instance to use for storing replay data.
+        :param writer: :class:`~agentsociety2.storage.ReplayWriter` 实例。
         """
         self._replay_writer = writer
         if writer is not None and (

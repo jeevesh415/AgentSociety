@@ -456,7 +456,7 @@ class Synthesizer:
         self.temperature = self.config.temperature
 
         self.llm_router, self.model_name = get_llm_router_and_model(
-            self.config.llm_profile_default
+            self.config.llm_profile_analysis
         )
         self.agent = AnalysisAgent(
             config=self.config,

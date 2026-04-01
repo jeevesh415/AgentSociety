@@ -1,5 +1,6 @@
 """`AnalysisAgent`：数据优先、多阶段洞察 + ReAct 工具环 + 可视化与上下文压缩。"""
 
+import asyncio
 import shutil
 from datetime import datetime
 from pathlib import Path
@@ -64,6 +65,12 @@ class AnalysisAgent:
     3. 决定分析策略和可视化方案
     4. 执行数据分析代码
     5. 生成可视化图表
+
+    并发安全：
+    - 实例变量均为只读或不可变（config, workspace_path, llm_router, model_name）
+    - 每次分析调用创建独立的 AnalysisRunner、DataReader 等局部变量
+    - 临时目录通过 tempfile.mkdtemp 创建，互不干扰
+    - 可安全用于 asyncio 并发任务
     """
 
     def __init__(
@@ -83,8 +90,8 @@ class AnalysisAgent:
         self.workspace_path = workspace_path or Path.cwd()
         self.max_retries = max(1, min(20, config.max_analysis_retries))
 
-        # LLM 配置
-        profile = config.llm_profile_default
+        # LLM 配置：分析使用 analysis profile，代码生成使用 coder profile
+        profile = config.llm_profile_analysis
         if llm_router is None:
             self.llm_router, self.model_name = get_llm_router_and_model(profile)
         else:

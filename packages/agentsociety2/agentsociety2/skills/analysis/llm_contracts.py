@@ -78,9 +78,25 @@ def strategy_xml_contract() -> str:
 <strategy>
   <analysis_strategy>...</analysis_strategy>
   <tools_to_use>
-    <tool><tool_name>...</tool_name><tool_type>code_executor|eda_profile|eda_sweetviz|builtin</tool_type><action>...</action><parameters>{{}}</parameters></tool>
+    <tool><tool_name>...</tool_name><tool_type>code_executor|eda_profile|eda_sweetviz|read_file|write_file|list_directory|glob|search_file_content|literature_search|load_literature|write_todos|run_shell_command</tool_type><action>...</action><parameters>{{}}</parameters></tool>
   </tools_to_use>
-</strategy>"""
+</strategy>
+
+Available tool types (use based on analysis needs):
+- code_executor: Run Python code for custom analysis/visualization
+- eda_profile: Generate ydata-profiling EDA report
+- eda_sweetviz: Generate Sweetviz EDA report
+- read_file: Read file contents (for artifacts, logs)
+- write_file: Write content to file
+- list_directory: List directory contents
+- glob: Find files matching pattern
+- search_file_content: Search for patterns in files
+- literature_search: Search literature database (if context requires)
+- load_literature: Load literature index
+- write_todos: Create task list for complex workflows
+- run_shell_command: Execute shell commands
+
+Not all tools are needed. Choose wisely based on data and analysis context."""
 
 
 def adjust_tools_xml_contract() -> str:
