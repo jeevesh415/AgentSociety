@@ -181,7 +181,7 @@ AssetProcessor = AssetManager
 # ─────────────────────────────────────────────────────────────────────────
 
 class EDAGenerator:
-    """EDA 报告生成器"""
+    """EDA 报告生成器 - 集成多种现成的自动分析工具"""
 
     def __init__(self, config: AnalysisConfig):
         self.config = config
@@ -202,6 +202,244 @@ class EDAGenerator:
         stats = reader.compute_stats(schema)
 
         return stats.quick_stats_md
+
+    def generate_missingno_report(
+        self,
+        db_path: Path,
+        output_dir: Path,
+        max_rows: int = 50000,
+    ) -> Optional[Path]:
+        """生成 missingno 缺失值可视化报告
+
+        missingno 是一个专门用于可视化缺失数据的工具，
+        可以生成矩阵图、条形图、热力图等来展示数据缺失模式。
+        """
+        if not db_path.exists():
+            return None
+
+        from .data import DataReader
+        reader = DataReader(db_path)
+        schema = reader.read_schema()
+        sample = reader.read_sample_data(limit=max_rows)
+
+        if not sample:
+            return None
+
+        # 合并所有表的数据进行缺失值分析
+        all_dfs = []
+        for table_name, data in sample.items():
+            if data and len(data) > 0:
+                df = pd.DataFrame(data)
+                # 添加表名前缀避免列名冲突
+                df.columns = [f"{table_name}.{col}" for col in df.columns]
+                all_dfs.append(df)
+
+        if not all_dfs:
+            return None
+
+        # 只取前几个表的列（避免太多列导致图表混乱）
+        combined_df = pd.concat(all_dfs, axis=1)
+        if len(combined_df.columns) > 50:
+            # 选择缺失值最多的列
+            missing_counts = combined_df.isnull().sum()
+            top_missing = missing_counts.nlargest(50).index.tolist()
+            combined_df = combined_df[top_missing]
+
+        output_dir.mkdir(parents=True, exist_ok=True)
+
+        try:
+            import missingno as msno
+            import matplotlib.pyplot as plt
+
+            out_file = output_dir / "eda_missingno.html"
+
+            # 创建多子图
+            fig, axes = plt.subplots(2, 2, figsize=(16, 12))
+
+            # 1. 缺失值矩阵
+            try:
+                msno.matrix(combined_df, ax=axes[0, 0], fontsize=8)
+                axes[0, 0].set_title("Missing Value Matrix", fontsize=12)
+            except Exception:
+                axes[0, 0].text(0.5, 0.5, "Matrix plot failed", ha='center', va='center')
+                axes[0, 0].set_title("Missing Value Matrix (Error)")
+
+            # 2. 缺失值条形图
+            try:
+                msno.bar(combined_df, ax=axes[0, 1], fontsize=8)
+                axes[0, 1].set_title("Missing Value Bar Chart", fontsize=12)
+            except Exception:
+                axes[0, 1].text(0.5, 0.5, "Bar plot failed", ha='center', va='center')
+                axes[0, 1].set_title("Missing Value Bar (Error)")
+
+            # 3. 缺失值热力图
+            try:
+                if len(combined_df.columns) > 1:
+                    msno.heatmap(combined_df, ax=axes[1, 0], fontsize=8)
+                    axes[1, 0].set_title("Missing Value Correlation Heatmap", fontsize=12)
+                else:
+                    axes[1, 0].text(0.5, 0.5, "Need >1 columns", ha='center', va='center')
+                    axes[1, 0].set_title("Correlation Heatmap (Skipped)")
+            except Exception:
+                axes[1, 0].text(0.5, 0.5, "Heatmap failed", ha='center', va='center')
+                axes[1, 0].set_title("Correlation Heatmap (Error)")
+
+            # 4. 缺失值树状图
+            try:
+                if len(combined_df.columns) > 1:
+                    msno.dendrogram(combined_df, ax=axes[1, 1], fontsize=8)
+                    axes[1, 1].set_title("Missing Value Dendrogram", fontsize=12)
+                else:
+                    axes[1, 1].text(0.5, 0.5, "Need >1 columns", ha='center', va='center')
+                    axes[1, 1].set_title("Dendrogram (Skipped)")
+            except Exception:
+                axes[1, 1].text(0.5, 0.5, "Dendrogram failed", ha='center', va='center')
+                axes[1, 1].set_title("Dendrogram (Error)")
+
+            plt.tight_layout()
+            plt.savefig(str(out_file).replace('.html', '.png'), dpi=150, bbox_inches='tight')
+            plt.close()
+
+            # 生成 HTML 包装
+            html_content = f"""<!DOCTYPE html>
+<html>
+<head>
+    <meta charset="utf-8">
+    <title>Missing Value Analysis (missingno)</title>
+    <style>
+        body {{ font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif; margin: 40px; }}
+        h1 {{ color: #333; }}
+        .summary {{ background: #f5f5f5; padding: 15px; border-radius: 5px; margin: 20px 0; }}
+        .stats {{ margin-top: 10px; }}
+        img {{ max-width: 100%; height: auto; margin: 20px 0; border: 1px solid #ddd; }}
+    </style>
+</head>
+<body>
+    <h1>Missing Value Analysis</h1>
+    <div class="summary">
+        <p><strong>Tool</strong>: missingno - Missing data visualization</p>
+        <p><strong>Total Columns Analyzed</strong>: {len(combined_df.columns)}</p>
+        <p><strong>Total Rows</strong>: {len(combined_df)}</p>
+        <div class="stats">
+            <p><strong>Total Missing Values</strong>: {combined_df.isnull().sum().sum()}</p>
+            <p><strong>Columns with Missing</strong>: {(combined_df.isnull().sum() > 0).sum()}</p>
+        </div>
+    </div>
+    <img src="eda_missingno.png" alt="Missing Value Visualization">
+</body>
+</html>"""
+            out_file.write_text(html_content, encoding="utf-8")
+
+            self.logger.info("生成 missingno 缺失值报告: %s", out_file)
+            return out_file
+
+        except ImportError:
+            self.logger.warning("missingno 未安装，跳过缺失值可视化")
+            return None
+        except Exception as e:
+            self.logger.warning("missingno 生成失败: %s", e)
+            return None
+
+    def generate_correlation_report(
+        self,
+        db_path: Path,
+        output_dir: Path,
+        max_rows: int = 50000,
+    ) -> Optional[Path]:
+        """生成相关性分析报告
+
+        使用 pandas 和 seaborn 生成变量相关性矩阵热力图。
+        """
+        if not db_path.exists():
+            return None
+
+        from .data import DataReader
+        reader = DataReader(db_path)
+        schema = reader.read_schema()
+        sample = reader.read_sample_data(limit=max_rows)
+
+        if not sample:
+            return None
+
+        output_dir.mkdir(parents=True, exist_ok=True)
+
+        generated_files = []
+        for table_name, data in sample.items():
+            if not data or len(data) < 2:
+                continue
+
+            df = pd.DataFrame(data)
+            numeric_df = df.select_dtypes(include=['number'])
+
+            if len(numeric_df.columns) < 2:
+                continue
+
+            try:
+                import matplotlib.pyplot as plt
+                import seaborn as sns
+
+                # 计算相关系数矩阵
+                corr_matrix = numeric_df.corr()
+
+                # 生成热力图
+                fig, ax = plt.subplots(figsize=(12, 10))
+                sns.heatmap(
+                    corr_matrix,
+                    annot=True,
+                    fmt='.2f',
+                    cmap='coolwarm',
+                    center=0,
+                    square=True,
+                    linewidths=0.5,
+                    ax=ax
+                )
+                ax.set_title(f"Correlation Matrix: {table_name}", fontsize=14)
+
+                safe_name = "".join(c if c.isalnum() or c in "_-" else "_" for c in table_name)
+                out_file = output_dir / f"correlation_{safe_name}.png"
+                plt.tight_layout()
+                plt.savefig(str(out_file), dpi=150, bbox_inches='tight')
+                plt.close()
+
+                generated_files.append((table_name, str(out_file)))
+                self.logger.info("生成相关性矩阵: %s (表: %s, %d 列)", out_file, table_name, len(numeric_df.columns))
+
+            except Exception as e:
+                self.logger.warning("生成表 %s 的相关性矩阵失败: %s", table_name, e)
+
+        if not generated_files:
+            return None
+
+        # 创建索引页面
+        index_file = output_dir / "correlation_index.html"
+        rows = "\n".join(
+            f'<tr><td>{name}</td><td><img src="{Path(path).name}" style="max-width:800px"></td></tr>'
+            for name, path in generated_files
+        )
+        html_content = f"""<!DOCTYPE html>
+<html>
+<head>
+    <meta charset="utf-8">
+    <title>Correlation Analysis</title>
+    <style>
+        body {{ font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif; margin: 40px; }}
+        h1 {{ color: #333; }}
+        table {{ border-collapse: collapse; width: 100%; }}
+        td {{ padding: 20px; border-bottom: 1px solid #ddd; }}
+        img {{ max-width: 100%; }}
+    </style>
+</head>
+<body>
+    <h1>Correlation Analysis Report</h1>
+    <table>
+        <tr><th>Table</th><th>Correlation Matrix</th></tr>
+        {rows}
+    </table>
+</body>
+</html>"""
+        index_file.write_text(html_content, encoding="utf-8")
+
+        return index_file
 
     def generate_ydata_profile(
         self,

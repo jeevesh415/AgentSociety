@@ -737,9 +737,11 @@ Based on the experiment context and **actual data structure above**, generate an
 
                 await progress(f"Running tool: {tool_name}...")
 
-                if tool_type in ("eda_profile", "eda_sweetviz") or tool_name in (
+                if tool_type in ("eda_profile", "eda_sweetviz", "eda_missingno", "eda_correlation") or tool_name in (
                     "eda_profile",
                     "eda_sweetviz",
+                    "eda_missingno",
+                    "eda_correlation",
                 ):
                     result = await self._run_eda_tool(
                         tool_name, db_path, output_dir, on_progress=progress
@@ -789,7 +791,14 @@ Based on the experiment context and **actual data structure above**, generate an
         output_dir: Path,
         on_progress=None,
     ) -> Dict[str, Any]:
-        """执行 EDA 工具。"""
+        """执行 EDA 工具。
+
+        支持的工具：
+        - eda_profile: ydata-profiling 完整EDA报告
+        - eda_sweetviz: Sweetviz EDA报告
+        - eda_missingno: missingno 缺失值可视化
+        - eda_correlation: 相关性矩阵热力图
+        """
         data_dir = output_dir / DIR_DATA
         data_dir.mkdir(parents=True, exist_ok=True)
         path = None
@@ -798,11 +807,19 @@ Based on the experiment context and **actual data structure above**, generate an
         if tool_name == "eda_profile":
             path = gen.generate_ydata_profile(db_path, data_dir)
             if path and on_progress:
-                await on_progress(f"EDA (ydata) generated: {path.name}")
+                await on_progress(f"EDA (ydata-profiling) generated: {path.name}")
         elif tool_name == "eda_sweetviz":
             path = gen.generate_sweetviz_profile(db_path, data_dir)
             if path and on_progress:
-                await on_progress(f"EDA (sweetviz) generated: {path.name}")
+                await on_progress(f"EDA (Sweetviz) generated: {path.name}")
+        elif tool_name == "eda_missingno":
+            path = gen.generate_missingno_report(db_path, data_dir)
+            if path and on_progress:
+                await on_progress(f"Missing value analysis (missingno) generated: {path.name}")
+        elif tool_name == "eda_correlation":
+            path = gen.generate_correlation_report(db_path, data_dir)
+            if path and on_progress:
+                await on_progress(f"Correlation analysis generated: {path.name}")
 
         if path and path.exists():
             return {"success": True, "path": str(path), "tool_name": tool_name}
