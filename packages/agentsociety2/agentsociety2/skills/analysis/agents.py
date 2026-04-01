@@ -222,7 +222,20 @@ class AnalysisAgent:
         custom_instructions: Optional[str] = None,
         literature_summary: Optional[str] = None,
     ) -> AnalysisResult:
-        """基于实际数据生成洞察，使用 LLM 总结长文档。"""
+        """基于实际数据生成洞察。
+
+        使用 LLM 总结长文档，确保洞察基于实际数据结构，避免幻觉。
+        支持重试机制，累积错误历史以提高迭代效率。
+
+        Args:
+            context: 实验上下文，包含假设和实验设计信息。
+            data_summary: 数据摘要，包含 schema 和行数信息。
+            custom_instructions: 自定义分析指令，可选。
+            literature_summary: 文献摘要，可选。
+
+        Returns:
+            AnalysisResult 对象，包含 insights、findings、conclusions 等。
+        """
         hypothesis_md_block = ""
         if getattr(context.design, "hypothesis_markdown", None):
             hyp_md = await self._summarize_document(
@@ -312,6 +325,8 @@ Based on the experiment context and **actual data structure above**, generate an
         messages.append({"role": "user", "content": prompt})
 
         parsed: Optional[Dict[str, Any]] = None
+        error_history: list[str] = []  # 累积错误历史
+        
         for attempt in range(self.max_retries):
             self.logger.info(
                 "生成分析结果 (第 %s/%s 次尝试)",
@@ -338,9 +353,16 @@ Based on the experiment context and **actual data structure above**, generate an
                 # 用 LLM 总结错误信息，生成有效反馈
                 raw_content = getattr(e, 'raw_content', None)
                 error_summary = await self._summarize_error(e, raw_content)
+                error_history.append(f"解析错误: {error_summary}")
+                
+                # 构建累积错误的反馈
+                history_note = ""
+                if len(error_history) > 1:
+                    history_note = f"\n\n**之前的问题**（请避免重复）:\n" + "\n".join(f"- {err}" for err in error_history[:-1])
                 
                 feedback = (
-                    f"Your previous output had a parsing error: {error_summary}\n\n"
+                    f"Your previous output had a parsing error: {error_summary}\n"
+                    f"{history_note}\n\n"
                     f"Please fix and return valid XML with this structure:\n"
                     f"<analysis>\n"
                     f"  <insights><item>...</item></insights>\n"
@@ -360,10 +382,47 @@ Based on the experiment context and **actual data structure above**, generate an
             ):
                 break
 
+            self.logger.info(
+                "分析结果需要改进 (第 %s 次尝试): %s",
+                attempt + 1,
+                judgment.reason,
+            )
+            
+            # 累积错误历史
+            error_history.append(judgment.reason)
+            
+            # 构建包含历史错误的具体反馈
+            history_note = ""
+            if len(error_history) > 1:
+                history_note = (
+                    f"\n\n**之前的问题**（已修复或无需处理）:\n"
+                    + "\n".join(f"- {err}" for err in error_history[:-1])
+                )
+            
+            # 提取当前输出的关键问题
+            current_output_summary = ""
+            if parsed:
+                insights_count = len(parsed.get("insights", []))
+                findings_count = len(parsed.get("findings", []))
+                conclusions = parsed.get("conclusions", "")[:200]
+                current_output_summary = (
+                    f"\n\n**你上次的输出**:\n"
+                    f"- {insights_count} 条洞察\n"
+                    f"- {findings_count} 条发现\n"
+                    f"- 结论: {conclusions}...\n"
+                    f"请针对上述问题进行改进，不要重复已有的内容。"
+                )
+            
             messages.append(
                 {
                     "role": "user",
-                    "content": f"Previous output needs improvement: {judgment.reason}\n{judgment.retry_instruction}\nReturn corrected XML only.",
+                    "content": (
+                        f"Previous output needs improvement: {judgment.reason}\n"
+                        f"{judgment.retry_instruction}\n"
+                        f"{history_note}"
+                        f"{current_output_summary}\n\n"
+                        f"Return corrected XML only."
+                    ),
                 }
             )
 
@@ -437,17 +496,146 @@ Based on the experiment context and **actual data structure above**, generate an
             ),
         }
 
+    @staticmethod
+    def _format_items_for_judgment(items: list, max_items: int = 5, max_len: int = 200) -> str:
+        """格式化列表项供裁判查看。
+
+        限制数量和长度避免 prompt 过长。
+
+        Args:
+            items: 待格式化的列表项。
+            max_items: 最大显示数量，默认 5。
+            max_len: 每项最大长度，默认 200。
+
+        Returns:
+            格式化后的字符串，每项一行，带序号。
+        """
+        if not items:
+            return "(none)"
+        formatted = []
+        for i, item in enumerate(items[:max_items]):
+            text = str(item)[:max_len]
+            formatted.append(f"  {i+1}. {text}")
+        if len(items) > max_items:
+            formatted.append(f"  ... and {len(items) - max_items} more items")
+        return "\n".join(formatted)
+
+    @staticmethod
+    def _format_tools_for_judgment(tools: list, max_tools: int = 10) -> str:
+        """格式化工具列表供裁判查看。
+
+        Args:
+            tools: 工具字典列表，每项包含 tool_name、tool_type、action。
+            max_tools: 最大显示数量，默认 10。
+
+        Returns:
+            格式化后的字符串，每项一行，显示工具类型和名称。
+        """
+        if not tools:
+            return "  (no tools)"
+        formatted = []
+        for i, tool in enumerate(tools[:max_tools]):
+            tool_name = tool.get("tool_name", "unknown")
+            tool_type = tool.get("tool_type", "unknown")
+            action = str(tool.get("action", ""))[:150]
+            formatted.append(f"  {i+1}. [{tool_type}] {tool_name}: {action}")
+        if len(tools) > max_tools:
+            formatted.append(f"  ... and {len(tools) - max_tools} more tools")
+        return "\n".join(formatted)
+
+    @staticmethod
+    def _format_viz_plan_for_judgment(viz_plan: list, max_items: int = 8) -> str:
+        """格式化可视化计划供裁判查看。
+
+        Args:
+            viz_plan: 可视化计划字典列表。
+            max_items: 最大显示数量，默认 8。
+
+        Returns:
+            格式化后的字符串，每项一行，显示工具名和描述。
+        """
+        if not viz_plan:
+            return "  (no visualization plan)"
+        formatted = []
+        for i, item in enumerate(viz_plan[:max_items]):
+            tool_name = item.get("tool_name", "unknown")
+            desc = str(item.get("tool_description", ""))[:150]
+            use_tool = item.get("use_tool", "unknown")
+            formatted.append(f"  {i+1}. [{use_tool}] {tool_name}: {desc}")
+        if len(viz_plan) > max_items:
+            formatted.append(f"  ... and {len(viz_plan) - max_items} more items")
+        return "\n".join(formatted)
+
+    @staticmethod
+    def _build_strategy_feedback(
+        error_history: list[str],
+        current_reason: Optional[str],
+        retry_instruction: Optional[str],
+    ) -> str:
+        """构建策略重试的反馈内容。
+
+        将历史错误、当前问题和重试指令组合成完整的反馈信息，
+        供 LLM 在下一次迭代时参考。
+
+        Args:
+            error_history: 累积的错误历史列表。
+            current_reason: 当前失败原因。
+            retry_instruction: 重试指令。
+
+        Returns:
+            格式化后的反馈字符串。
+        """
+        parts = []
+        if error_history:
+            parts.append("Previous issues (avoid these):")
+            for i, err in enumerate(error_history[-3:]):  # 只保留最近3个
+                parts.append(f"  {i+1}. {err}")
+        if current_reason:
+            parts.append(f"Current issue: {current_reason}")
+        if retry_instruction:
+            parts.append(f"Instruction: {retry_instruction}")
+        return "\n".join(parts) if parts else ""
+
+    @staticmethod
+    def _build_viz_feedback(error_history: list[str]) -> str:
+        """构建可视化重试的反馈内容。
+
+        将累积的错误历史格式化为反馈信息，供 LLM 在下一次迭代时参考。
+
+        Args:
+            error_history: 累积的错误历史列表。
+
+        Returns:
+            格式化后的反馈字符串，最多显示最近 3 个错误。
+        """
+        if not error_history:
+            return ""
+        parts = ["**Previous issues (avoid these)**:"]
+        for i, err in enumerate(error_history[-3:]):
+            parts.append(f"  {i+1}. {err}")
+        return "\n".join(parts)
+
     async def _judge_analysis_result(
         self,
         parsed: Dict[str, Any],
         context: ExperimentContext,
         data_summary: DataSummary,
     ) -> AnalysisJudgment:
-        """
-        判断分析结果是否合理。
+        """判断分析结果是否合理。
 
-        注意：data_summary.schema_markdown 已经在 _generate_insights_with_data 中被 LLM 总结过，
-        这里直接使用，不需要额外处理。
+        检查 LLM 生成的洞察、发现、结论是否基于实际数据，是否与假设相关，
+        是否存在幻觉（引用不存在的表/列）等问题。
+
+        Args:
+            parsed: 解析后的分析结果字典，包含 insights、findings、conclusions 等。
+            context: 实验上下文，包含假设信息。
+            data_summary: 数据摘要，包含 schema 和行数信息。
+
+        Returns:
+            AnalysisJudgment 对象，包含 success、reason、should_retry 等字段。
+
+        Note:
+            data_summary.schema_markdown 已在 _generate_insights_with_data 中被 LLM 总结过。
         """
         hypothesis_preview = (context.design.hypothesis or "")[:300]
 
@@ -479,15 +667,27 @@ Based on the experiment context and **actual data structure above**, generate an
 **Schema**:
 {schema_preview}
 
-**Generated**: {len(parsed.get("insights", []))} insights, {len(parsed.get("findings", []))} findings, conclusions, {len(parsed.get("recommendations", []))} recommendations.
+**Generated Analysis**:
+
+Insights ({len(parsed.get("insights", []))} items):
+{self._format_items_for_judgment(parsed.get("insights", []))}
+
+Findings ({len(parsed.get("findings", []))} items):
+{self._format_items_for_judgment(parsed.get("findings", []))}
+
+Conclusions:
+{(parsed.get("conclusions") or "(none)")[:500]}
+
+Recommendations ({len(parsed.get("recommendations", []))} items):
+{self._format_items_for_judgment(parsed.get("recommendations", []))}
 
 **Checklist**:
-1. Substantive content? (not generic placeholders)
-2. Relevant to hypothesis?
-3. Data-grounded? (insights reference actual table/column names from schema)
-4. No hallucination? (no mention of non-existent tables/columns)
-5. Data limitations acknowledged? (if tables are empty/sparse)
-6. Conclusions reasonable?
+1. Substantive content? (not generic placeholders like "need more data")
+2. Relevant to hypothesis? (insights address the research question)
+3. Data-grounded? (insights reference actual table/column names from schema above)
+4. No hallucination? (no mention of tables/columns not in the schema)
+5. Data limitations acknowledged? (if tables are empty/sparse, this should be noted)
+6. Conclusions reasonable? (follows from the findings)
 
 {judgment_prompt()}"""
 
@@ -509,12 +709,33 @@ Based on the experiment context and **actual data structure above**, generate an
         tool_executor: AnalysisRunner,
         on_progress: Optional[AnalysisProgressCallback],
     ) -> Dict[str, Any]:
-        """决定分析策略，经 LLM 裁判通过后返回。"""
+        """决定分析策略，经 LLM 裁判通过后返回。
+
+        支持重试机制，累积错误历史以提高迭代效率。每次重试都会
+        把之前的问题反馈给 LLM，避免重复错误。
+
+        Args:
+            context: 实验上下文。
+            analysis_result: 初始分析结果。
+            data_summary: 数据摘要。
+            tool_executor: 工具执行器。
+            on_progress: 进度回调函数，可选。
+
+        Returns:
+            分析计划字典，包含 analysis_strategy 和 tools_to_use。
+
+        Raises:
+            XmlParseError: 重试次数耗尽仍未通过裁判。
+        """
         max_retries = self.config.max_strategy_retries
+        error_history: list[str] = []
+        previous_feedback: Optional[str] = None
+        
         for attempt in range(max_retries):
             try:
                 analysis_plan = await self._decide_analysis_strategy(
-                    context, analysis_result, data_summary, tool_executor
+                    context, analysis_result, data_summary, tool_executor,
+                    previous_feedback=previous_feedback,
                 )
                 judgment = await self._judge_analysis_strategy(
                     analysis_plan, context, data_summary
@@ -523,6 +744,11 @@ Based on the experiment context and **actual data structure above**, generate an
                 if attempt >= max_retries - 1:
                     self.logger.warning("分析策略XML解析失败: %s", e)
                     raise
+                error_summary = f"XML解析错误: {str(e)[:200]}"
+                error_history.append(error_summary)
+                previous_feedback = self._build_strategy_feedback(
+                    error_history, None, None
+                )
                 if on_progress:
                     await on_progress(f"Strategy XML parse failed, retrying: {e}")
                 continue
@@ -534,8 +760,19 @@ Based on the experiment context and **actual data structure above**, generate an
             ):
                 return analysis_plan
 
+            error_history.append(judgment.reason)
+            self.logger.info(
+                "分析策略需要改进 (第 %s 次尝试): %s",
+                attempt + 1,
+                judgment.reason,
+            )
             if on_progress:
                 await on_progress(f"Strategy needs improvement: {judgment.reason}")
+            
+            # 构建下一次生成的反馈
+            previous_feedback = self._build_strategy_feedback(
+                error_history, judgment.reason, judgment.retry_instruction
+            )
 
         raise XmlParseError("Strategy retries exhausted", raw_content="")
 
@@ -545,8 +782,24 @@ Based on the experiment context and **actual data structure above**, generate an
         analysis_result: AnalysisResult,
         data_summary: DataSummary,
         tool_executor: AnalysisRunner,
+        previous_feedback: Optional[str] = None,
     ) -> Dict[str, Any]:
-        """决定分析策略，选表/选工具。使用 LLM 总结而非截断。"""
+        """决定分析策略，选表/选工具。
+
+        使用 LLM 总结大型 schema 而非简单截断，确保策略基于完整的数据理解。
+
+        Args:
+            context: 实验上下文。
+            analysis_result: 初始分析结果，提供已有洞察。
+            data_summary: 数据摘要，包含 schema 和行数信息。
+            tool_executor: 工具执行器，用于发现可用工具。
+            previous_feedback: 上一次重试的反馈信息，可选。
+
+        Returns:
+            分析计划字典，包含:
+            - analysis_strategy: 分析策略描述
+            - tools_to_use: 要执行的工具列表
+        """
         available_tools = tool_executor.discover_tools_with_schemas()
         builtin = {
             k: v for k, v in available_tools.items() if v.get("type") == "builtin"
@@ -593,6 +846,7 @@ Based on the experiment context and **actual data structure above**, generate an
 {schema_block}
 
 **Available tools**: {tools_list}
+{f"**Previous feedback (FIX THESE ISSUES)**: {previous_feedback}" if previous_feedback else ""}
 
 {strategy_xml_contract()}"""
 
@@ -647,7 +901,19 @@ Based on the experiment context and **actual data structure above**, generate an
         context: ExperimentContext,
         data_summary: DataSummary,
     ) -> StrategyJudgment:
-        """判断分析策略是否合理。"""
+        """判断分析策略是否合理。
+
+        检查策略是否与假设相关，工具是否引用了正确的表/列，
+        是否考虑了数据稀疏情况等。
+
+        Args:
+            analysis_plan: 分析计划字典，包含 analysis_strategy 和 tools_to_use。
+            context: 实验上下文。
+            data_summary: 数据摘要，用于验证工具引用的表/列是否存在。
+
+        Returns:
+            StrategyJudgment 对象，包含 success、reason、should_retry 等字段。
+        """
         # 构建数据摘要
         total_rows = sum(data_summary.row_counts.values())
         non_empty_tables = [
@@ -656,6 +922,14 @@ Based on the experiment context and **actual data structure above**, generate an
         empty_tables = [
             t for t in data_summary.tables if data_summary.row_counts.get(t, 0) == 0
         ]
+
+        # 截取 schema 信息（裁判需要知道有哪些列）
+        schema_preview = data_summary.schema_markdown or "No schema available"
+        if len(schema_preview) > 1500:
+            schema_preview = schema_preview[:1500] + "\n...[truncated]"
+
+        # 格式化工具列表供裁判查看
+        tools_str = self._format_tools_for_judgment(analysis_plan.get("tools_to_use", []))
 
         prompt = f"""Evaluate the analysis strategy for experiment {context.experiment_id}.
 
@@ -667,16 +941,20 @@ Based on the experiment context and **actual data structure above**, generate an
 - Empty: {empty_tables}
 - Total rows: {total_rows}
 
+**Schema** (valid table/column names):
+{schema_preview}
+
 **Proposed strategy**:
-- analysis_strategy: {analysis_plan.get("analysis_strategy", "")}
-- tools_to_use: {analysis_plan.get("tools_to_use", [])}
+- Analysis approach: {analysis_plan.get("analysis_strategy", "")}
+- Tools to use:
+{tools_str}
 
 **CRITICAL CHECKS**:
 1. **Relevance**: Strategy relevant to hypothesis?
-2. **Schema Alignment**: Tools reference ONLY tables/columns that exist in schema?
+2. **Schema Alignment**: Tools reference ONLY tables/columns that exist in schema above?
 3. **Data Appropriateness**: If key tables are empty, does strategy adjust accordingly?
 4. **EDA Usage**: EDA tools used when data overview needed?
-5. **Hallucination Check**: Do tools reference tables that do NOT exist? If YES, FAIL.
+5. **Hallucination Check**: Do tools reference tables/columns that do NOT exist in schema? If YES, must FAIL.
 
 {judgment_prompt()}"""
 
@@ -929,9 +1207,25 @@ Based on the experiment context and **actual data structure above**, generate an
         tool_executor: AnalysisRunner,
         on_progress: AnalysisProgressCallback = None,
     ) -> Tuple[List[Dict[str, Any]], List[Path]]:
-        """决定可视化方案、生成图表，经裁判通过后返回。"""
+        """决定可视化方案、生成图表，经裁判通过后返回。
+
+        支持重试机制，累积错误历史以提高迭代效率。
+
+        Args:
+            context: 实验上下文。
+            analysis_result: 分析结果。
+            data_summary: 数据摘要。
+            tool_results: 工具执行结果。
+            db_path: 数据库路径。
+            output_dir: 输出目录。
+            tool_executor: 工具执行器。
+            on_progress: 进度回调函数，可选。
+
+        Returns:
+            元组 (visualization_plan, generated_charts)。
+        """
         max_retries = self.config.max_visualization_retries
-        previous_feedback: Optional[str] = None
+        error_history: list[str] = []  # 累积错误历史
         visualization_plan: List[Dict[str, Any]] = []
         generated_charts: List[Path] = []
 
@@ -940,6 +1234,9 @@ Based on the experiment context and **actual data structure above**, generate an
                 await on_progress(msg)
 
         for attempt in range(max_retries):
+            # 构建包含历史错误的反馈
+            previous_feedback = self._build_viz_feedback(error_history)
+            
             try:
                 await progress("Deciding visualizations...")
                 visualization_plan = await self._decide_visualizations(
@@ -953,7 +1250,7 @@ Based on the experiment context and **actual data structure above**, generate an
                 if attempt >= max_retries - 1:
                     self.logger.warning("可视化XML解析失败: %s", e)
                     raise
-                previous_feedback = str(e)
+                error_history.append(f"XML解析错误: {str(e)[:200]}")
                 continue
 
             if not visualization_plan:
@@ -981,7 +1278,7 @@ Based on the experiment context and **actual data structure above**, generate an
             except XmlParseError as e:
                 if attempt >= max_retries - 1:
                     raise
-                previous_feedback = str(e)
+                error_history.append(f"裁判XML解析错误: {str(e)[:200]}")
                 continue
 
             if (
@@ -991,7 +1288,12 @@ Based on the experiment context and **actual data structure above**, generate an
             ):
                 return visualization_plan, generated_charts
 
-            previous_feedback = f"{judgment.reason}. {judgment.retry_instruction}"
+            error_history.append(judgment.reason)
+            self.logger.info(
+                "可视化方案需要改进 (第 %s 次尝试): %s",
+                attempt + 1,
+                judgment.reason,
+            )
 
         return visualization_plan, generated_charts
 
@@ -1003,7 +1305,21 @@ Based on the experiment context and **actual data structure above**, generate an
         analysis_results: Dict[str, Any],
         previous_feedback: Optional[str] = None,
     ) -> List[Dict[str, Any]]:
-        """决定可视化方案。使用 LLM 总结长内容。"""
+        """决定可视化方案。
+
+        根据分析结果和数据上下文，决定需要生成哪些可视化图表。
+        使用 LLM 总结长内容以避免 prompt 过长。
+
+        Args:
+            context: 实验上下文。
+            analysis_result: 分析结果，包含洞察和发现。
+            data_summary: 数据摘要。
+            analysis_results: 工具执行结果字典。
+            previous_feedback: 上一次重试的反馈信息，可选。
+
+        Returns:
+            可视化计划列表，每项包含 tool_name、tool_description 等。
+        """
         feedback_block = ""
         if previous_feedback:
             feedback_block = f"\n**Previous feedback**: {previous_feedback[:500]}\n"
@@ -1095,12 +1411,27 @@ Based on the experiment context and **actual data structure above**, generate an
         error_logs: Optional[List[str]] = None,
         data_summary: Optional[DataSummary] = None,
     ) -> VisualizationJudgment:
-        """判断可视化结果是否充分。"""
+        """判断可视化结果是否充分。
+
+        检查生成的图表是否与假设相关，是否基于实际数据，
+        是否足以支撑报告。
+
+        Args:
+            visualization_plan: 可视化计划列表。
+            generated_charts: 已生成的图表路径列表。
+            context: 实验上下文。
+            tool_results: 工具执行结果。
+            error_logs: 执行错误日志，可选。
+            data_summary: 数据摘要，用于验证数据上下文，可选。
+
+        Returns:
+            VisualizationJudgment 对象，包含 success、reason、should_retry 等字段。
+        """
         chart_names = [p.name for p in generated_charts]
         errors_block = ""
         if error_logs:
             errors_block = "\n**Execution Errors**:\n" + "\n".join(
-                f"- {e}" for e in error_logs
+                f"- {e[:200]}" for e in error_logs[:5]  # 限制错误信息长度
             )
 
         # 数据摘要
@@ -1117,11 +1448,17 @@ Based on the experiment context and **actual data structure above**, generate an
 - Empty tables: {[t for t in data_summary.tables if data_summary.row_counts.get(t, 0) == 0]}
 """
 
+        # 格式化可视化计划内容
+        viz_plan_str = self._format_viz_plan_for_judgment(visualization_plan)
+
         prompt = f"""Evaluate the visualization output for experiment {context.experiment_id}.
 
 **Hypothesis**: {context.design.hypothesis}
-**Visualization plan**: {len(visualization_plan)} items
-**Generated charts**: {chart_names}{errors_block}{data_block}
+
+**Visualization Plan** ({len(visualization_plan)} items):
+{viz_plan_str}
+
+**Generated Charts**: {chart_names if chart_names else "(none)"}{errors_block}{data_block}
 
 **CRITICAL CHECKS**:
 1. **Relevance**: Charts relevant to hypothesis?
@@ -1150,7 +1487,22 @@ Based on the experiment context and **actual data structure above**, generate an
         tool_executor: AnalysisRunner,
         on_progress: AnalysisProgressCallback = None,
     ) -> Tuple[List[Path], List[str]]:
-        """执行可视化生成。"""
+        """执行可视化生成。
+
+        根据可视化计划，调用代码执行器生成图表文件。
+
+        Args:
+            visualization_plan: 可视化计划列表。
+            db_path: 数据库路径。
+            output_dir: 输出目录，用于保存图表。
+            tool_executor: 工具执行器。
+            on_progress: 进度回调函数，可选。
+
+        Returns:
+            元组 (generated_charts, error_logs):
+            - generated_charts: 生成的图表路径列表
+            - error_logs: 错误日志列表
+        """
 
         async def progress(msg: str) -> None:
             if on_progress:
@@ -1378,7 +1730,18 @@ Return ONLY the summary, no additional text."""
         error: Exception,
         raw_content: Optional[str] = None,
     ) -> str:
-        """使用 LLM 总结错误信息，生成简洁的反馈。"""
+        """使用 LLM 总结错误信息，生成简洁的反馈。
+
+        对于长错误信息，使用 LLM 提取关键问题，生成 2-3 句总结，
+        供下一次迭代参考。
+
+        Args:
+            error: 原始异常对象。
+            raw_content: 原始输出内容，可选，用于提供更多上下文。
+
+        Returns:
+            简洁的错误总结字符串。
+        """
         error_msg = str(error)
         
         # 如果错误信息很短，直接返回

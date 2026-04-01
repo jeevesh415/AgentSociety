@@ -409,7 +409,15 @@ class ToolRegistry:
         name: str,
         parameters: Dict[str, Any],
     ) -> ToolResult:
-        """执行工具"""
+        """执行工具。
+
+        Args:
+            name: 工具名称。
+            parameters: 工具参数字典。
+
+        Returns:
+            ToolResult 对象，包含 success、content、error 等字段。
+        """
         if name not in self._tool_classes:
             return ToolResult(
                 success=False,
@@ -843,7 +851,7 @@ class AnalysisRunner:
                 "type": "builtin",
             }
 
-        self.logger.info("Initialized %s built-in tools for analysis", len(self._builtin_tools))
+        self.logger.info("已初始化 %s 个内置分析工具", len(self._builtin_tools))
 
     def discover_tools(self) -> Dict[str, Dict[str, Any]]:
         return {
@@ -873,6 +881,18 @@ class AnalysisRunner:
         tool_type: str,
         parameters: Dict[str, Any],
     ) -> Dict[str, Any]:
+        """执行工具。
+
+        根据工具类型分发到对应的执行器。
+
+        Args:
+            tool_name: 工具名称。
+            tool_type: 工具类型（builtin 或 code_executor）。
+            parameters: 工具参数字典。
+
+        Returns:
+            执行结果字典，包含 success、error 等字段。
+        """
         if tool_type == "builtin":
             return await self._execute_builtin_tool(tool_name, parameters)
         if tool_type == "code_executor":
@@ -960,7 +980,7 @@ for table in actual_tables:
     print(f"Table {{table}}: {{count}} rows")
 ```
 """
-                self.logger.info("Database schema included in code generation prompt")
+                self.logger.info("数据库 schema 已包含在代码生成提示中")
 
         if db_path:
             src_db = Path(db_path)
@@ -1085,7 +1105,7 @@ Use these libraries for analysis and visualization:
                     break
 
                 if judgment.should_retry and current_try < max_retries - 1:
-                    self.logger.info("Execution failed, will retry. Reason: %s", judgment.reason)
+                    self.logger.info("代码执行失败，将重试。原因: %s", judgment.reason)
                     execution_output = f"""## Code Execution Result (Attempt {current_try + 1})
 
 **Return Code**: {exec_result.return_code if exec_result else "N/A"}
@@ -1115,7 +1135,7 @@ Please generate corrected code that addresses the issues above."""
                     break
 
             if not exec_result:
-                self.logger.warning("No execution result after all attempts")
+                self.logger.warning("所有尝试后仍无执行结果")
                 return {
                     "success": False,
                     "error": "No execution result after all attempts",
@@ -1187,6 +1207,20 @@ Please generate corrected code that addresses the issues above."""
         work_dir: Path,
         files_before_execution: set,
     ) -> CodeExecutionJudgment:
+        """判断代码执行结果是否成功。
+
+        检查执行返回码、输出文件、错误信息等，通过 LLM 判断执行是否成功，
+        以及是否需要重试。
+
+        Args:
+            generated_code: 生成的 Python 代码。
+            exec_result: 代码执行结果，包含 return_code、stdout、stderr。
+            work_dir: 工作目录，用于检查生成的文件。
+            files_before_execution: 执行前已存在的文件集合。
+
+        Returns:
+            CodeExecutionJudgment 对象，包含 success、reason、should_retry 等字段。
+        """
         artifact_extensions = {
             ".png",
             ".jpg",

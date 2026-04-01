@@ -974,6 +974,26 @@ class Reporter:
         self.max_retries = config.max_analysis_retries
         self.logger.info("使用 %s 来生成报告", self.agent.model_name)
 
+    @staticmethod
+    def _build_retry_feedback(error_history: list[str]) -> str:
+        """构建包含错误历史的反馈内容。
+
+        将累积的错误历史格式化为反馈信息，供 LLM 在下一次迭代时参考，
+        避免重复相同的错误。
+
+        Args:
+            error_history: 累积的错误历史列表。
+
+        Returns:
+            格式化后的反馈字符串，最多显示最近 3 个错误。
+        """
+        if not error_history:
+            return ""
+        parts = ["**Previous issues (avoid these mistakes)**:"]
+        for i, err in enumerate(error_history[-3:]):  # 只保留最近3个
+            parts.append(f"  {i+1}. {err}")
+        return "\n".join(parts)
+
     async def generate(
         self,
         context: ExperimentContext,
@@ -987,14 +1007,26 @@ class Reporter:
         data_summary: Optional[Any] = None,
         on_progress: AnalysisProgressCallback = None,
     ) -> Tuple[Dict[str, str], bool]:
-        """
-        生成图文并茂的报告（Markdown + HTML）。
-        literature_summary: 可选，文献摘要。
-        eda_profile_path: 可选，ydata-profiling EDA 概览路径。
-        eda_sweetviz_path: 可选，Sweetviz EDA 报告路径。
-        quick_stats_md: 可选，pandas describe 统计摘要（Markdown），供 LLM 参考。
-        data_summary: 可选，DataSummary 对象，用于交叉验证洞察是否基于实际数据。
-        Returns: (文件路径字典, report_complete 是否成功)
+        """生成图文并茂的报告（Markdown + HTML）。
+
+        支持重试机制，累积错误历史以提高迭代效率。
+
+        Args:
+            context: 实验上下文。
+            analysis_result: 分析结果。
+            processed_assets: 处理后的资产字典。
+            output_dir: 输出目录。
+            literature_summary: 文献摘要，可选。
+            eda_profile_path: ydata-profiling EDA 概览路径，可选。
+            eda_sweetviz_path: Sweetviz EDA 报告路径，可选。
+            quick_stats_md: pandas describe 统计摘要，可选。
+            data_summary: DataSummary 对象，用于交叉验证，可选。
+            on_progress: 进度回调函数，可选。
+
+        Returns:
+            元组 (files, success):
+            - files: 生成的文件路径字典
+            - success: 报告是否成功生成
         """
 
         async def progress(msg: str) -> None:
@@ -1003,9 +1035,12 @@ class Reporter:
 
         max_retries = self.max_retries
         retry_count = 0
-        last_retry_instruction: Optional[str] = None
+        error_history: list[str] = []  # 累积错误历史
 
         while retry_count < max_retries:
+            # 构建包含历史错误的反馈
+            combined_feedback = self._build_retry_feedback(error_history)
+            
             try:
                 await progress("Generating report content...")
                 content = await self._generate_content(
@@ -1017,7 +1052,7 @@ class Reporter:
                     eda_sweetviz_path,
                     quick_stats_md,
                     data_summary,
-                    previous_retry_instruction=last_retry_instruction,
+                    previous_retry_instruction=combined_feedback,
                 )
                 files = {}
                 await progress("Saving report (Markdown & HTML)...")
@@ -1047,9 +1082,7 @@ class Reporter:
                     files["markdown"] = str(output_dir / FILE_REPORT_MD)
                     files["html"] = str(output_dir / FILE_REPORT_HTML)
                     return (files, False)
-                last_retry_instruction = (
-                    f"XML parse failed: {e}. Return valid XML only."
-                )
+                error_history.append(f"XML解析错误: {str(e)[:200]}")
                 retry_count += 1
                 self.logger.info(
                     "重试报告生成，XML解析错误 (%s/%s)", retry_count, max_retries
@@ -1066,7 +1099,7 @@ class Reporter:
                     files["markdown"] = str(output_dir / FILE_REPORT_MD)
                     files["html"] = str(output_dir / FILE_REPORT_HTML)
                     return (files, False)
-                last_retry_instruction = judgment.retry_instruction
+                error_history.append(f"异常: {judgment.reason}")
                 retry_count += 1
                 self.logger.info(
                     "重试报告生成，异常 (%s/%s): %s",
@@ -1096,7 +1129,7 @@ class Reporter:
                 )
                 return (files, False)
 
-            last_retry_instruction = judgment.retry_instruction
+            error_history.append(judgment.reason)
             retry_count += 1
             self.logger.info(
                 "重试报告生成 (%s/%s): %s",
@@ -1126,7 +1159,22 @@ class Reporter:
         data_summary: Optional[Any] = None,
         previous_retry_instruction: Optional[str] = None,
     ) -> ReportContent:
-        """构建报告生成 prompt。"""
+        """构建报告生成 prompt 并调用 LLM 生成内容。
+
+        Args:
+            context: 实验上下文。
+            analysis_result: 分析结果。
+            processed_assets: 处理后的资产字典。
+            literature_summary: 文献摘要，可选。
+            eda_profile_path: ydata-profiling EDA 概览路径，可选。
+            eda_sweetviz_path: Sweetviz EDA 报告路径，可选。
+            quick_stats_md: pandas describe 统计摘要，可选。
+            data_summary: DataSummary 对象，可选。
+            previous_retry_instruction: 上一次重试的反馈信息，可选。
+
+        Returns:
+            ReportContent 对象，包含中英文 Markdown 和 HTML 内容。
+        """
         prompt = self._build_prompt(
             context,
             analysis_result,
@@ -1395,7 +1443,19 @@ Current retry count: {retry_count}/{max_retries}
         html_path: Path,
         processed_assets: Optional[Dict[str, Any]] = None,
     ) -> ReportGenerationResult:
-        """裁判报告生成结果。"""
+        """裁判报告生成结果。
+
+        检查生成的报告是否完整、格式是否正确，决定是否需要重试。
+
+        Args:
+            content: 报告内容对象。
+            md_path: Markdown 文件路径。
+            html_path: HTML 文件路径。
+            processed_assets: 处理后的资产字典，可选。
+
+        Returns:
+            ReportGenerationResult 对象，包含 success、reason、should_retry 等字段。
+        """
         md_exists = md_path.exists() and md_path.stat().st_size > 0
         html_exists = html_path.exists() and html_path.stat().st_size > 0
         md_text = content.full_content_markdown or ""

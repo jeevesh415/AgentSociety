@@ -831,7 +831,7 @@ Return only XML in this format:
             return
         section = "\n\n## Charts\n\n" + "\n\n".join(lines)
         md_path.write_text(md_content.rstrip() + section + "\n", encoding="utf-8")
-        self.logger.info("Embedded %d chart(s) into synthesis Markdown", len(lines))
+        self.logger.info("已嵌入 %d 张图表到综合报告 Markdown", len(lines))
 
     def _embed_synthesis_charts_in_html(
         self, html_path: Path, output_dir: Path, chart_paths: List[Path]
@@ -925,7 +925,17 @@ Check: (1) Both MD and HTML present and meaningful? (2) HTML is complete documen
     async def _generate_synthesis_report(
         self, synthesis: ExperimentSynthesis
     ) -> Optional[Path]:
-        """由 LLM 根据综合内容与图表自主决定布局，直接生成 Markdown 与 HTML，经裁判校验。"""
+        """生成综合报告。
+
+        由 LLM 根据综合内容与图表自主决定布局，直接生成 Markdown 与 HTML，
+        经裁判校验。支持重试机制，累积错误历史避免重复问题。
+
+        Args:
+            synthesis: 实验综合结果对象。
+
+        Returns:
+            生成的报告路径，失败时返回 None。
+        """
         output_dir = self.workspace_path / self.config.synthesis_output_dir_name
         output_dir.mkdir(parents=True, exist_ok=True)
         sid = synthesis.synthesis_id
@@ -950,13 +960,16 @@ Check: (1) Both MD and HTML present and meaningful? (2) HTML is complete documen
                 "Include at least: Overview, Hypothesis Summary, Current Status, and Recommendations."
             )
         max_retries = self.config.max_synthesis_report_retries
-        last_feedback: Optional[str] = None
+        error_history: list[str] = []  # 累积错误历史
 
         for attempt in range(max_retries):
+            # 构建包含历史错误的反馈
             feedback_block = ""
-            if last_feedback:
+            if error_history:
                 feedback_block = (
-                    f"\n**Previous feedback (must address)**: {last_feedback}\n"
+                    "\n**Previous issues (avoid these)**:\n"
+                    + "\n".join(f"  {i+1}. {err}" for i, err in enumerate(error_history[-3:]))
+                    + "\n"
                 )
 
             prompt = f"""You are writing a synthesis report. Below is the synthesis content and available charts.
@@ -981,9 +994,9 @@ Use CDATA to wrap content. HTML must be a complete, well-styled document. If cha
                 data = parse_llm_report_response(raw)
             except XmlParseError as e:
                 if attempt >= max_retries - 1:
-                    self.logger.warning("Synthesis report XML parse failed: %s", e)
+                    self.logger.warning("综合报告 XML 解析失败: %s", e)
                     return report_md
-                last_feedback = str(e)
+                error_history.append(f"XML解析错误: {str(e)[:200]}")
                 continue
             # 双语解析：优先取中文；markdown/html 为解析器计算出的聚合字段
             md_content = (data.get("markdown_zh") or data.get("markdown") or "").strip()
@@ -997,13 +1010,11 @@ Use CDATA to wrap content. HTML must be a complete, well-styled document. If cha
                 and len(html_content) < MIN_CONTENT_LEN
             )
             if is_too_short:
-                last_feedback = (
-                    "Report content is empty or too short (both MD and HTML < 150 chars). "
-                    "You MUST produce a complete report with Executive Overview, Hypothesis Summary, "
-                    "Cross-experiment Analysis, Conclusions, and Recommendations. Do not return minimal or placeholder content."
+                error_history.append(
+                    "报告内容过短 (< 150 chars)，必须包含完整章节"
                 )
                 self.logger.warning(
-                    "Synthesis report too short (md=%d, html=%d chars), retrying (%s/%s)",
+                    "综合报告内容过短 (md=%d, html=%d chars)，正在重试 (%s/%s)",
                     len(md_content),
                     len(html_content),
                     attempt + 1,
@@ -1011,7 +1022,7 @@ Use CDATA to wrap content. HTML must be a complete, well-styled document. If cha
                 )
                 if attempt >= max_retries - 1:
                     self.logger.warning(
-                        "Synthesis report empty after %d attempts; saving partial.",
+                        "综合报告在 %d 次尝试后仍为空，保存部分结果。",
                         max_retries,
                     )
                     if md_content or html_content:
@@ -1051,16 +1062,16 @@ Use CDATA to wrap content. HTML must be a complete, well-styled document. If cha
                 md_content, html_content, len(chart_paths), synthesis
             )
             if judgment.success:
-                self.logger.info("Saved synthesis report: %s", report_md)
+                self.logger.info("综合报告已保存: %s", report_md)
                 return report_md
             if attempt >= max_retries - 1:
                 self.logger.warning(
-                    "Synthesis report judgment failed after %d attempts; keeping last output.",
+                    "综合报告裁判失败，已尝试 %d 次，保留最后输出。",
                     max_retries,
                 )
                 return report_md
-            last_feedback = f"{judgment.reason}. {judgment.retry_instruction}"
-            self.logger.info("Synthesis report judgment: %s, retrying", judgment.reason)
+            error_history.append(f"{judgment.reason}. {judgment.retry_instruction}")
+            self.logger.info("综合报告需要改进: %s，正在重试", judgment.reason)
 
         return report_md
 
