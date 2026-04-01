@@ -1,51 +1,58 @@
 ---
 name: cognition
-description: Produce emotion.json and intention.json from workspace context (observation, optional thought, optional needs, optional memory).
+description: Produce emotion.json and intention.json from workspace context.
 ---
 
 # Cognition
 
-**You only write:** `emotion.json` and `intention.json`.
+Read available workspace context and produce `emotion.json` and `intention.json`.
 
-**You do not write:** `thought.txt` (that is the `thought` skill), `needs.json` / `current_need.txt` (owned by the `needs` subprocess when used), or `plan_state.json`.
+## Output Files
 
-There is **no required order** with other built-in skills: use whatever files already exist; missing files mean you reason with less context.
+- `emotion.json`: Current emotional state
+- `intention.json`: Current intention/goal
 
-## Optional inputs (read if present)
+## Input Files (optional, read if present)
+
+Read any existing files from the workspace as context. Common inputs include:
 
 | File | Use |
 |------|-----|
 | `observation.txt` | Main grounding for this tick |
-| `thought.txt` | Inner monologue; if missing, infer mental tone from observation + profile only |
-| `needs.json`, `current_need.txt` | **Read-only** urgency context if the needs skill has run |
-| `memory.jsonl` | Last 5–10 lines optional |
-| `emotion.json`, `intention.json` | Continuity from prior ticks |
-| `plan_state.json` | Whether a multi-step plan is in flight (optional) |
+| `thought.txt` | Inner monologue context |
+| `needs.json`, `current_need.txt` | Urgency context |
+| `memory.jsonl` | Last 5–10 lines for continuity |
+| `emotion.json`, `intention.json` | Prior state for continuity |
+| `plan_state.json` | Whether a multi-step plan is in flight |
 
-Also use **Agent Identity** from the system prompt. Other JSON in the workspace (`beliefs.json`, etc.) — read only if present.
+Also use **Agent Identity** from the system prompt. Other JSON in the workspace (`beliefs.json`, etc.) can be read if present. **Skip missing files gracefully.**
 
-## What to do (one pass)
+## What to do
 
 1. Integrate whatever inputs exist into one appraisal.
-2. Write **`emotion.json`**: `primary`, dimensional **`intensities`**, plus `valence` / `arousal` / `note` as in the schema below.
-3. Write **`intention.json`**: one chosen goal with TPB scores.
+2. Write `emotion.json`: `primary`, dimensional `intensities`, plus `valence` / `arousal` / `note`.
+3. Write `intention.json`: one chosen goal with TPB scores.
 
 ## Emotion
 
-**Intensities** (`sadness`, `joy`, `fear`, `disgust`, `anger`, `surprise`) are integers **0–10**:
+### Intensities (0–10 integers)
+
+Dimensions: `sadness`, `joy`, `fear`, `disgust`, `anger`, `surprise`
 
 | Band | Level |
-|------|--------|
+|------|-------|
 | 0–2 | very low |
 | 3–4 | low |
 | 5–6 | moderate |
 | 7–8 | high |
 | 9–10 | very high |
 
-- Combine **recent events** (`memory.jsonl` tail, `observation.txt`) with **need levels** from `needs.json` when present: urgent unmet needs push negative dimensions up; satisfied needs support positive ones.
-- If a previous `emotion.json` exists, **change intensities only when the situation meaningfully shifted**; otherwise stay near prior values.
+- Combine recent events (`memory.jsonl` tail, `observation.txt`) with any urgency signals present in the workspace (e.g., need levels if available).
+- If a previous `emotion.json` exists, change intensities only when the situation meaningfully shifted; otherwise stay near prior values.
 
-**`primary`**: exactly **one** English label, case-sensitive, from:
+### Primary Emotion Label
+
+Exactly **one** English label, case-sensitive, from:
 
 `Joy`, `Distress`, `Resentment`, `Pity`, `Hope`, `Fear`, `Satisfaction`, `Relief`, `Disappointment`, `Pride`, `Admiration`, `Shame`, `Reproach`, `Liking`, `Disliking`, `Gratitude`, `Anger`, `Gratification`, `Remorse`, `Love`, `Hate`
 
@@ -57,21 +64,19 @@ Also use **Agent Identity** from the system prompt. Other JSON in the workspace 
 | `subjective_norm` | 0–1 | Social pressure / what others expect |
 | `perceived_control` | 0–1 | How controllable / feasible it feels |
 
-Higher values on all three → stronger commitment. **`priority`**: lower number = more urgent this tick.
+Higher values on all three → stronger commitment. `priority`: lower number = more urgent this tick.
 
-**Selection procedure**
+### Selection Procedure
 
-1. List up to **5** candidate goals (fewer is fine).
-2. When `current_need.txt` / `needs.json` flags satiety, energy, safety, or social as urgent, **prefer candidates that address that**; if the active need is `whatever`, leisure or exploration is appropriate.
+1. List up to 5 candidate goals (fewer is fine).
+2. If the workspace contains urgency signals (e.g., unmet needs), prefer candidates that address them; otherwise leisure or exploration is appropriate.
 3. Score each candidate with the three TPB fields; assign `priority` to each.
-4. **Emit only the best candidate** as `intention.json` (lowest `priority` wins ties you care about).
-5. Phrase `intention` as a **goal** (“Eat lunch at the café”), not step-by-step motor instructions.
+4. Emit only the best candidate as `intention.json` (lowest `priority` wins).
+5. Phrase `intention` as a goal ("Eat lunch at the café"), not step-by-step motor instructions.
 
-**Need ordering (for your own reasoning):** compare satisfaction to thresholds in order **satiety → energy → safety → social**; if none are at or below threshold, treat the situation as no single urgent drive.
+## Output File Schemas
 
-## Output files
-
-### `emotion.json`
+### emotion.json
 
 ```json
 {
@@ -90,7 +95,7 @@ Higher values on all three → stronger commitment. **`priority`**: lower number
 }
 ```
 
-### `intention.json`
+### intention.json
 
 ```json
 {
@@ -103,7 +108,7 @@ Higher values on all three → stronger commitment. **`priority`**: lower number
 }
 ```
 
-## Execution sequence
+## Execution Sequence
 
 1. `workspace_read` any of the optional inputs that exist (skip missing paths).
 2. `workspace_write("emotion.json", ...)`
@@ -112,5 +117,4 @@ Higher values on all three → stronger commitment. **`priority`**: lower number
 
 ## Notes
 
-- Do **not** duplicate the needs subprocess: never overwrite `needs.json` here.
 - Intentions should be feasible given the latest observation; if the situation is unclear, prefer low-risk intentions (`wait`, `observe`, `move to safer area`) over fantasy.

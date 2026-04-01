@@ -221,7 +221,7 @@ Reconcile `intention.json` with the plan you are executing:
 
 If the balance is “yes”, clear or rewrite `plan_state.json` and build a new plan.
 
-Also honor **`needs.json.should_interrupt_plan`** and **`current_need`** when present: critical satiety/energy (per needs skill) means **discard** the current plan and replan toward that need.
+If the workspace indicates an urgent need that should interrupt the current plan, discard the plan and replan toward addressing that need.
 
 ### When to Interrupt a Plan
 
@@ -234,7 +234,7 @@ An ongoing plan should be interrupted when:
 
 #### Need-based interrupt
 
-When `needs.json` sets `should_interrupt_plan: true`, reset `plan_state.json` and generate steps that address `current_need`.
+When the workspace signals that a plan should be interrupted (e.g., an urgent need flag), reset `plan_state.json` and generate steps that address the urgent condition.
 
 ### How to Determine Interruption
 
@@ -371,7 +371,7 @@ After calling `codegen`, check the result:
 
 ## After success or failure
 
-Update `plan_state.json` (and optionally `memory.jsonl`) to record step outcomes. **Do not** write `emotion.json` in this skill—use the cognition skill when affect should change.
+Update `plan_state.json` (and optionally `memory.jsonl`) to record step outcomes.
 
 ## Workspace Files Summary
 

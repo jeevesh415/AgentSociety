@@ -24,7 +24,7 @@ Anything else in the workspace may **optionally** read this file; nothing is aut
 ## Voice and content
 
 1. Tie what happened recently to **goals, values, and personality** (Agent Identity / profile).
-2. If `needs.json` exists, let urgency (hunger, fatigue, etc.) **color tone**, not only factual mentions.
+2. If the workspace contains urgency signals (e.g., need levels), let them **color tone**, not only factual mentions.
 3. Use **full sentences**, one coherent inner voice—never a task checklist.
 4. Prefer **concrete** who/where over slogans.
 
@@ -36,6 +36,5 @@ Anything else in the workspace may **optionally** read this file; nothing is aut
 
 ## Notes
 
-- This skill only owns **`thought.txt`**. Do not write `emotion.json` or `intention.json` here.
 - Keep tone consistent with Agent Identity (profile) when relevant.
 - If `observation.txt` is missing or empty, write a brief note that perception is unclear rather than inventing scenery.
