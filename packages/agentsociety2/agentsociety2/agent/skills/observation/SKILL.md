@@ -9,7 +9,7 @@ You are a situated agent in a simulated world. This skill fetches the latest sen
 
 ## When to Use
 
-Activate this skill at the **start of every step**. Observation is the foundation for all downstream reasoning (needs, cognition, plan, memory).
+Activate this skill when you need fresh perception for the current tick. Other skills **may** read `observation.txt` / `observation_ctx.json` if those files exist—there is no hard activation order.
 
 ## Workflow
 
@@ -29,6 +29,10 @@ workspace_write("observation.txt", <stdout text>)
 ```
 workspace_write("observation_ctx.json", <ctx as JSON string>)
 ```
+
+## Persisting perception
+
+After a successful observe, if you want a durable trace, append one line to `memory.jsonl` with `type: "observation"` (or `event`) and a short factual `summary`. Skip if this tick’s perception duplicates the latest entry.
 
 ## What Observation Contains
 
@@ -52,23 +56,6 @@ The observation text typically includes:
 ### Available Actions
 - What actions are possible in the current location
 - What interactions are available with nearby entities
-
-## Observation as Memory
-
-After each observation, consider adding it to memory:
-
-```json
-{
-  "tick": 42,
-  "time": "2024-01-15T10:30:00",
-  "type": "event",
-  "summary": "Observed: Standing at the park entrance. Alice is nearby.",
-  "tags": ["observation", "park", "alice"],
-  "importance": "low"
-}
-```
-
-This helps maintain a record of what the agent has seen and experienced.
 
 ## Re-observation After Actions
 
@@ -104,10 +91,10 @@ The `observation_ctx.json` typically contains:
 
 ## Important Notes
 
-- Always write `observation.txt` even if the observation seems mundane—downstream skills depend on it.
-- Do NOT skip observation. Without it, needs/cognition/plan have no input.
-- The `ctx` JSON may be large; you don't need to memorize it all—just write it to the workspace file. Other skills can `workspace_read` specific fields as needed.
-- If `codegen` returns an error, write the error to `observation.txt` so the issue is visible to downstream skills, then proceed.
+- Prefer writing `observation.txt` every time you observe so the workspace stays self-consistent.
+- If you skip observation, other skills have less grounding—work from profile + whatever files already exist.
+- The `ctx` JSON may be large; you don't need to memorize it all—write it to `observation_ctx.json` and let readers pull fields as needed.
+- If `codegen` returns an error, write a short note into `observation.txt` so later reads see what failed.
 
 ## Notes on State
 

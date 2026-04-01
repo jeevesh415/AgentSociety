@@ -1,93 +1,77 @@
 ---
 name: memory
 description: Persist important outcomes from this step to long-term storage.
-requires:
-  - observation
 ---
 
 # Memory
 
-You are the agent's long-term memory system. After each step, decide what's worth remembering and append it to `memory.jsonl`.
+You are the agent's long-term memory system. When you run this skill, decide what's worth remembering and append it to `memory.jsonl`, using whatever workspace context you already have (no required ordering with other skills).
 
-## Memory Architecture
+## Architecture (conceptual)
 
-The agent maintains multiple memory subsystems:
+Three layers:
 
-### 1. Short-term Memory (Working Memory)
+### 1. Working context (implicit)
 
-- **Storage**: In-memory list, recent N entries (default: 10)
-- **Purpose**: Quick access to recent events for immediate reasoning
-- **Content**: Recent observations, actions, and their outcomes
-- **Window Size**: Configurable via `short_memory_window_size`, typically 10 entries
-- **Usage**: Most recent memories are included in agent state for LLM prompts
+- **What**: Recent tool-loop messages plus any workspace files you choose to read in this step.
+- **Purpose**: Immediate reasoning; there is no separate hidden memory buffer beyond workspace + thread.
+- **Usage**: Read only files that exist; skip missing paths.
 
-### 2. Long-term Memory (`memory.jsonl`)
+### 2. Long-term store (`memory.jsonl`)
 
-- **Storage**: Persistent JSONL file
-- **Purpose**: Persistent storage of important experiences
-- **Content**: Significant events, decisions, social interactions, discoveries
+- **What**: Append-only JSONL in the agent workspace.
+- **Purpose**: Persist what should survive across ticks (events, decisions, plan outcomes, abstract takeaways).
+- **Usage**: Append one JSON object per line (see format below).
 
-### 3. Cognition Memory (Step-level Buffer)
+### 3. Optional “step bundle” (convention)
 
-- **Storage**: Temporary buffer cleared after each step
-- **Purpose**: Collect cognitive updates during a step, then flush to long-term memory
-- **Content**: Need adjustments, emotion updates, intention changes, plan updates, ReAct interactions
-- **Types**: `need`, `emotion`, `cognition`, `intention`, `plan`, `react`, `plan_execution`
+- If you want one rich JSONL line per tick, you may bundle highlights into `summary` from whatever files you read in this step—purely optional.
 
-## Cognition Memory Types
+## Entry `type` values (recommended)
 
-During a step, various types of cognition memories are collected:
+Use `type` to help future `grep` / manual scanning:
 
-| Type | When Added | Example |
-|------|------------|---------|
-| `need` | After need adjustment | "Adjusted needs based on memories: satiety low after not eating" |
-| `emotion` | After emotion update for plan outcome | "I feel relieved that I successfully completed my plan" |
-| `cognition` | After thought/emotion update | "Updated thought: I should find food. Updated emotion: Distress" |
-| `intention` | After intention update | "Selected intention: Find food (Priority: 1)" |
-| `plan` | After plan generation | "Generated plan for intention: Find food. Steps: 1. Look for restaurants..." |
-| `react` | During ReAct interactions | "ReAct interaction 1: Move to café -> Successfully moved" |
-| `plan_execution` | After step execution completes | "Executed step: Walk to café. Status: completed. Result: Arrived at café" |
+| Type | When it applies | Example |
+|------|------------------|---------|
+| `need` | After notable need change (if you track needs in workspace) | “Satiety dropped; decided to find food” |
+| `emotion` | After strong emotion / regulation | “Relieved after plan succeeded” |
+| `cognition` | Thought / appraisal update | “Reframed delay as acceptable” |
+| `intention` | Intention changed | “Switched intention to head home” |
+| `plan` | Plan created or revised | “New plan: 3 steps to reach clinic” |
+| `react` | Notable environment interaction | “codegen: move → arrived at gate” |
+| `plan_execution` | Step finished or failed | “Step ‘walk to café’ completed” |
+| `event` | General occurrence | “Met Alice; she mentioned the job” |
+| `observation` | Notable perception to recall later | Short summary of what you saw / heard |
+| `social` / `decision` / `discovery` / `plan_outcome` | As in the table below |
 
-## Cognition Memory Flush
+Use **`type`** + **`tags`** so grep and tail-scans stay useful—for example tag `observe` on observation lines, `step` on execution lines.
 
-At the **end of each step**, all cognition memories are structured and flushed to long-term memory:
+## Optional: one structured block per tick
 
-### Flush Process
+If you prefer one consolidated line instead of many tiny appends, you can format `summary` as short markdown-ish text, for example:
 
-1. **Group by type**: Organize memories by their type
-2. **Format as structured text**:
-   ```
-   ## COGNITION
-   - Updated thought: I should find something to eat soon.
-   - Updated emotion: Distress
+```
+## COGNITION
+- Thought: …
+- Emotion: …
 
-   ## NEED
-   - Adjusted needs based on memories: satiety is low after not eating
+## INTENTION
+- …
 
-   ## INTENTION
-   - Selected intention: Find food (Priority: 1)
+## PLAN
+- …
 
-   ## PLAN
-   - Generated plan for intention: Find food
-     1. Look for nearby restaurants
-     2. Go to the closest one
-     3. Order food
+## REACT
+- interaction 1: …
+```
 
-   ## REACT
-   - ReAct interaction 1 for step 'Walk to café': Move to café -> Successfully moved
-   - ReAct interaction 2 for step 'Walk to café': Enter café -> Entered
+Then append **one** JSONL object with a `type` like `cognition` or `event` and this text in `summary`. This is a **writing convention**, not an automatic runtime flush.
 
-   ## PLAN_EXECUTION
-   - Executed step: Walk to café. Status: completed. Interactions: 2. Result: Arrived at café entrance
-   ```
-3. **Write to memory.jsonl** as a single structured entry
-4. **Clear cognition memory buffer** for next step
+### Why bundle sometimes
 
-### Why Flush at Step End?
-
-- **Efficiency**: One structured write instead of many small writes
-- **Coherence**: Related information stays together
-- **Retrievability**: Easier to search and understand step activities
+- **Coherence**: One tick’s story stays together.
+- **Efficiency**: Fewer appends when the step was busy.
+- **Retrieval**: Easier to grep a single line per tick if you tag it (`tags`: include `tick_bundle`).
 
 ## When to Write a Memory
 
@@ -140,13 +124,7 @@ Each entry is a single JSON line in `memory.jsonl`:
 
 ## How to Write
 
-1. Read the workspace files from this step:
-   - `observation.txt` — what happened
-   - `emotion.json` — how you felt (optional, for emotional memories)
-   - `thought.txt` — what you were thinking (optional)
-   - `intention.json` — what you decided to do (optional)
-   - `needs.json` — current need levels (optional)
-   - `plan_state.json` — plan status (optional)
+1. Optionally `workspace_read` any of: `observation.txt`, `thought.txt`, `emotion.json`, `intention.json`, `needs.json`, `plan_state.json` — only if present and relevant.
 2. Decide if anything is worth remembering (see criteria above).
 3. If yes, construct the memory entry and append:
 
@@ -164,18 +142,13 @@ Each entry is a single JSON line in `memory.jsonl`:
 
 4. If nothing notable happened, call `done` immediately.
 
-## Memory Retrieval (for other skills)
+## Memory Retrieval
 
-Other skills (especially cognition) can read `memory.jsonl` to inform decisions. Recent memories provide context about:
-
-- **Ongoing relationships**: Who have you talked to recently?
-- **Unfinished plans**: What were you trying to accomplish?
-- **Past experiences**: Have you been to this place before?
-- **Emotional context**: How were you feeling recently?
+Readers of `memory.jsonl` typically scan the last few lines for recent context.
 
 ### Reading Recent Memories
 
-Focus on the most recent entries (last 5–10) for immediate context:
+Focus on the most recent entries (last 5–10) when you need continuity:
 
 ```json
 {
@@ -200,51 +173,20 @@ Met Alice at the park. She mentioned a job opening at the library.
 
 Recent memories (within last few ticks) are most relevant for immediate decisions.
 
-## Memory Search
+## Searching older memories
 
-When planning or reasoning about a specific topic, search for related memories:
-
-```json
-{
-  "tool_name": "memory_search",
-  "arguments": {
-    "query": "Alice",
-    "limit": 5
-  }
-}
-```
-
-This returns memories tagged with or containing the search term.
+There is no `memory_search` tool. Use `grep` on `memory.jsonl` (or `workspace_read` the tail of the file and scan locally), e.g. search for a name or tag substring.
 
 ## Guidelines
 
 - Keep summaries **concise** (1–2 sentences max). This is a log, not a diary.
 - Use **specific names and locations**, not vague references.
 - Don't duplicate information that's already in the most recent memory entry.
-- Over time, memory.jsonl grows. The agent's cognition skill should focus on the most recent entries (last 5–10) for immediate context.
 - **Timestamp all entries** for temporal reasoning.
 - **Tag entries** with relevant keywords for efficient retrieval.
 
-## Memory-Need-Emotion Integration
+## End of step (checklist)
 
-Memory influences needs and emotions:
-
-| Memory Content | Effect on State |
-|----------------|-----------------|
-| Recent eating | Increase satiety |
-| Social interaction | Increase social satisfaction |
-| Dangerous situation | Decrease safety, increase fear |
-| Success/achievement | Increase positive emotions, potentially increase safety/energy |
-| Failure | Decrease positive emotions, potentially decrease safety |
-
-When writing memories, consider how they should affect the agent's state in subsequent ticks.
-
-## Step End Memory Routine
-
-At the end of each agent step:
-
-1. **Flush cognition memory**: Convert buffer to structured text, write to memory.jsonl
-2. **Write observation memory**: If observation was notable, add as separate entry
-3. **Update short-term memory**: Add to in-memory recent list
-4. **Trim short-term memory**: Remove oldest entries if exceeding window size
-5. **Keep outputs consistent**: ensure `emotion.json`, `thought.txt`, `intention.json`, `plan_state.json` reflect the latest state
+1. Decide whether this tick warrants a new JSONL line (or a bundled summary line).
+2. If yes: `workspace_read("memory.jsonl")` then `workspace_write` with prior content plus `\n` + new JSON line, or append via `bash` (`>>`).
+3. If nothing notable happened, skip writing and finish the skill with `done`.

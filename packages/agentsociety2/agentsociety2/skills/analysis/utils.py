@@ -281,11 +281,16 @@ def _xml_element_to_value(el: ET.Element) -> Any:
 
 
 def _parse_xml_to_root(xml_str: str) -> ET.Element:
-    """解析 XML 字符串为 Element；失败则抛出 XmlParseError。"""
+    """解析 XML 字符串为 Element，使用 elemental-xenon 修复 LLM 生成的畸形 XML。"""
+    from xenon import repair_xml_safe, TrustLevel
+    
+    # 使用 xenon 修复 XML（专为 LLM 输出设计）
+    repaired = repair_xml_safe(xml_str, trust=TrustLevel.UNTRUSTED)
+    
     try:
-        return ET.fromstring(xml_str)
+        return ET.fromstring(repaired)
     except ET.ParseError as e:
-        raise XmlParseError(f"XML parse failed: {e}", raw_content=xml_str) from e
+        raise XmlParseError(f"XML parse failed even after repair: {e}", raw_content=repaired) from e
 
 
 def parse_llm_xml_response(content: str, root_tag: str = "result") -> Dict[str, Any]:

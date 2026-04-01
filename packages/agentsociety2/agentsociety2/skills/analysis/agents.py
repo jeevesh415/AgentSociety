@@ -328,12 +328,22 @@ Based on the experiment context and **actual data structure above**, generate an
                         "XML解析失败，尝试 %s 次后失败: %s", self.max_retries, e
                     )
                     raise
-                messages.append(
-                    {
-                        "role": "user",
-                        "content": f"XML parse failed: {e}\n\nPlease fix and return valid XML only.",
-                    }
+                # 用 LLM 总结错误信息，生成有效反馈
+                raw_content = getattr(e, 'raw_content', None)
+                error_summary = await self._summarize_error(e, raw_content)
+                
+                feedback = (
+                    f"Your previous output had a parsing error: {error_summary}\n\n"
+                    f"Please fix and return valid XML with this structure:\n"
+                    f"<analysis>\n"
+                    f"  <insights><item>...</item></insights>\n"
+                    f"  <findings><item>...</item></findings>\n"
+                    f"  <conclusions>...</conclusions>\n"
+                    f"  <recommendations><item>...</item></recommendations>\n"
+                    f"</analysis>\n\n"
+                    f"Return ONLY the corrected XML."
                 )
+                messages.append({"role": "user", "content": feedback})
                 continue
 
             if (
@@ -364,8 +374,26 @@ Based on the experiment context and **actual data structure above**, generate an
         )
 
     def _parse_analysis_response(self, content: str) -> Dict[str, Any]:
-        """解析分析结果。"""
-        data = parse_llm_xml_response(content, root_tag="analysis")
+        """解析分析结果。使用 xenon 修复后的 XML 解析。"""
+        from .utils import parse_llm_json_response
+        
+        # 尝试 XML 解析（xenon 会自动修复）
+        try:
+            data = parse_llm_xml_response(content, root_tag="analysis")
+        except XmlParseError as e:
+            # XML 完全失败，尝试 JSON 解析
+            try:
+                data = parse_llm_json_response(content)
+            except Exception as json_err:
+                # 都失败，抛出详细错误信息供迭代反馈
+                raise XmlParseError(
+                    f"Both XML and JSON parsing failed. "
+                    f"XML error: {e}. JSON error: {json_err}. "
+                    f"Please ensure output is valid XML with <analysis> root tag "
+                    f"containing: insights, findings, conclusions, recommendations.",
+                    raw_content=content
+                )
+        
         insights = data.get("insights", [])
         findings = data.get("findings", [])
         recs = data.get("recommendations", [])
@@ -1320,6 +1348,45 @@ Return ONLY the summary, no additional text."""
         except Exception as e:
             self.logger.warning("文档总结失败 (%s): %s", document_type, e)
             return document[:max_length] + "...[truncated]"
+
+    async def _summarize_error(
+        self,
+        error: Exception,
+        raw_content: Optional[str] = None,
+    ) -> str:
+        """使用 LLM 总结错误信息，生成简洁的反馈。"""
+        error_msg = str(error)
+        
+        # 如果错误信息很短，直接返回
+        if len(error_msg) <= 200 and (not raw_content or len(raw_content) <= 200):
+            return error_msg
+        
+        # 构建总结提示
+        prompt_parts = [
+            "Summarize this error message concisely for an LLM to understand and fix.",
+            "Focus on: what went wrong, what format is expected.\n",
+            f"**Error**: {error_msg[:1000]}",
+        ]
+        
+        if raw_content:
+            prompt_parts.append(f"\n**Problematic Output** (first 500 chars):\n{raw_content[:500]}")
+        
+        prompt_parts.append("\nReturn a brief summary (2-3 sentences) explaining what needs to be fixed.")
+        
+        prompt = "\n".join(prompt_parts)
+        
+        try:
+            response = await self.llm_router.acompletion(
+                model=self.model_name,
+                messages=[{"role": "user", "content": prompt}],
+                temperature=0.3,
+            )
+            summary = (response.choices[0].message.content or "").strip()
+            self.logger.info("错误总结: %d -> %d chars", len(error_msg), len(summary))
+            return summary
+        except Exception as e:
+            self.logger.warning("错误总结失败: %s", e)
+            return error_msg[:300] + "...[error summary failed]"
 
     async def _summarize_schema(
         self,

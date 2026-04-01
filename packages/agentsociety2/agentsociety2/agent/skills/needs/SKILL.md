@@ -2,13 +2,11 @@
 name: needs
 description: Update physiological/social need levels via subprocess heuristic.
 script: scripts/needs.py
-requires:
-  - observation
 ---
 
 # Needs
 
-Subprocess skill that maintains four physiological/social need levels based on the current observation. Needs drive motivation: a hungry agent seeks food, a lonely agent seeks company.
+Subprocess skill that maintains four physiological/social need levels from **observation text you pass in** (usually the contents of `observation.txt` if that file exists—read it first with `workspace_read`, or pass `""` if unavailable). Needs drive motivation: a hungry agent seeks food, a lonely agent seeks company.
 
 ## Understanding Human Needs
 
@@ -33,7 +31,7 @@ These values will change over time through natural decay and activities.
 |------|-------|-----------|-------------|
 | `satiety` | 0.0–1.0 | 0.2 (T_H) | Hunger satisfaction. Decays over time; increases when eating. |
 | `energy` | 0.0–1.0 | 0.2 (T_D) | Physical energy. Decays over time; increases when resting/sleeping. |
-| `safety` | 0.0–1.0 | 0.2 (T_P) | Feeling of security. Drops in dangerous situations. |
+| `safety` | 0.0–1.0 | 0.2 (T_P) | Security broadly: physical safety, stable work/income, financial peace—not only “no immediate danger”. Drops when things feel precarious, threatening, or economically unstable. |
 | `social` | 0.0–1.0 | 0.3 (T_C) | Social fulfillment. Increases through conversation and companionship. |
 
 ## Need Priorities and Interruption Rules
@@ -51,7 +49,7 @@ Needs are organized by priority, with lower priority numbers indicating higher u
 - **Can interrupt other plans**:  **YES** - Fatigue can make it difficult to continue other activities effectively
 
 ### 3. **Safety** (Priority 3)
-- **Meaning**: The need to maintain or improve your safety level
+- **Meaning**: Stay secure physically, financially, and situationally (work, income, avoiding unsafe places)
 - **When it becomes urgent**: When `safety` drops below or equals the threshold
 - **Can interrupt other plans**:  **NO** - Safety needs are important but typically don't require immediate interruption
 
@@ -83,22 +81,7 @@ Even without negative events, the agent will eventually need to eat and rest.
 
 ## Plan Interruption Logic
 
-The `should_interrupt_plan` output indicates whether the current urgent need should cause the agent to abandon its current plan. **This value is written into `needs.json` each tick** so downstream skills can reliably read it from the workspace.
-
-```json
-{
-  "current_need": "satiety",
-  "should_interrupt_plan": true
-}
-```
-
-**Interruption happens when:**
-1. The current need is `satiety` or `energy` (can_interrupt = true)
-2. AND the need value is at or below threshold
-
-**Plan skill should:**
-1. Read `should_interrupt_plan` from `needs.json`
-2. If true, abandon current plan and generate new plan addressing the urgent need
+The `should_interrupt_plan` flag is written to `needs.json` when satiety/energy is urgent and interruptible. Any skill that maintains `plan_state.json` **may** read this field and reset the plan—this is a **workspace convention**, not a hard dependency between skills.
 
 ## How to Call
 
@@ -159,18 +142,6 @@ The single most urgent need key (e.g. `"satiety"` or `"whatever"`)
 }
 ```
 
-## How Downstream Skills Should Use This
-
-### cognition skill
-- Read `current_need.txt` to understand what's driving motivation
-- Read `needs.json` for nuanced multi-need awareness
-- Consider `should_interrupt_plan` when updating intentions
-
-### plan skill
-- If `should_interrupt_plan` is true, abandon current plan
-- Generate new plan addressing the urgent need
-- Prioritize actions that address the current need
-
 ## Need Adjustment Logic
 
 Adjustments happen based on:
@@ -185,7 +156,6 @@ Adjustments happen based on:
 
 ## Notes
 
-- The subprocess uses keyword matching—heuristic baseline. Cognition provides intelligence.
+- The subprocess uses keyword matching—heuristic baseline only.
 - Low values (< 0.3) indicate urgency.
-- Need satisfaction influences emotion.
 - Initial values are chosen to create realistic starting conditions (energy starts lower, safety higher).

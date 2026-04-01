@@ -1,14 +1,17 @@
 ---
 name: plan
 description: Turn the current intention into an environment action for this tick.
-requires:
-  - observation
-  - cognition
 ---
 
 # Plan
 
-You are the agent's executive function. Read the intention (from cognition) and translate it into a concrete environment action via `codegen`.
+You are the agent's **motor / executive** layer: turn a stated goal into a concrete `codegen` call (and optional `plan_state.json` for multi-step work).
+
+## Intention source (no hard deps)
+
+1. If `intention.json` exists, use it.
+2. Else if `thought.txt` or `observation.txt` exists, infer a **single short goal line**, write a minimal `intention.json` yourself (`intention`, `priority`, `reasoning` fields), then execute.
+3. Else use Agent Identity + a conservative default (e.g. `wait` / observe) and still write `intention.json` so the workspace stays explicit.
 
 ## Configuration
 
@@ -24,11 +27,11 @@ The plan skill has configurable parameters:
 
 | File | Content |
 |------|---------|
-| `intention.json` | What you want to do (intention, priority, TPB scores, reason) |
+| `intention.json` | Goal for this tick (see **Intention source** above if absent) |
 | `observation.txt` | Current perception (for grounding actions in reality) |
 | `observation_ctx.json` | Structured environment context (if available) |
 | `plan_state.json` | Ongoing multi-step plan state (if exists) |
-| `memory.jsonl` | Related memories for context |
+| `memory.jsonl` | Optional context |
 
 ## Plan Model
 
@@ -195,20 +198,30 @@ Example sequence:
 
 ## Checking Step Completion
 
-After each interaction, determine if the step is complete:
+Classify the **active plan step** after each interaction:
 
-1. **Completed**: The step intention has been fulfilled
-2. **In Progress**: The step is ongoing but not yet complete
-3. **Failed**: The step cannot be completed (especially after repeated unsuccessful attempts)
+| Status | Meaning |
+|--------|---------|
+| `completed` | Step intention is satisfied given latest observation / tool thread. |
+| `in_progress` | Still in flight. If the environment says the action is **unsupported**, use **`failed`**, not endless `in_progress`. |
+| `failed` | Unreachable, or **repeated failures** on the same subgoal with no progress (prefer `failed` over spinning). |
+| `pending` | Not started yet (if your `plan_state.json` tracks that). |
 
-Consider:
-- What the step intention is trying to achieve
-- What has been observed in the environment
-- What actions have been taken according to memories
-- Whether the goal of the step has been achieved
-- If memories show multiple failed attempts at the same goal with no progress, strongly consider returning "failed" to avoid infinite loops
+Check: step goal → latest observation → actions in thread / `memory.jsonl` → goal met? Multiple dead-end retries → `failed`. Then update `plan_state.json`.
 
 ## Plan Interruption
+
+### Intention vs current plan
+
+Reconcile `intention.json` with the plan you are executing:
+
+1. Is the latest intention **materially different** from the plan’s target?
+2. Is it **more urgent** than finishing the current plan?
+3. Should you **drop** the plan and replan?
+
+If the balance is “yes”, clear or rewrite `plan_state.json` and build a new plan.
+
+Also honor **`needs.json.should_interrupt_plan`** and **`current_need`** when present: critical satiety/energy (per needs skill) means **discard** the current plan and replan toward that need.
 
 ### When to Interrupt a Plan
 
@@ -219,13 +232,9 @@ An ongoing plan should be interrupted when:
 3. **Better opportunity**: A significantly better intention has been identified
 4. **Plan vs Intention mismatch**: Current intention is significantly different from plan target
 
-#### Need-based Interrupt (Satiety/Energy)
+#### Need-based interrupt
 
-To preserve the old PersonAgent behavior (“饥饿/疲劳可以打断当前动作/计划”), the plan skill must also check `needs.json`:
-- `needs.json.should_interrupt_plan`
-- `needs.json.current_need`
-
-If `should_interrupt_plan` is `true`, drop current `plan_state.json` and re-plan toward satisfying `current_need`.
+When `needs.json` sets `should_interrupt_plan: true`, reset `plan_state.json` and generate steps that address `current_need`.
 
 ### How to Determine Interruption
 
@@ -266,7 +275,7 @@ When a step completes successfully:
 1. **Increment step index** to move to next step
 2. **Check if more steps remain**
 3. **If more steps**: Continue executing the next step (don't wait for next tick if capacity allows)
-4. **If last step completed**: Mark plan as completed, update emotion
+4. **If last step completed**: Mark plan as completed and clear or finalize `plan_state.json`
 
 Example flow:
 ```
@@ -321,6 +330,16 @@ When there's no active plan, generate one from the current intention:
 3. Generate step-by-step plan (limited to max_plan_steps, typically 6)
 4. Ensure steps are actionable and realistic
 
+### Decomposing a goal into steps
+
+1. Each step is one clear **`intention`** string: what to achieve in that slice of work.  
+2. **`steps`** contains only what is **necessary**, at most **`max_plan_steps`** (default 6).  
+3. Use **`memory.jsonl`** (tail or `grep`) so you do not repeat known-failed moves.  
+4. Every step must be **executable under AVAILABLE ACTIONS** from the world description—no made-up verbs.  
+5. Avoid **query-only** steps to re-fetch facts you already have: rely on `observation.txt` / `observation_ctx.json` when they already state place, time, nearby entities.
+
+**Feasibility:** instructions must match the simulator’s action vocabulary—either one allowed action or a valid combination, at the right granularity.
+
 ### Plan Generation Guidelines
 
 1. Each execution step should have a clear `intention` field
@@ -350,25 +369,19 @@ After calling `codegen`, check the result:
 - **Avoid redundant queries**: Check observation first before querying the environment for information.
 - **Use available information**: Prioritize information from current observation, previous interactions, and related memories.
 
-## Plan Outcome Emotion Update
+## After success or failure
 
-When a plan completes or fails, update the agent's emotion:
-
-- **Plan completed**: Positive emotions (Satisfaction, Pride, Relief)
-- **Plan failed**: Negative emotions (Disappointment, Frustration, Shame)
-
-Write the emotion update to `emotion.json`.
+Update `plan_state.json` (and optionally `memory.jsonl`) to record step outcomes. **Do not** write `emotion.json` in this skill—use the cognition skill when affect should change.
 
 ## Workspace Files Summary
 
 | File | Purpose |
 |------|---------|
 | `plan_state.json` | Current multi-step plan state |
-| `intention.json` | Current intention from cognition |
+| `intention.json` | Current goal (from any source) |
 | `observation.txt` | Current environment perception |
 | `observation_ctx.json` | Structured environment data |
-| `emotion.json` | Updated emotion after plan outcome |
-| `memory.jsonl` | Plan generation and execution memories |
+| `memory.jsonl` | Optional execution notes |
 
 ## Template Mode (Optional)
 

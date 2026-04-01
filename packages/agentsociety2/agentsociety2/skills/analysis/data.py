@@ -353,7 +353,7 @@ class DataReader:
 
             if table in sample_data and sample_data[table]:
                 lines.append("Sample data (first rows):")
-                for i, row in enumerate(sample[table][:3], 1):
+                for i, row in enumerate(sample_data[table][:3], 1):
                     items = [f"  - {k}: {v}" for k, v in list(row.items())[:5]]
                     lines.append(f"  Row {i}:")
                     lines.extend(items)

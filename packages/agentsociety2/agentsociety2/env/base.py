@@ -36,9 +36,23 @@ import inspect
 import json
 import re
 from copy import deepcopy
+from dataclasses import dataclass
 from datetime import datetime
 from pathlib import Path
-from typing import TYPE_CHECKING, Any, Callable, ClassVar, Dict, Literal, Optional, Tuple, TypeVar, overload
+from typing import (
+    TYPE_CHECKING,
+    Any,
+    Callable,
+    ClassVar,
+    Dict,
+    Literal,
+    Optional,
+    Tuple,
+    TypeVar,
+    overload,
+)
+
+from agentsociety2.logger import get_logger
 
 if TYPE_CHECKING:
     from agentsociety2.storage import ReplayWriter
@@ -47,7 +61,63 @@ from mcp.server.fastmcp.tools.base import Tool
 from mcp.server.fastmcp.tools.tool_manager import ToolManager
 from openai.types.chat import ChatCompletionToolParam
 
-__all__ = ["tool", "EnvBase"]
+__all__ = [
+    "EnvBase",
+    "PersonStepConstraints",
+    "merge_person_step_constraints",
+    "tool",
+]
+
+_constraints_logger = get_logger()
+
+
+@dataclass(frozen=True)
+class PersonStepConstraints:
+    """单仿真步内对 PersonAgent 可见技能与工具白名单的约束。
+
+    环境可实现 :meth:`EnvBase.person_step_constraints` 返回本结构；PersonAgent 合并后执行，不绑定单一实验。
+    """
+
+    hide_skills: frozenset[str] = frozenset()
+    pin_allowed_tools_to_skill: str | None = None
+    forbid_disabling_skills: frozenset[str] = frozenset()
+
+
+def merge_person_step_constraints(
+    env_modules: list[Any],
+) -> PersonStepConstraints | None:
+    """合并路由器上所有环境模块返回的约束（并集/冲突检测）。"""
+    hide: set[str] = set()
+    forbid: set[str] = set()
+    pin: str | None = None
+    for m in env_modules or []:
+        fn = getattr(m, "person_step_constraints", None)
+        if not callable(fn):
+            continue
+        c = fn()
+        if c is None:
+            continue
+        hide.update(c.hide_skills)
+        forbid.update(c.forbid_disabling_skills)
+        if c.pin_allowed_tools_to_skill:
+            p = c.pin_allowed_tools_to_skill.strip()
+            if not p:
+                continue
+            if pin is None:
+                pin = p
+            elif pin != p:
+                _constraints_logger.warning(
+                    "person_step_constraints: conflicting pin_allowed_tools_to_skill %r vs %r (using first)",
+                    pin,
+                    p,
+                )
+    if not hide and not forbid and not pin:
+        return None
+    return PersonStepConstraints(
+        hide_skills=frozenset(hide),
+        pin_allowed_tools_to_skill=pin,
+        forbid_disabling_skills=frozenset(forbid),
+    )
 
 
 F = TypeVar("F", bound=Callable)
@@ -158,27 +228,27 @@ def tool(
         # Wrap the function to record call history
         original_func = func
         tool_name = name if name else func.__name__
-        
+
         # Get function signature to convert args to kwargs
         sig = inspect.signature(func)
         param_names = list(sig.parameters.keys())
         # Skip 'self' parameter for instance methods
-        if param_names and param_names[0] == 'self':
+        if param_names and param_names[0] == "self":
             param_names = param_names[1:]
 
         def _normalize_to_kwargs(args, kwargs):
             """
             Convert args and kwargs to unified kwargs dict based on function signature.
-            
+
             Args:
                 args: Positional arguments (excluding self)
                 kwargs: Keyword arguments
-                
+
             Returns:
                 Dict of arguments with parameter names as keys
             """
             normalized_kwargs = {}
-            
+
             # Process positional args first (map to parameter names by position)
             for i, arg in enumerate(args):
                 if i < len(param_names):
@@ -186,10 +256,10 @@ def tool(
                     # Only add if not already in kwargs (kwargs take precedence)
                     if param_name not in kwargs:
                         normalized_kwargs[param_name] = arg
-            
+
             # Add all kwargs
             normalized_kwargs.update(kwargs)
-            
+
             return normalized_kwargs
 
         def _create_call_record(
@@ -215,6 +285,7 @@ def tool(
             }
 
         if inspect.iscoroutinefunction(func):
+
             async def async_wrapper(self, *args, **kwargs):
                 exception_occurred = False
                 exception_info = None
@@ -360,7 +431,7 @@ class EnvBase(metaclass=EnvMeta):
         name = cls.__name__
         for suffix in ("Space", "Env", "Module"):
             if name.endswith(suffix) and len(name) > len(suffix):
-                name = name[:-len(suffix)]
+                name = name[: -len(suffix)]
                 break
         return re.sub(r"(?<=[a-z0-9])(?=[A-Z])", "_", name).lower()
 
@@ -501,6 +572,7 @@ It contains no functions or methods.
             Empty list if no skills are provided.
         """
         import inspect
+
         module_file = Path(inspect.getfile(cls))
         parent = module_file.parent
         dirs: list[Path] = []
@@ -543,6 +615,18 @@ It contains no functions or methods.
 
         Returns:
             Skill name to auto-activate, or None for default behavior.
+        """
+        return None
+
+    def person_step_constraints(self) -> Optional["PersonStepConstraints"]:
+        """可选：返回本步对 PersonAgent 的通用约束（隐藏技能、钉住 allowed-tools 等）。
+
+        默认无约束。需要「专用默认 skill 独占一步」类行为的环境应返回
+        :class:`PersonStepConstraints`，
+        由 PersonAgent 与具体实验/玩法解耦。
+
+        Returns:
+            PersonStepConstraints | None
         """
         return None
 
@@ -620,7 +704,7 @@ It contains no functions or methods.
             - exception_occurred: bool
             - exception_info: dict | None (type and message if exception occurred)
             - timestamp: str (ISO format)
-            
+
         Note:
             The kwargs dict contains all arguments (both positional and keyword) unified into
             a single dict with parameter names as keys, according to the function signature.
@@ -642,7 +726,9 @@ It contains no functions or methods.
             writer: The ReplayWriter instance to use for storing replay data.
         """
         self._replay_writer = writer
-        if writer is not None and (self._agent_state_columns or self._env_state_columns):
+        if writer is not None and (
+            self._agent_state_columns or self._env_state_columns
+        ):
             try:
                 loop = asyncio.get_running_loop()
                 task = loop.create_task(self._register_state_tables())
@@ -758,6 +844,4 @@ It contains no functions or methods.
         if not self._state_tables_registered:
             await self._register_state_tables()
         table_name = f"{self._state_table_prefix}_env_state"
-        await self._replay_writer.write(
-            table_name, {"step": step, "t": t, **data}
-        )
+        await self._replay_writer.write(table_name, {"step": step, "t": t, **data})
