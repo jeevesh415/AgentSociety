@@ -10,6 +10,7 @@ from __future__ import annotations
 
 from collections import defaultdict
 from datetime import datetime
+import json
 from pathlib import Path
 from typing import Any, Dict, List, Optional
 
@@ -27,6 +28,7 @@ from ...backend.services.replay_catalog import (
     query_dataset_rows,
     reflect_dataset_table,
 )
+from ...storage.replay_metadata import AGENT_PROFILE_DATASET_CAPABILITY
 from ...storage.models import AgentDialog, AgentProfile, AgentStatus
 
 router = APIRouter(prefix="/replay", tags=["replay"])
@@ -292,6 +294,18 @@ async def _get_agent_status_dataset(session: AsyncSession) -> Optional[Dict[str,
     return candidates[0] if candidates else None
 
 
+async def _get_agent_profile_dataset(session: AsyncSession) -> Optional[Dict[str, Any]]:
+    datasets = await load_dataset_catalog(session)
+    candidates = [
+        dataset
+        for dataset in datasets
+        if AGENT_PROFILE_DATASET_CAPABILITY in dataset.get("capabilities", [])
+        and dataset.get("entity_key")
+    ]
+    candidates.sort(key=lambda item: item["dataset_id"])
+    return candidates[0] if candidates else None
+
+
 async def _get_trajectory_dataset(session: AsyncSession) -> Optional[Dict[str, Any]]:
     datasets = await load_dataset_catalog(session)
     candidates = [
@@ -370,6 +384,45 @@ async def _load_social_events(
 
 
 async def _load_agent_profiles(session: AsyncSession) -> Dict[int, AgentProfile]:
+    dataset = await _get_agent_profile_dataset(session)
+    if dataset is not None:
+        table = await reflect_dataset_table(session, dataset)
+        entity_key = dataset["entity_key"]
+        if entity_key in table.c:
+            query = select(table).order_by(table.c[entity_key])
+            result = await session.execute(query)
+            profiles: Dict[int, AgentProfile] = {}
+            for row in result.mappings().all():
+                raw_id = row.get(entity_key)
+                if raw_id is None:
+                    continue
+                profile_payload = row.get("profile")
+                if isinstance(profile_payload, str):
+                    try:
+                        profile_payload = json.loads(profile_payload)
+                    except json.JSONDecodeError:
+                        profile_payload = {"raw": profile_payload}
+                if not isinstance(profile_payload, dict):
+                    profile_payload = {}
+
+                name = row.get("name")
+                if not isinstance(name, str) or not name.strip():
+                    name_value = profile_payload.get("name")
+                    if isinstance(name_value, str) and name_value.strip():
+                        name = name_value
+                    else:
+                        name = f"Agent_{int(raw_id)}"
+
+                created_at = _coerce_datetime(row.get("created_at")) or datetime.now()
+                profiles[int(raw_id)] = AgentProfile(
+                    id=int(raw_id),
+                    name=name,
+                    profile=profile_payload,
+                    created_at=created_at,
+                )
+            if profiles:
+                return profiles
+
     if await _table_exists(session, AgentProfile.__tablename__):
         result = await session.execute(select(AgentProfile))
         return {profile.id: profile for profile in result.scalars().all()}

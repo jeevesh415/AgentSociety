@@ -29,7 +29,10 @@ from fastapi import APIRouter, HTTPException, Query
 from pydantic import BaseModel
 
 from agentsociety2.logger import get_logger
-from agentsociety2.storage.replay_metadata import DATASET_CATALOG_TABLE
+from agentsociety2.storage.replay_metadata import (
+    AGENT_PROFILE_DATASET_CAPABILITY,
+    DATASET_CATALOG_TABLE,
+)
 
 logger = get_logger()
 
@@ -244,6 +247,19 @@ def _get_agent_status_dataset(cursor: sqlite3.Cursor) -> Optional[Dict[str, Any]
     return candidates[0] if candidates else None
 
 
+def _get_agent_profile_dataset(cursor: sqlite3.Cursor) -> Optional[Dict[str, Any]]:
+    candidates = [
+        dataset
+        for dataset in _load_dataset_catalog(cursor)
+        if AGENT_PROFILE_DATASET_CAPABILITY in dataset.get("capabilities", [])
+        and dataset.get("entity_key")
+        and _table_exists(cursor, dataset["table_name"])
+        and _dataset_has_columns(cursor, dataset, dataset["entity_key"])
+    ]
+    candidates.sort(key=lambda item: item["dataset_id"])
+    return candidates[0] if candidates else None
+
+
 def _load_agent_profiles(cursor: sqlite3.Cursor) -> List[AgentProfile]:
     if not _table_exists(cursor, "agent_profile"):
         return []
@@ -314,7 +330,7 @@ def _load_agent_status_rows(
     return rows
 
 
-def _load_agent_profiles_from_dataset(
+def _load_agent_profiles_from_status_dataset(
     cursor: sqlite3.Cursor,
     dataset: Dict[str, Any],
 ) -> List[AgentProfile]:
@@ -333,6 +349,43 @@ def _load_agent_profiles_from_dataset(
         for (agent_id,) in cursor.fetchall()
         if agent_id is not None
     ]
+
+
+def _load_agent_profiles_from_profile_dataset(
+    cursor: sqlite3.Cursor,
+    dataset: Dict[str, Any],
+) -> List[AgentProfile]:
+    entity_key = dataset["entity_key"]
+    table_name = dataset["table_name"]
+    cursor.execute(
+        f"SELECT * FROM {_quote_identifier(table_name)} "
+        f"ORDER BY {_quote_identifier(entity_key)} ASC"
+    )
+    column_names = [description[0] for description in cursor.description or []]
+
+    profiles: List[AgentProfile] = []
+    for row in cursor.fetchall():
+        payload = dict(zip(column_names, row))
+        raw_agent_id = payload.get(entity_key)
+        if raw_agent_id is None:
+            continue
+
+        profile_raw = _parse_json_field(payload.get("profile"), {})
+        if not isinstance(profile_raw, dict):
+            profile_raw = {}
+
+        name = payload.get("name")
+        if not isinstance(name, str) or not name.strip():
+            profile_name = profile_raw.get("name")
+            if isinstance(profile_name, str) and profile_name.strip():
+                name = profile_name
+            else:
+                name = f"Agent_{int(raw_agent_id)}"
+
+        profiles.append(
+            AgentProfile(id=int(raw_agent_id), name=name, profile=profile_raw)
+        )
+    return profiles
 
 
 def _load_agent_status_entries_from_dataset(
@@ -390,13 +443,19 @@ def _load_agent_status_entries_from_dataset(
 
 
 def _load_agent_profiles_compat(cursor: sqlite3.Cursor) -> List[AgentProfile]:
+    dataset = _get_agent_profile_dataset(cursor)
+    if dataset is not None:
+        profiles = _load_agent_profiles_from_profile_dataset(cursor, dataset)
+        if profiles:
+            return profiles
+
     if _table_exists(cursor, "agent_profile"):
         return _load_agent_profiles(cursor)
 
     dataset = _get_agent_status_dataset(cursor)
     if dataset is None:
         return []
-    return _load_agent_profiles_from_dataset(cursor, dataset)
+    return _load_agent_profiles_from_status_dataset(cursor, dataset)
 
 
 def _load_agent_status_entries(
