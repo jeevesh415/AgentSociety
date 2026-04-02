@@ -1,20 +1,15 @@
 """
 实验数据API
 
-提供实验结果数据的查询接口，支持：
-- 获取实验时间线
-- 获取agent状态
-- 获取实验指标
-- 兼容V1前端API格式
+提供实验信息与产出文件查询接口。
 
 关联文件：
-- @extension/src/replayWebviewProvider.ts - 前端Replay Webview（调用此API）
+- @frontend/src/pages/Console/index.tsx - 实验列表与产出下载
 
 API端点：
 - GET /api/v1/experiments/{hypothesis_id}/{experiment_id}/info - 实验信息
-- GET /api/v1/experiments/{hypothesis_id}/{experiment_id}/timeline - 时间线
-- GET /api/v1/experiments/{hypothesis_id}/{experiment_id}/agents/* - Agent数据
-- GET /api/v1/experiments/{hypothesis_id}/{experiment_id}/state - 最新状态
+- GET /api/v1/experiments/{hypothesis_id}/{experiment_id}/artifacts - 产出文件列表
+- GET /api/v1/experiments/{hypothesis_id}/{experiment_id}/artifacts/{artifact_name} - 产出文件内容
 """
 
 from __future__ import annotations
@@ -44,33 +39,12 @@ router = APIRouter(prefix="/experiments", tags=["experiments"])
 # ============================================================================
 
 
-class TimePoint(BaseModel):
-    """时间点"""
-
-    day: int
-    t: int  # 当天秒数 (0-86400)
-    timestamp: str
-
-
 class AgentProfile(BaseModel):
     """Agent配置文件"""
 
     id: int
     name: Optional[str] = None
     profile: Optional[Dict[str, Any]] = None
-
-
-class AgentStatus(BaseModel):
-    """Agent状态"""
-
-    id: int
-    day: int
-    t: int
-    lng: Optional[float] = None
-    lat: Optional[float] = None
-    parent_id: Optional[int] = None
-    action: Optional[str] = None
-    status: Optional[Dict[str, Any]] = None
 
 
 class ExperimentInfo(BaseModel):
@@ -125,14 +99,6 @@ def _parse_json_field(raw: Any, default: Any) -> Any:
         except json.JSONDecodeError:
             return default
     return default
-
-
-def _datetime_to_day_t(dt: datetime, start_t: datetime) -> tuple[int, int]:
-    """将datetime转换为(day, t)格式"""
-    delta = dt - start_t
-    day = delta.days
-    t = int(delta.seconds)
-    return day, t
 
 
 def _table_exists(cursor: sqlite3.Cursor, table_name: str) -> bool:
@@ -519,14 +485,6 @@ def _get_agent_dataset_summary(
     )
 
 
-def _get_first_timestamp(
-    status_rows: List[Dict[str, Any]],
-) -> Optional[datetime]:
-    if status_rows:
-        return status_rows[0]["timestamp"]
-    return None
-
-
 # ============================================================================
 # API 端点
 # ============================================================================
@@ -626,256 +584,6 @@ async def get_experiment_info(
         agent_count=agent_count,
         step_count=step_count,
     )
-
-
-@router.get("/{hypothesis_id}/{experiment_id}/timeline")
-async def get_timeline(
-    hypothesis_id: str,
-    experiment_id: str,
-    workspace_path: str = Query(..., description="Workspace directory path"),
-) -> List[TimePoint]:
-    """
-    获取实验时间线
-
-    返回实验所有记录的时间点，用于在时间轴上展示实验进度。
-
-    Args:
-        hypothesis_id: 假设ID
-        experiment_id: 实验ID
-        workspace_path: 工作区根目录路径
-
-    Returns:
-        List[TimePoint]: 时间点列表，每个时间点包含：
-            - day: 模拟天数（从0开始）
-            - t: 当天秒数 (0-86400)
-            - timestamp: ISO格式的时间戳字符串
-
-    Raises:
-        HTTPException: 404 - 数据库不存在（实验未运行）
-    """
-    workspace = Path(workspace_path)
-    exp_path = _get_experiment_path(workspace, hypothesis_id, experiment_id)
-    db_file = exp_path / "run" / "sqlite.db"
-
-    conn = _get_db_connection(db_file)
-    cursor = conn.cursor()
-
-    status_rows = _load_agent_status_entries(cursor)
-
-    timeline: List[TimePoint] = []
-    first_time = _get_first_timestamp(status_rows)
-
-    if status_rows and first_time is not None:
-        seen_steps: set[int] = set()
-        for status_entry in status_rows:
-            step = int(status_entry["step"])
-            if step in seen_steps:
-                continue
-            seen_steps.add(step)
-            timestamp = status_entry["timestamp"]
-            day, t = _datetime_to_day_t(timestamp, first_time)
-            timeline.append(
-                TimePoint(day=day, t=t, timestamp=timestamp.isoformat())
-            )
-    conn.close()
-    return timeline
-
-
-@router.get("/{hypothesis_id}/{experiment_id}/agents")
-async def get_agents(
-    hypothesis_id: str,
-    experiment_id: str,
-    workspace_path: str = Query(..., description="Workspace directory path"),
-) -> List[AgentProfile]:
-    """
-    获取所有Agent的配置信息
-
-    返回实验中所有Agent的配置文件信息。
-
-    Args:
-        hypothesis_id: 假设ID
-        experiment_id: 实验ID
-        workspace_path: 工作区根目录路径
-
-    Returns:
-        List[AgentProfile]: Agent配置列表，每个配置包含：
-            - id: Agent唯一标识符
-            - name: Agent名称
-            - profile: Agent详细配置字典
-
-    Raises:
-        HTTPException: 404 - 数据库不存在
-    """
-    workspace = Path(workspace_path)
-    exp_path = _get_experiment_path(workspace, hypothesis_id, experiment_id)
-    db_file = exp_path / "run" / "sqlite.db"
-
-    conn = _get_db_connection(db_file)
-    cursor = conn.cursor()
-
-    agents = _load_agent_profiles_compat(cursor)
-    if not agents:
-        agents = _build_profiles_from_status_entries(_load_agent_status_entries(cursor))
-    conn.close()
-    return agents
-
-
-@router.get("/{hypothesis_id}/{experiment_id}/agents/{agent_id}/status")
-async def get_agent_status(
-    hypothesis_id: str,
-    experiment_id: str,
-    agent_id: int,
-    workspace_path: str = Query(..., description="Workspace directory path"),
-    day: Optional[int] = Query(None, description="Day number (0-indexed)"),
-    t: Optional[int] = Query(None, description="Time within day (seconds, 0-86400)"),
-) -> List[AgentStatus]:
-    """
-    获取指定Agent的状态历史
-
-    返回指定Agent在实验中的状态变化记录。
-
-    Args:
-        hypothesis_id: 假设ID
-        experiment_id: 实验ID
-        agent_id: Agent的唯一标识符
-        workspace_path: 工作区根目录路径
-        day: 可选，指定查询的模拟天数（0-indexed）
-        t: 可选，指定查询的当天秒数（0-86400），与day配合使用
-
-    Returns:
-        List[AgentStatus]: Agent状态列表，每个状态包含：
-            - id: Agent ID
-            - day: 模拟天数
-            - t: 当天秒数
-            - lng: 经度坐标（如果有位置信息）
-            - lat: 纬度坐标（如果有位置信息）
-            - parent_id: 父Agent ID（如果有）
-            - action: 当前动作
-            - status: 状态详情字典
-
-    Note:
-        如果指定了day和t参数，返回该时刻附近的状态（允许1分钟误差）；
-        否则返回所有历史状态记录。
-
-    Raises:
-        HTTPException: 404 - 数据库不存在
-    """
-    workspace = Path(workspace_path)
-    exp_path = _get_experiment_path(workspace, hypothesis_id, experiment_id)
-    db_file = exp_path / "run" / "sqlite.db"
-
-    conn = _get_db_connection(db_file)
-    cursor = conn.cursor()
-
-    status_rows = _load_agent_status_entries(cursor, agent_id=agent_id)
-    all_status_rows = _load_agent_status_entries(cursor)
-    first_time = _get_first_timestamp(all_status_rows)
-
-    statuses: List[AgentStatus] = []
-    if first_time is not None:
-        for status_entry in status_rows:
-            timestamp = status_entry["timestamp"]
-            current_day, current_t = _datetime_to_day_t(timestamp, first_time)
-            if day is not None and t is not None:
-                if current_day != day or abs(current_t - t) > 60:
-                    continue
-            statuses.append(
-                AgentStatus(
-                    id=agent_id,
-                    day=current_day,
-                    t=current_t,
-                    lng=status_entry["lng"],
-                    lat=status_entry["lat"],
-                    parent_id=status_entry["parent_id"],
-                    action=status_entry["action"],
-                    status=status_entry["status"],
-                )
-            )
-
-    conn.close()
-    return statuses
-
-
-@router.get("/{hypothesis_id}/{experiment_id}/state")
-async def get_latest_state(
-    hypothesis_id: str,
-    experiment_id: str,
-    workspace_path: str = Query(..., description="Workspace directory path"),
-) -> Dict[str, Any]:
-    """
-    获取实验最新状态数据
-
-    返回实验的最新完整状态，包括所有Agent的当前状态。
-
-    Args:
-        hypothesis_id: 假设ID
-        experiment_id: 实验ID
-        workspace_path: 工作区根目录路径
-
-    Returns:
-        Dict[str, Any]: 最新状态数据，包含：
-            - timestamp: 记录时间戳
-            - current_time: 当前模拟时间
-            - step_count: 已执行步骤数
-            - state: 完整状态数据（包含所有Agent信息）
-
-    Raises:
-        HTTPException: 404 - 数据库不存在或无状态数据
-    """
-    workspace = Path(workspace_path)
-    exp_path = _get_experiment_path(workspace, hypothesis_id, experiment_id)
-    db_file = exp_path / "run" / "sqlite.db"
-
-    conn = _get_db_connection(db_file)
-    cursor = conn.cursor()
-
-    profiles = _load_agent_profiles_compat(cursor)
-    status_rows = _load_agent_status_entries(cursor)
-    conn.close()
-
-    if not profiles and status_rows:
-        profiles = _build_profiles_from_status_entries(status_rows)
-
-    if not profiles and not status_rows:
-        raise HTTPException(status_code=404, detail="No state data found")
-
-    latest_timestamp: Optional[datetime] = None
-    latest_step = 0
-    if status_rows:
-        latest_step = max(int(entry["step"]) for entry in status_rows)
-        latest_timestamp = max(entry["timestamp"] for entry in status_rows)
-
-    latest_status_by_agent: Dict[int, Dict[str, Any]] = {}
-    for status_entry in status_rows:
-        if int(status_entry["step"]) != latest_step:
-            continue
-        latest_status_by_agent[int(status_entry["id"])] = {
-            "timestamp": status_entry["timestamp"],
-            "action": status_entry["action"],
-            "status": status_entry["status"],
-        }
-
-    agents_state = []
-    for profile in profiles:
-        state_entry = latest_status_by_agent.get(profile.id, {})
-        agents_state.append(
-            {
-                "id": profile.id,
-                "name": profile.name,
-                "dump": {
-                    "profile": profile.profile or {},
-                    "current_action": state_entry.get("action"),
-                    "status": state_entry.get("status", {}),
-                },
-            }
-        )
-
-    return {
-        "timestamp": latest_timestamp.isoformat() if latest_timestamp else None,
-        "current_time": latest_timestamp.isoformat() if latest_timestamp else None,
-        "step_count": latest_step,
-        "state": {"agents": agents_state},
-    }
 
 
 @router.get("/{hypothesis_id}/{experiment_id}/artifacts")

@@ -9,7 +9,6 @@
  *
  * 后端API：
  * - @packages/agentsociety2/agentsociety2/backend/routers/replay.py - /api/v1/replay/*
- * - @packages/agentsociety2/agentsociety2/backend/routers/experiments.py - /api/v1/experiments/*
  */
 
 import * as vscode from 'vscode';
@@ -21,7 +20,6 @@ import type {
   ExtensionMessage,
   InitData,
   ReplayAgentStateHistory,
-  ReplayDatasetList,
   ReplayDatasetRows,
   ReplayPanelSchema,
   ReplayStepBundle,
@@ -135,54 +133,6 @@ export class ReplayWebviewProvider {
           message.endStep,
           message.limit
         );
-        break;
-
-      case 'fetchAgentStatuses':
-        await this.fetchAgentStatuses(message.step);
-        break;
-
-      case 'fetchAgentStatusHistory':
-        await this.fetchAgentStatusHistory(message.agentId);
-        break;
-
-      case 'fetchAgentDialogs':
-        await this.fetchAgentDialogs(message.agentId, message.dialogType);
-        break;
-
-      case 'fetchSocialProfile':
-        await this.fetchSocialProfile(message.agentId);
-        break;
-
-      case 'fetchSocialPosts':
-        await this.fetchSocialPosts(message.agentId);
-        break;
-
-      case 'fetchSocialEvents':
-        await this.fetchSocialEvents(message.agentId, message.step);
-        break;
-
-      case 'fetchSocialNetwork':
-        await this.fetchSocialNetwork();
-        break;
-
-      case 'fetchSocialActivity':
-        await this.fetchSocialActivity(message.step);
-        break;
-
-      case 'fetchAllPosts':
-        await this.fetchAllPosts(message.step);
-        break;
-
-      case 'fetchPostComments':
-        await this.fetchPostComments(message.postId);
-        break;
-
-      case 'fetchTrajectory':
-        await this.fetchTrajectory(message.agentId, message.startStep, message.endStep);
-        break;
-
-      case 'fetchReplayDatasets':
-        await this.fetchReplayDatasets();
         break;
 
       case 'fetchReplayDatasetRows':
@@ -349,225 +299,6 @@ export class ReplayWebviewProvider {
   }
 
   /**
-   * Fetch agent statuses at a specific step
-   */
-  private async fetchAgentStatuses(step?: number): Promise<void> {
-    try {
-      let url = `${this.backendUrl}/api/v1/replay/${this.hypothesisId}/${this.experimentId}/agents/status?workspace_path=${encodeURIComponent(this.workspacePath)}`;
-      if (step !== undefined) {
-        url += `&step=${step}`;
-      }
-
-      const response = await fetch(url);
-
-      if (!response.ok) {
-        throw new Error(`HTTP ${response.status}: ${response.statusText}`);
-      }
-
-      const data = await response.json();
-      this.postMessage({ type: 'agentStatuses', data });
-    } catch (error) {
-      this.handleFetchError('agent statuses', error);
-    }
-  }
-
-  /**
-   * Fetch full status history for one agent (all steps)
-   */
-  private async fetchAgentStatusHistory(agentId: number): Promise<void> {
-    try {
-      const url = `${this.backendUrl}/api/v1/replay/${this.hypothesisId}/${this.experimentId}/agents/${agentId}/status?workspace_path=${encodeURIComponent(this.workspacePath)}`;
-      const response = await fetch(url);
-
-      if (!response.ok) {
-        throw new Error(`HTTP ${response.status}: ${response.statusText}`);
-      }
-
-      const data = await response.json();
-      this.postMessage({ type: 'agentStatusHistory', data });
-    } catch (error) {
-      this.handleFetchError('agent status history', error);
-    }
-  }
-
-  /**
-   * Fetch agent dialogs
-   */
-  private async fetchAgentDialogs(agentId: number, dialogType?: number): Promise<void> {
-    try {
-      let url = `${this.backendUrl}/api/v1/replay/${this.hypothesisId}/${this.experimentId}/agents/${agentId}/dialog?workspace_path=${encodeURIComponent(this.workspacePath)}`;
-      if (dialogType !== undefined) {
-        url += `&dialog_type=${dialogType}`;
-      }
-
-      const response = await fetch(url);
-
-      if (!response.ok) {
-        throw new Error(`HTTP ${response.status}: ${response.statusText}`);
-      }
-
-      const data = await response.json();
-      this.postMessage({ type: 'agentDialogs', data });
-    } catch (error) {
-      this.handleFetchError('agent dialogs', error);
-    }
-  }
-
-  /**
-   * Fetch social media profile
-   */
-  private async fetchSocialProfile(agentId: number): Promise<void> {
-    try {
-      const url = `${this.backendUrl}/api/v1/replay/${this.hypothesisId}/${this.experimentId}/social/users/${agentId}?workspace_path=${encodeURIComponent(this.workspacePath)}`;
-      const response = await fetch(url);
-
-      if (!response.ok) {
-        throw new Error(`HTTP ${response.status}: ${response.statusText}`);
-      }
-
-      const data = await response.json();
-      this.postMessage({ type: 'socialProfile', data });
-    } catch (error) {
-      this.handleFetchError('social profile', error);
-    }
-  }
-
-  /**
-   * Fetch social media posts
-   */
-  private async fetchSocialPosts(agentId: number): Promise<void> {
-    try {
-      const url = `${this.backendUrl}/api/v1/replay/${this.hypothesisId}/${this.experimentId}/social/users/${agentId}/posts?workspace_path=${encodeURIComponent(this.workspacePath)}`;
-      const response = await fetch(url);
-
-      if (!response.ok) {
-        throw new Error(`HTTP ${response.status}: ${response.statusText}`);
-      }
-
-      const data = await response.json();
-      this.postMessage({ type: 'socialPosts', data });
-    } catch (error) {
-      this.handleFetchError('social posts', error);
-    }
-  }
-
-  /**
-   * Fetch social media events (optionally up to a given step for timeline)
-   */
-  private async fetchSocialEvents(agentId: number, step?: number): Promise<void> {
-    try {
-      let url = `${this.backendUrl}/api/v1/replay/${this.hypothesisId}/${this.experimentId}/social/users/${agentId}/events?workspace_path=${encodeURIComponent(this.workspacePath)}`;
-      if (step !== undefined && step !== null) {
-        url += `&max_step=${step}`;
-      }
-      const response = await fetch(url);
-
-      if (!response.ok) {
-        throw new Error(`HTTP ${response.status}: ${response.statusText}`);
-      }
-
-      const data = await response.json();
-      this.postMessage({ type: 'socialEvents', data });
-    } catch (error) {
-      this.handleFetchError('social events', error);
-    }
-  }
-
-  /**
-   * Fetch per-step social activity derived from replay events
-   */
-  private async fetchSocialActivity(step: number): Promise<void> {
-    try {
-      const url = `${this.backendUrl}/api/v1/replay/${this.hypothesisId}/${this.experimentId}/social/activity?workspace_path=${encodeURIComponent(this.workspacePath)}&step=${step}`;
-      const response = await fetch(url);
-
-      if (!response.ok) {
-        throw new Error(`HTTP ${response.status}: ${response.statusText}`);
-      }
-
-      const raw = await response.json();
-      const data = {
-        step: raw.step,
-        highlightedAgentIds: raw.highlighted_agent_ids ?? [],
-      };
-      this.postMessage({ type: 'socialActivity', data });
-    } catch (error) {
-      this.handleFetchError('social activity', error);
-    }
-  }
-
-  /**
-   * Fetch social network graph
-   */
-  private async fetchSocialNetwork(): Promise<void> {
-    try {
-      const url = `${this.backendUrl}/api/v1/replay/${this.hypothesisId}/${this.experimentId}/social/network?workspace_path=${encodeURIComponent(this.workspacePath)}`;
-      const response = await fetch(url);
-
-      if (!response.ok) {
-        throw new Error(`HTTP ${response.status}: ${response.statusText}`);
-      }
-
-      const data = await response.json();
-      this.postMessage({ type: 'socialNetwork', data });
-    } catch (error) {
-      this.handleFetchError('social network', error);
-    }
-  }
-
-  /**
-   * Fetch all posts (optionally up to step for timeline)
-   */
-  private async fetchAllPosts(step?: number): Promise<void> {
-    try {
-      let url = `${this.backendUrl}/api/v1/replay/${this.hypothesisId}/${this.experimentId}/social/posts?workspace_path=${encodeURIComponent(this.workspacePath)}`;
-      if (step !== undefined && step !== null) {
-        url += `&max_step=${step}`;
-      }
-      const response = await fetch(url);
-
-      if (!response.ok) {
-        throw new Error(`HTTP ${response.status}: ${response.statusText}`);
-      }
-
-      const data = await response.json();
-      this.postMessage({ type: 'allPosts', data });
-    } catch (error) {
-      this.handleFetchError('all posts', error);
-    }
-  }
-
-  /**
-   * Fetch comments for a post
-   */
-  private async fetchPostComments(postId: number): Promise<void> {
-    try {
-      const url = `${this.backendUrl}/api/v1/replay/${this.hypothesisId}/${this.experimentId}/social/posts/${postId}/comments?workspace_path=${encodeURIComponent(this.workspacePath)}`;
-      const response = await fetch(url);
-
-      if (!response.ok) {
-        throw new Error(`HTTP ${response.status}: ${response.statusText}`);
-      }
-
-      const data = await response.json();
-      this.postMessage({ type: 'postComments', data, postId });
-    } catch (error) {
-      this.handleFetchError('post comments', error);
-    }
-  }
-
-  /**
-   * Fetch database tables
-   */
-  private async fetchReplayDatasets(): Promise<void> {
-    const url = this.buildReplayUrl('/datasets', {});
-    const data = await this.fetchJson<ReplayDatasetList>('replay datasets', url);
-    if (data) {
-      this.postMessage({ type: 'replayDatasets', data });
-    }
-  }
-
-  /**
    * Fetch replay dataset rows
    */
   private async fetchReplayDatasetRows(
@@ -600,36 +331,6 @@ export class ReplayWebviewProvider {
     const data = await this.fetchJson<ReplayDatasetRows>('replay dataset rows', url, { latestGroup: 'replayDatasetRows' });
     if (data) {
       this.postMessage({ type: 'replayDatasetRows', data });
-    }
-  }
-
-  /**
-   * Fetch agent trajectory
-   */
-  private async fetchTrajectory(
-    agentId: number,
-    startStep?: number,
-    endStep?: number
-  ): Promise<void> {
-    try {
-      let url = `${this.backendUrl}/api/v1/replay/${this.hypothesisId}/${this.experimentId}/agents/${agentId}/trajectory?workspace_path=${encodeURIComponent(this.workspacePath)}`;
-      if (startStep !== undefined) {
-        url += `&start_step=${startStep}`;
-      }
-      if (endStep !== undefined) {
-        url += `&end_step=${endStep}`;
-      }
-
-      const response = await fetch(url);
-
-      if (!response.ok) {
-        throw new Error(`HTTP ${response.status}: ${response.statusText}`);
-      }
-
-      const data = await response.json();
-      this.postMessage({ type: 'trajectory', data });
-    } catch (error) {
-      this.handleFetchError('trajectory', error);
     }
   }
 

@@ -16,33 +16,6 @@ export interface AgentProfile {
   profile: Record<string, any>;
 }
 
-/** Legacy agent status at a specific step */
-export interface AgentStatus {
-  id: number;
-  step: number;
-  t: string;
-  lng: number | null;
-  lat: number | null;
-  action: string | null;
-  status: Record<string, any>;
-}
-
-/** Legacy dialog record */
-export interface AgentDialog {
-  id: number;
-  agent_id: number;
-  step: number;
-  t: string;
-  type: DialogType;
-  speaker: string;
-  content: string;
-}
-
-/** Dialog types */
-export enum DialogType {
-  THOUGHT = 0,
-}
-
 /** Timeline point */
 export interface TimelinePoint {
   step: number;
@@ -57,92 +30,6 @@ export interface ExperimentInfo {
   start_time: string | null;
   end_time: string | null;
   agent_count: number;
-  has_social?: boolean;
-}
-
-/** Legacy social media types kept for compatibility */
-export interface SocialUser {
-  user_id: number;
-  username: string;
-  bio?: string | null;
-  created_at?: string | null;
-  followers_count: number;
-  following_count: number;
-  posts_count: number;
-  profile: Record<string, any>;
-}
-
-export interface SocialPost {
-  post_id: number;
-  author_id: number;
-  content: string;
-  post_type: string;
-  parent_id?: number | null;
-  created_at?: string | null;
-  likes_count: number;
-  reposts_count: number;
-  comments_count: number;
-  view_count: number;
-  tags?: string[];
-  topic_category?: string | null;
-  step?: number;
-}
-
-export interface SocialComment {
-  comment_id: number;
-  post_id: number;
-  author_id: number;
-  content: string;
-  parent_comment_id?: number | null;
-  created_at?: string | null;
-  likes_count?: number;
-}
-
-export interface SocialEvent {
-  event_id: number;
-  step: number;
-  t?: string | null;
-  sender_id: number;
-  sender_name: string;
-  action: string;
-  content?: string | null;
-  receiver_id?: number | null;
-  receiver_name?: string | null;
-  target_id?: number | null;
-  target_author_id?: number | null;
-  target_author_name?: string | null;
-  summary: string;
-}
-
-export interface SocialNetworkNode {
-  user_id: number;
-  username: string;
-}
-
-export interface SocialNetworkEdge {
-  source: number;
-  target: number;
-}
-
-export interface SocialNetwork {
-  nodes: SocialNetworkNode[];
-  edges: SocialNetworkEdge[];
-}
-
-export interface PositionPoint {
-  step: number;
-  t: string;
-  lng: number;
-  lat: number;
-}
-
-/** Map view state */
-export interface ViewState {
-  longitude: number;
-  latitude: number;
-  zoom: number;
-  pitch?: number;
-  bearing?: number;
 }
 
 /** Playback state */
@@ -186,10 +73,6 @@ export interface ReplayDatasetInfo {
   columns: ReplayDatasetColumn[];
 }
 
-export interface ReplayDatasetList {
-  datasets: ReplayDatasetInfo[];
-}
-
 export interface ReplayDatasetRows {
   dataset_id: string;
   columns: string[];
@@ -208,7 +91,6 @@ export interface ReplayPanelSchema {
   agent_state_datasets: ReplayDatasetInfo[];
   env_state_datasets: ReplayDatasetInfo[];
   geo_dataset?: ReplayDatasetInfo | null;
-  trajectory_dataset?: ReplayDatasetInfo | null;
   primary_agent_state_dataset_id?: string | null;
   layout_hint: LayoutMode;
   supports_map: boolean;
@@ -246,11 +128,6 @@ export interface ReplayAgentStateHistory {
   history_by_dataset: Record<string, Record<string, any>[]>;
 }
 
-export interface SocialActivityAtStep {
-  step: number;
-  highlightedAgentIds: number[];
-}
-
 /** Message types from extension to webview */
 export type ExtensionMessage =
   | { type: 'init'; data: InitData }
@@ -260,19 +137,7 @@ export type ExtensionMessage =
   | { type: 'panelSchema'; data: ReplayPanelSchema }
   | { type: 'stepBundle'; data: ReplayStepBundle }
   | { type: 'agentStateHistory'; data: ReplayAgentStateHistory }
-  | { type: 'replayDatasets'; data: ReplayDatasetList }
   | { type: 'replayDatasetRows'; data: ReplayDatasetRows }
-  | { type: 'agentStatuses'; data: AgentStatus[] }
-  | { type: 'agentStatusHistory'; data: AgentStatus[] }
-  | { type: 'agentDialogs'; data: AgentDialog[] }
-  | { type: 'socialProfile'; data: SocialUser }
-  | { type: 'socialPosts'; data: SocialPost[] }
-  | { type: 'socialEvents'; data: SocialEvent[] }
-  | { type: 'socialNetwork'; data: SocialNetwork }
-  | { type: 'socialActivity'; data: SocialActivityAtStep }
-  | { type: 'allPosts'; data: SocialPost[] }
-  | { type: 'postComments'; data: SocialComment[]; postId: number }
-  | { type: 'trajectory'; data: PositionPoint[] }
   | { type: 'error'; message: string };
 
 /** Initial data from extension */
@@ -292,18 +157,5 @@ export type WebviewMessage =
   | { command: 'fetchPanelSchema' }
   | { command: 'fetchStepBundle'; step: number }
   | { command: 'fetchAgentStateHistory'; agentId: number; datasetId?: string; startStep?: number; endStep?: number; limit?: number }
-  | { command: 'fetchReplayDatasets' }
   | { command: 'fetchReplayDatasetRows'; datasetId: string; page?: number; pageSize?: number; step?: number; entityId?: number; startStep?: number; endStep?: number; maxStep?: number; columns?: string[]; descOrder?: boolean; latestPerEntity?: boolean }
-  | { command: 'fetchAgentStatuses'; step?: number }
-  | { command: 'fetchAgentStatusHistory'; agentId: number }
-  | { command: 'fetchAgentDialogs'; agentId: number; dialogType?: DialogType }
-  | { command: 'fetchSocialProfile'; agentId: number }
-  | { command: 'fetchSocialPosts'; agentId: number }
-  | { command: 'fetchSocialEvents'; agentId: number; step?: number }
-  | { command: 'fetchSocialNetwork' }
-  | { command: 'fetchSocialActivity'; step: number }
-  | { command: 'fetchAllPosts'; step?: number }
-  | { command: 'fetchPostComments'; postId: number }
-  | { command: 'fetchTrajectory'; agentId: number; startStep?: number; endStep?: number }
-  | { command: 'selectAgent'; agentId: number | null }
   | { command: 'error'; message: string };

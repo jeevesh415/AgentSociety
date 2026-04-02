@@ -2,14 +2,13 @@
 Replay data query API for simulation playback.
 
 关联文件：
-- @extension/src/replayWebviewProvider.ts - 前端 Replay Webview（调用此 API）
-- @extension/src/webview/replay/ - 前端 React 组件
+- @extension/src/replayWebviewProvider.ts - VSCode Replay Webview provider
+- @extension/src/webview/replay/ - VSCode Replay Webview React app
 """
 
 from __future__ import annotations
 
 import asyncio
-from collections import defaultdict
 from datetime import datetime
 import json
 from pathlib import Path
@@ -17,21 +16,18 @@ from typing import Any, Dict, List, Literal, Optional
 
 from fastapi import APIRouter, HTTPException, Query
 from pydantic import BaseModel, Field
-from sqlalchemy import inspect as sa_inspect
 from sqlalchemy.ext.asyncio import AsyncEngine, AsyncSession, create_async_engine
 from sqlalchemy.orm import sessionmaker
-from sqlmodel import desc, func, select
+from sqlmodel import func, select
 
 from ...backend.services.replay_catalog import (
     fetch_dataset_rows,
-    find_dataset_by_capability,
     get_dataset_by_id,
     load_dataset_catalog,
     query_dataset_rows,
     reflect_dataset_table,
 )
 from ...storage.replay_metadata import AGENT_PROFILE_DATASET_CAPABILITY
-from ...storage.models import AgentDialog, AgentProfile, AgentStatus
 
 router = APIRouter(prefix="/replay", tags=["replay"])
 _DB_CACHE_LOCK = asyncio.Lock()
@@ -45,7 +41,6 @@ class ExperimentInfo(BaseModel):
     start_time: Optional[datetime]
     end_time: Optional[datetime]
     agent_count: int
-    has_social: bool = False
 
 
 class TimelinePoint(BaseModel):
@@ -53,14 +48,10 @@ class TimelinePoint(BaseModel):
     t: datetime
 
 
-class AgentStatusResponse(BaseModel):
+class AgentProfile(BaseModel):
     id: int
-    step: int
-    t: datetime
-    lng: Optional[float]
-    lat: Optional[float]
-    action: Optional[str]
-    status: Dict[str, Any]
+    name: str
+    profile: Dict[str, Any] = Field(default_factory=dict)
 
 
 class ReplayDatasetColumn(BaseModel):
@@ -110,7 +101,6 @@ class ReplayPanelSchema(BaseModel):
     agent_state_datasets: List[ReplayDatasetInfo] = Field(default_factory=list)
     env_state_datasets: List[ReplayDatasetInfo] = Field(default_factory=list)
     geo_dataset: Optional[ReplayDatasetInfo] = None
-    trajectory_dataset: Optional[ReplayDatasetInfo] = None
     primary_agent_state_dataset_id: Optional[str] = None
     layout_hint: Literal["map", "random"] = "random"
     supports_map: bool = False
@@ -154,83 +144,6 @@ class ReplayAgentStateHistory(BaseModel):
     history_by_dataset: Dict[str, List[Dict[str, Any]]] = Field(default_factory=dict)
 
 
-class SocialNetworkNode(BaseModel):
-    user_id: int
-    username: str
-
-
-class SocialNetworkEdge(BaseModel):
-    source: int
-    target: int
-
-
-class SocialNetwork(BaseModel):
-    nodes: List[SocialNetworkNode]
-    edges: List[SocialNetworkEdge]
-
-
-class SocialUser(BaseModel):
-    user_id: int
-    username: str
-    bio: Optional[str] = None
-    created_at: Optional[datetime] = None
-    followers_count: Optional[int] = None
-    following_count: Optional[int] = None
-    posts_count: Optional[int] = None
-    profile: Optional[Any] = None
-
-
-class SocialPost(BaseModel):
-    post_id: int
-    step: int
-    author_id: int
-    content: str
-    post_type: str
-    parent_id: Optional[int] = None
-    created_at: Optional[datetime] = None
-    likes_count: Optional[int] = 0
-    reposts_count: Optional[int] = 0
-    comments_count: Optional[int] = 0
-    view_count: Optional[int] = 0
-    tags: Optional[Any] = None
-    topic_category: Optional[str] = None
-
-
-class SocialComment(BaseModel):
-    comment_id: int
-    step: int
-    post_id: int
-    author_id: int
-    content: str
-    created_at: Optional[datetime] = None
-    likes_count: Optional[int] = 0
-
-
-class SocialEvent(BaseModel):
-    event_id: int
-    step: int
-    t: Optional[datetime] = None
-    sender_id: int
-    sender_name: str
-    action: str
-    content: Optional[str] = None
-    receiver_id: Optional[int] = None
-    receiver_name: Optional[str] = None
-    target_id: Optional[int] = None
-    target_author_id: Optional[int] = None
-    target_author_name: Optional[str] = None
-    summary: str
-
-
-class SocialActivityResponse(BaseModel):
-    step: int
-    highlighted_agent_ids: List[int]
-
-
-SOCIAL_POST_ACTIONS = {"post", "repost"}
-SOCIAL_TARGETED_ACTIONS = {"follow", "unfollow", "like", "unlike", "comment", "repost"}
-
-
 def get_db_path(workspace_path: str, hypothesis_id: str, experiment_id: str) -> Path:
     return (
         Path(workspace_path)
@@ -252,10 +165,10 @@ async def _get_cached_sessionmaker(db_path: Path) -> tuple[sessionmaker, int]:
     async with _DB_CACHE_LOCK:
         cached = _DB_SESSIONMAKER_CACHE.get(cache_key)
         if cached is not None:
-            cached_mtime_ns, _engine, cached_sessionmaker = cached
+            cached_mtime_ns, engine, cached_sessionmaker = cached
             if cached_mtime_ns == mtime_ns:
                 return cached_sessionmaker, mtime_ns
-            await _engine.dispose()
+            await engine.dispose()
 
         engine = create_async_engine(
             f"sqlite+aiosqlite:///{resolved_path}",
@@ -278,13 +191,6 @@ async def get_db_session(db_path: Path):
         yield session
 
 
-async def _table_exists(session: AsyncSession, table_name: str) -> bool:
-    def _do(sync_session):
-        return table_name in sa_inspect(sync_session.connection()).get_table_names()
-
-    return bool(await session.run_sync(_do))
-
-
 def _dataset_to_response(dataset: Dict[str, Any]) -> ReplayDatasetInfo:
     return ReplayDatasetInfo.model_validate(dataset)
 
@@ -295,6 +201,29 @@ def _dataset_ref(dataset: Dict[str, Any]) -> ReplayDatasetPanelRef:
         module_name=dataset.get("module_name") or "",
         title=dataset.get("title") or "",
     )
+
+
+def _coerce_datetime(value: Any) -> Optional[datetime]:
+    if isinstance(value, datetime):
+        return value
+    if isinstance(value, str):
+        try:
+            return datetime.fromisoformat(value)
+        except ValueError:
+            return None
+    return None
+
+
+def _dataset_has_columns(dataset: Dict[str, Any], *column_names: str) -> bool:
+    available = {column["column_name"] for column in dataset.get("columns", [])}
+    return all(column_name in available for column_name in column_names)
+
+
+def _split_columns_param(raw_columns: Optional[str]) -> Optional[List[str]]:
+    if raw_columns is None:
+        return None
+    columns = [column.strip() for column in raw_columns.split(",") if column.strip()]
+    return columns or None
 
 
 def _list_agent_state_datasets(datasets: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
@@ -333,20 +262,6 @@ def _select_geo_dataset(datasets: List[Dict[str, Any]]) -> Optional[Dict[str, An
     return candidates[0] if candidates else None
 
 
-def _select_trajectory_dataset(
-    datasets: List[Dict[str, Any]],
-) -> Optional[Dict[str, Any]]:
-    candidates = [
-        dataset
-        for dataset in _list_agent_state_datasets(datasets)
-        if "trajectory" in dataset.get("capabilities", [])
-        and dataset.get("time_key")
-        and _dataset_has_columns(dataset, "lng", "lat")
-    ]
-    candidates.sort(key=lambda item: item["dataset_id"])
-    return candidates[0] if candidates else None
-
-
 def _select_primary_agent_state_dataset(
     datasets: List[Dict[str, Any]],
 ) -> Optional[Dict[str, Any]]:
@@ -364,7 +279,44 @@ def _select_primary_agent_state_dataset(
     return candidates[0]
 
 
-def _find_time_value(rows: List[Dict[str, Any]], time_key: Optional[str]) -> Optional[datetime]:
+def _select_timeline_dataset(
+    datasets: List[Dict[str, Any]],
+) -> Optional[Dict[str, Any]]:
+    primary_agent_state = _select_primary_agent_state_dataset(datasets)
+    if (
+        primary_agent_state is not None
+        and primary_agent_state.get("step_key")
+        and primary_agent_state.get("time_key")
+    ):
+        return primary_agent_state
+
+    agent_candidates = [
+        dataset
+        for dataset in _list_agent_state_datasets(datasets)
+        if dataset.get("step_key") and dataset.get("time_key")
+    ]
+    agent_candidates.sort(
+        key=lambda item: (
+            0 if "geo_point" not in item.get("capabilities", []) else 1,
+            item["dataset_id"],
+        )
+    )
+    if agent_candidates:
+        return agent_candidates[0]
+
+    env_candidates = [
+        dataset
+        for dataset in _list_env_state_datasets(datasets)
+        if dataset.get("step_key") and dataset.get("time_key")
+    ]
+    env_candidates.sort(key=lambda item: item["dataset_id"])
+    return env_candidates[0] if env_candidates else None
+
+
+def _find_time_value(
+    rows: List[Dict[str, Any]],
+    time_key: Optional[str],
+) -> Optional[datetime]:
     if not time_key:
         return None
     for row in rows:
@@ -410,87 +362,6 @@ def _build_positions_from_step_rows(
     return list(positions_by_agent_id.values())
 
 
-def _split_columns_param(raw_columns: Optional[str]) -> Optional[List[str]]:
-    if raw_columns is None:
-        return None
-    columns = [column.strip() for column in raw_columns.split(",") if column.strip()]
-    return columns or None
-
-
-def _build_agent_status_response(
-    status: AgentStatus,
-    *,
-    lng: Optional[float] = None,
-    lat: Optional[float] = None,
-) -> AgentStatusResponse:
-    return AgentStatusResponse(
-        id=status.id,
-        step=status.step,
-        t=status.t,
-        lng=lng,
-        lat=lat,
-        action=status.action,
-        status=status.status or {},
-    )
-
-
-def _coerce_datetime(value: Any) -> Optional[datetime]:
-    if isinstance(value, datetime):
-        return value
-    if isinstance(value, str):
-        try:
-            return datetime.fromisoformat(value)
-        except ValueError:
-            return None
-    return None
-
-
-def _dataset_has_columns(dataset: Dict[str, Any], *column_names: str) -> bool:
-    available = {column["column_name"] for column in dataset.get("columns", [])}
-    return all(column_name in available for column_name in column_names)
-
-
-async def _find_optional_dataset_by_capability(
-    session: AsyncSession,
-    capability: str,
-    *,
-    kind: Optional[str] = None,
-) -> Optional[Dict[str, Any]]:
-    try:
-        return await find_dataset_by_capability(session, capability, kind=kind)
-    except HTTPException as exc:
-        if exc.status_code == 404:
-            return None
-        raise
-
-
-async def _get_geo_dataset(
-    session: AsyncSession,
-    datasets: Optional[List[Dict[str, Any]]] = None,
-) -> Optional[Dict[str, Any]]:
-    catalog = datasets or await load_dataset_catalog(session)
-    return _select_geo_dataset(catalog)
-
-
-async def _get_agent_status_dataset(
-    session: AsyncSession,
-    datasets: Optional[List[Dict[str, Any]]] = None,
-) -> Optional[Dict[str, Any]]:
-    catalog = datasets or await load_dataset_catalog(session)
-    candidates = [
-        dataset
-        for dataset in _list_agent_state_datasets(catalog)
-        if dataset.get("time_key")
-    ]
-    candidates.sort(
-        key=lambda item: (
-            0 if "geo_point" in item.get("capabilities", []) else 1,
-            item["dataset_id"],
-        )
-    )
-    return candidates[0] if candidates else None
-
-
 async def _get_agent_profile_dataset(
     session: AsyncSession,
     datasets: Optional[List[Dict[str, Any]]] = None,
@@ -506,80 +377,37 @@ async def _get_agent_profile_dataset(
     return candidates[0] if candidates else None
 
 
-async def _get_trajectory_dataset(
+def _parse_profile_payload(raw_profile: Any) -> Dict[str, Any]:
+    if isinstance(raw_profile, dict):
+        return raw_profile
+    if isinstance(raw_profile, str):
+        try:
+            decoded = json.loads(raw_profile)
+        except json.JSONDecodeError:
+            return {"raw": raw_profile}
+        return decoded if isinstance(decoded, dict) else {}
+    return {}
+
+
+def _resolve_agent_name(agent_id: int, row: Dict[str, Any], profile: Dict[str, Any]) -> str:
+    name = row.get("name")
+    if isinstance(name, str) and name.strip():
+        return name
+    profile_name = profile.get("name")
+    if isinstance(profile_name, str) and profile_name.strip():
+        return profile_name
+    return f"Agent_{agent_id}"
+
+
+async def _load_agent_profiles(
     session: AsyncSession,
     datasets: Optional[List[Dict[str, Any]]] = None,
-) -> Optional[Dict[str, Any]]:
+) -> Dict[int, AgentProfile]:
     catalog = datasets or await load_dataset_catalog(session)
-    return _select_trajectory_dataset(catalog)
-
-
-async def _get_social_datasets(
-    session: AsyncSession,
-) -> tuple[Optional[Dict[str, Any]], Optional[Dict[str, Any]]]:
-    event_dataset = await _find_optional_dataset_by_capability(
-        session,
-        "social_event",
-        kind="event_stream",
-    )
-    if event_dataset is None:
-        return None, None
-
-    datasets = await load_dataset_catalog(session)
-    state_candidates = [
-        dataset
-        for dataset in datasets
-        if dataset.get("module_name") == event_dataset.get("module_name")
-        and dataset.get("kind") == "entity_snapshot"
-        and "agent_snapshot" in dataset.get("capabilities", [])
-        and dataset.get("entity_key")
-    ]
-    state_candidates.sort(key=lambda item: item["dataset_id"])
-    return event_dataset, (state_candidates[0] if state_candidates else None)
-
-
-async def _load_dataset_mappings(
-    session: AsyncSession,
-    dataset: Dict[str, Any],
-    *,
-    max_step: Optional[int] = None,
-) -> List[Dict[str, Any]]:
-    table = await reflect_dataset_table(session, dataset)
-    query = select(table)
-    step_key = dataset.get("step_key")
-    if max_step is not None and step_key and step_key in table.c:
-        query = query.where(table.c[step_key] <= max_step)
-
-    order_columns = [
-        table.c[column_name]
-        for column_name in dataset.get("default_order", [])
-        if column_name in table.c
-    ]
-    if not order_columns and step_key and step_key in table.c:
-        order_columns = [table.c[step_key]]
-    if order_columns:
-        query = query.order_by(*order_columns)
-
-    result = await session.execute(query)
-    return [dict(row) for row in result.mappings().all()]
-
-
-async def _load_social_events(
-    session: AsyncSession,
-    *,
-    max_step: Optional[int] = None,
-) -> List[Dict[str, Any]]:
-    event_dataset, _ = await _get_social_datasets(session)
-    if event_dataset is None:
-        return []
-    return await _load_dataset_mappings(session, event_dataset, max_step=max_step)
-
-
-async def _load_agent_profiles(session: AsyncSession) -> Dict[int, AgentProfile]:
-    dataset = await _get_agent_profile_dataset(session)
-    if dataset is not None:
-        table = await reflect_dataset_table(session, dataset)
-        entity_key = dataset["entity_key"]
+    profile_dataset = await _get_agent_profile_dataset(session, catalog)
+    if profile_dataset is not None:
+        table = await reflect_dataset_table(session, profile_dataset)
+        entity_key = profile_dataset["entity_key"]
         if entity_key in table.c:
             query = select(table).order_by(table.c[entity_key])
             result = await session.execute(query)
@@ -588,43 +416,22 @@ async def _load_agent_profiles(session: AsyncSession) -> Dict[int, AgentProfile]
                 raw_id = row.get(entity_key)
                 if raw_id is None:
                     continue
-                profile_payload = row.get("profile")
-                if isinstance(profile_payload, str):
-                    try:
-                        profile_payload = json.loads(profile_payload)
-                    except json.JSONDecodeError:
-                        profile_payload = {"raw": profile_payload}
-                if not isinstance(profile_payload, dict):
-                    profile_payload = {}
-
-                name = row.get("name")
-                if not isinstance(name, str) or not name.strip():
-                    name_value = profile_payload.get("name")
-                    if isinstance(name_value, str) and name_value.strip():
-                        name = name_value
-                    else:
-                        name = f"Agent_{int(raw_id)}"
-
-                created_at = _coerce_datetime(row.get("created_at")) or datetime.now()
-                profiles[int(raw_id)] = AgentProfile(
-                    id=int(raw_id),
-                    name=name,
+                agent_id = int(raw_id)
+                profile_payload = _parse_profile_payload(row.get("profile"))
+                profiles[agent_id] = AgentProfile(
+                    id=agent_id,
+                    name=_resolve_agent_name(agent_id, dict(row), profile_payload),
                     profile=profile_payload,
-                    created_at=created_at,
                 )
             if profiles:
                 return profiles
 
-    if await _table_exists(session, AgentProfile.__tablename__):
-        result = await session.execute(select(AgentProfile))
-        return {profile.id: profile for profile in result.scalars().all()}
-
-    dataset = await _get_agent_status_dataset(session)
-    if dataset is None:
+    identity_dataset = _select_primary_agent_state_dataset(catalog)
+    if identity_dataset is None:
         return {}
 
-    table = await reflect_dataset_table(session, dataset)
-    entity_key = dataset["entity_key"]
+    table = await reflect_dataset_table(session, identity_dataset)
+    entity_key = identity_dataset["entity_key"]
     if entity_key not in table.c:
         return {}
 
@@ -642,132 +449,34 @@ async def _load_agent_profiles(session: AsyncSession) -> Dict[int, AgentProfile]
     }
 
 
-def _display_name(profile: Optional[AgentProfile], user_id: int) -> str:
-    if profile is not None and profile.name:
-        return profile.name
-    return f"User {user_id}"
-
-
-def _extract_bio(profile: Optional[AgentProfile]) -> Optional[str]:
-    if profile is None or not isinstance(profile.profile, dict):
-        return None
-    for key in ("bio", "background_story", "description"):
-        value = profile.profile.get(key)
-        if isinstance(value, str) and value.strip():
-            return value
-    return None
-
-
-async def _get_agent_dataset_summary(
+async def _get_experiment_summary(
     session: AsyncSession,
+    datasets: List[Dict[str, Any]],
 ) -> tuple[int, Optional[datetime], Optional[datetime], int]:
-    dataset = await _get_agent_status_dataset(session)
-    if dataset is None:
-        return 0, None, None, 0
+    timeline_dataset = _select_timeline_dataset(datasets)
+    total_steps = 0
+    start_time: Optional[datetime] = None
+    end_time: Optional[datetime] = None
 
-    table = await reflect_dataset_table(session, dataset)
-    entity_key = dataset["entity_key"]
-    step_key = dataset["step_key"]
-    time_key = dataset["time_key"]
-    if any(key not in table.c for key in (entity_key, step_key, time_key)):
-        return 0, None, None, 0
+    if timeline_dataset is not None:
+        table = await reflect_dataset_table(session, timeline_dataset)
+        step_key = timeline_dataset["step_key"]
+        time_key = timeline_dataset["time_key"]
+        if step_key in table.c and time_key in table.c:
+            total_steps = (
+                await session.execute(
+                    select(func.count(func.distinct(table.c[step_key])))
+                )
+            ).scalar() or 0
+            start_time = _coerce_datetime(
+                (await session.execute(select(func.min(table.c[time_key])))).scalar()
+            )
+            end_time = _coerce_datetime(
+                (await session.execute(select(func.max(table.c[time_key])))).scalar()
+            )
 
-    total_steps = (
-        await session.execute(select(func.count(func.distinct(table.c[step_key]))))
-    ).scalar() or 0
-    start_time = (
-        await session.execute(select(func.min(table.c[time_key])))
-    ).scalar()
-    end_time = (
-        await session.execute(select(func.max(table.c[time_key])))
-    ).scalar()
-    agent_count = (
-        await session.execute(select(func.count(func.distinct(table.c[entity_key]))))
-    ).scalar() or 0
-    return (
-        int(total_steps),
-        _coerce_datetime(start_time),
-        _coerce_datetime(end_time),
-        int(agent_count),
-    )
-
-
-def _mapping_to_agent_status_response(
-    row: Dict[str, Any],
-    dataset: Dict[str, Any],
-) -> Optional[AgentStatusResponse]:
-    payload = dict(row)
-    entity_key = dataset["entity_key"]
-    step_key = dataset["step_key"]
-    time_key = dataset["time_key"]
-
-    timestamp = _coerce_datetime(payload.pop(time_key, None))
-    if timestamp is None:
-        return None
-
-    agent_id = payload.pop(entity_key, None)
-    step = payload.pop(step_key, None)
-    if agent_id is None or step is None:
-        return None
-
-    lng = payload.pop("lng", None)
-    lat = payload.pop("lat", None)
-    action = payload.pop("action", None)
-    payload.pop("created_at", None)
-
-    return AgentStatusResponse(
-        id=int(agent_id),
-        step=int(step),
-        t=timestamp,
-        lng=lng,
-        lat=lat,
-        action=action,
-        status=payload,
-    )
-
-
-async def _load_agent_status_from_dataset(
-    session: AsyncSession,
-    *,
-    step: Optional[int] = None,
-    agent_id: Optional[int] = None,
-) -> List[AgentStatusResponse]:
-    dataset = await _get_agent_status_dataset(session)
-    if dataset is None:
-        return []
-
-    table = await reflect_dataset_table(session, dataset)
-    entity_key = dataset["entity_key"]
-    step_key = dataset["step_key"]
-    if entity_key not in table.c or step_key not in table.c:
-        return []
-
-    query = select(table)
-    if step is not None:
-        query = query.where(table.c[step_key] == step)
-    if agent_id is not None:
-        query = query.where(table.c[entity_key] == agent_id)
-    query = query.order_by(table.c[step_key], table.c[entity_key])
-
-    result = await session.execute(query)
-    responses: List[AgentStatusResponse] = []
-    for row in result.mappings().all():
-        response = _mapping_to_agent_status_response(dict(row), dataset)
-        if response is not None:
-            responses.append(response)
-    return responses
-
-
-def _build_post_author_map(events: List[Dict[str, Any]]) -> Dict[int, int]:
-    post_author_map: Dict[int, int] = {}
-    for event in events:
-        action = str(event.get("action") or "")
-        target_id = event.get("target_id")
-        if action == "post" and target_id is not None:
-            post_author_map[int(target_id)] = int(event["sender_id"])
-        elif action == "repost":
-            post_author_map[int(event["id"])] = int(event["sender_id"])
-    return post_author_map
+    profiles = await _load_agent_profiles(session, datasets)
+    return int(total_steps), start_time, end_time, len(profiles)
 
 
 @router.get("/{hypothesis_id}/{experiment_id}/info", response_model=ExperimentInfo)
@@ -779,32 +488,9 @@ async def get_experiment_info(
     db_path = get_db_path(workspace_path, hypothesis_id, experiment_id)
 
     async for session in get_db_session(db_path):
-        if await _table_exists(session, AgentStatus.__tablename__):
-            total_steps = (
-                await session.execute(select(func.count(func.distinct(AgentStatus.step))))
-            ).scalar() or 0
-            start_time = (
-                await session.execute(select(func.min(AgentStatus.t)))
-            ).scalar()
-            end_time = (
-                await session.execute(select(func.max(AgentStatus.t)))
-            ).scalar()
-        else:
-            total_steps, start_time, end_time, _ = await _get_agent_dataset_summary(
-                session
-            )
-
-        if await _table_exists(session, AgentProfile.__tablename__):
-            agent_count = (
-                await session.execute(select(func.count(AgentProfile.id)))
-            ).scalar() or 0
-        else:
-            _, _, _, agent_count = await _get_agent_dataset_summary(session)
-
         datasets = await load_dataset_catalog(session)
-        has_social = any(
-            "social_event" in dataset.get("capabilities", [])
-            for dataset in datasets
+        total_steps, start_time, end_time, agent_count = await _get_experiment_summary(
+            session, datasets
         )
         return ExperimentInfo(
             hypothesis_id=hypothesis_id,
@@ -813,7 +499,6 @@ async def get_experiment_info(
             start_time=start_time,
             end_time=end_time,
             agent_count=agent_count,
-            has_social=has_social,
         )
 
 
@@ -868,7 +553,10 @@ async def get_replay_dataset_rows(
     end_step: Optional[int] = Query(None, description="End step (inclusive)"),
     max_step: Optional[int] = Query(None, description="Maximum step (inclusive)"),
     columns: Optional[str] = Query(None, description="Comma-separated column whitelist"),
-    latest_per_entity: bool = Query(False, description="Return only the latest row per entity"),
+    latest_per_entity: bool = Query(
+        False,
+        description="Return only the latest row per entity",
+    ),
 ) -> ReplayDatasetRows:
     db_path = get_db_path(workspace_path, hypothesis_id, experiment_id)
 
@@ -914,7 +602,6 @@ async def get_replay_panel_schema(
         agent_state_datasets = _list_agent_state_datasets(datasets)
         env_state_datasets = _list_env_state_datasets(datasets)
         geo_dataset = _select_geo_dataset(datasets)
-        trajectory_dataset = _select_trajectory_dataset(datasets)
         primary_agent_state_dataset = _select_primary_agent_state_dataset(datasets)
         return ReplayPanelSchema(
             agent_profile_dataset=(
@@ -930,11 +617,6 @@ async def get_replay_panel_schema(
             ],
             geo_dataset=(
                 _dataset_to_response(geo_dataset) if geo_dataset is not None else None
-            ),
-            trajectory_dataset=(
-                _dataset_to_response(trajectory_dataset)
-                if trajectory_dataset is not None
-                else None
             ),
             primary_agent_state_dataset_id=(
                 primary_agent_state_dataset["dataset_id"]
@@ -985,7 +667,9 @@ async def get_replay_step_bundle(
                 rows_by_agent_id=rows_by_agent_id,
             )
             if step_timestamp is None:
-                step_timestamp = _find_time_value(rows_result["rows"], dataset.get("time_key"))
+                step_timestamp = _find_time_value(
+                    rows_result["rows"], dataset.get("time_key")
+                )
 
         env_state_rows: Dict[str, ReplayEnvStateAtStep] = {}
         for dataset in env_state_datasets:
@@ -996,7 +680,9 @@ async def get_replay_step_bundle(
                 row=row,
             )
             if step_timestamp is None:
-                step_timestamp = _find_time_value(rows_result["rows"], dataset.get("time_key"))
+                step_timestamp = _find_time_value(
+                    rows_result["rows"], dataset.get("time_key")
+                )
 
         positions = _build_positions_from_step_rows(geo_dataset, agent_state_rows)
         return ReplayStepBundle(
@@ -1083,27 +769,20 @@ async def get_timeline(
     db_path = get_db_path(workspace_path, hypothesis_id, experiment_id)
 
     async for session in get_db_session(db_path):
-        if await _table_exists(session, AgentStatus.__tablename__):
-            result = await session.execute(
-                select(AgentStatus.step, AgentStatus.t)
-                .distinct()
-                .order_by(AgentStatus.step)
-            )
-            return [TimelinePoint(step=row[0], t=row[1]) for row in result.all()]
-
-        dataset = await _get_agent_status_dataset(session)
-        if dataset is None:
+        datasets = await load_dataset_catalog(session)
+        timeline_dataset = _select_timeline_dataset(datasets)
+        if timeline_dataset is None:
             return []
 
-        table = await reflect_dataset_table(session, dataset)
-        step_key = dataset["step_key"]
-        time_key = dataset["time_key"]
+        table = await reflect_dataset_table(session, timeline_dataset)
+        step_key = timeline_dataset["step_key"]
+        time_key = timeline_dataset["time_key"]
         if step_key not in table.c or time_key not in table.c:
             return []
 
         result = await session.execute(
-            select(table.c[step_key], table.c[time_key])
-            .distinct()
+            select(table.c[step_key], func.min(table.c[time_key]))
+            .group_by(table.c[step_key])
             .order_by(table.c[step_key])
         )
         timeline: List[TimelinePoint] = []
@@ -1127,713 +806,6 @@ async def get_agent_profiles(
     db_path = get_db_path(workspace_path, hypothesis_id, experiment_id)
 
     async for session in get_db_session(db_path):
-        profiles = await _load_agent_profiles(session)
-        return list(profiles.values())
-
-
-@router.get(
-    "/{hypothesis_id}/{experiment_id}/agents/status",
-    response_model=List[AgentStatusResponse],
-)
-async def get_agents_status_at_step(
-    hypothesis_id: str,
-    experiment_id: str,
-    workspace_path: str = Query(..., description="Workspace root path"),
-    step: Optional[int] = Query(None, description="Specific step to query. If omitted, use latest step."),
-) -> List[AgentStatusResponse]:
-    db_path = get_db_path(workspace_path, hypothesis_id, experiment_id)
-
-    async for session in get_db_session(db_path):
-        if not await _table_exists(session, AgentStatus.__tablename__):
-            if step is None:
-                dataset = await _get_agent_status_dataset(session)
-                if dataset is None:
-                    return []
-                table = await reflect_dataset_table(session, dataset)
-                step_key = dataset["step_key"]
-                if step_key not in table.c:
-                    return []
-                step = (
-                    await session.execute(select(func.max(table.c[step_key])))
-                ).scalar()
-                if step is None:
-                    return []
-            return await _load_agent_status_from_dataset(session, step=int(step))
-
-        if step is None:
-            step = (await session.execute(select(func.max(AgentStatus.step)))).scalar()
-            if step is None:
-                return []
-
-        geo_dataset = await _get_geo_dataset(session)
-        if geo_dataset is None:
-            result = await session.execute(
-                select(AgentStatus)
-                .where(AgentStatus.step == step)
-                .order_by(AgentStatus.id)
-            )
-            return [_build_agent_status_response(status) for status in result.scalars().all()]
-
-        geo_table = await reflect_dataset_table(session, geo_dataset)
-        entity_key = geo_dataset["entity_key"]
-        step_key = geo_dataset["step_key"]
-        if entity_key not in geo_table.c or step_key not in geo_table.c:
-            result = await session.execute(
-                select(AgentStatus)
-                .where(AgentStatus.step == step)
-                .order_by(AgentStatus.id)
-            )
-            return [_build_agent_status_response(status) for status in result.scalars().all()]
-
-        result = await session.execute(
-            select(AgentStatus, geo_table.c.lng, geo_table.c.lat)
-            .select_from(AgentStatus)
-            .outerjoin(
-                geo_table,
-                (AgentStatus.id == geo_table.c[entity_key])
-                & (AgentStatus.step == geo_table.c[step_key]),
-            )
-            .where(AgentStatus.step == step)
-            .order_by(AgentStatus.id)
-        )
-        return [
-            _build_agent_status_response(status, lng=lng, lat=lat)
-            for status, lng, lat in result.all()
-        ]
-
-
-@router.get(
-    "/{hypothesis_id}/{experiment_id}/agents/{agent_id}/status",
-    response_model=List[AgentStatusResponse],
-)
-async def get_agent_status_history(
-    hypothesis_id: str,
-    experiment_id: str,
-    agent_id: int,
-    workspace_path: str = Query(..., description="Workspace root path"),
-) -> List[AgentStatusResponse]:
-    db_path = get_db_path(workspace_path, hypothesis_id, experiment_id)
-
-    async for session in get_db_session(db_path):
-        if not await _table_exists(session, AgentStatus.__tablename__):
-            return await _load_agent_status_from_dataset(session, agent_id=agent_id)
-
-        geo_dataset = await _get_geo_dataset(session)
-        if geo_dataset is None:
-            result = await session.execute(
-                select(AgentStatus)
-                .where(AgentStatus.id == agent_id)
-                .order_by(AgentStatus.step)
-            )
-            return [_build_agent_status_response(status) for status in result.scalars().all()]
-
-        geo_table = await reflect_dataset_table(session, geo_dataset)
-        entity_key = geo_dataset["entity_key"]
-        step_key = geo_dataset["step_key"]
-        if entity_key not in geo_table.c or step_key not in geo_table.c:
-            result = await session.execute(
-                select(AgentStatus)
-                .where(AgentStatus.id == agent_id)
-                .order_by(AgentStatus.step)
-            )
-            return [_build_agent_status_response(status) for status in result.scalars().all()]
-
-        result = await session.execute(
-            select(AgentStatus, geo_table.c.lng, geo_table.c.lat)
-            .select_from(AgentStatus)
-            .outerjoin(
-                geo_table,
-                (AgentStatus.id == geo_table.c[entity_key])
-                & (AgentStatus.step == geo_table.c[step_key]),
-            )
-            .where(AgentStatus.id == agent_id)
-            .order_by(AgentStatus.step)
-        )
-        return [
-            _build_agent_status_response(status, lng=lng, lat=lat)
-            for status, lng, lat in result.all()
-        ]
-
-
-@router.get(
-    "/{hypothesis_id}/{experiment_id}/agents/{agent_id}/trajectory",
-    response_model=List[Dict[str, Any]],
-)
-async def get_agent_trajectory(
-    hypothesis_id: str,
-    experiment_id: str,
-    agent_id: int,
-    workspace_path: str = Query(..., description="Workspace root path"),
-    start_step: Optional[int] = Query(None, description="Start step (inclusive)"),
-    end_step: Optional[int] = Query(None, description="End step (inclusive)"),
-) -> List[Dict[str, Any]]:
-    db_path = get_db_path(workspace_path, hypothesis_id, experiment_id)
-
-    async for session in get_db_session(db_path):
-        dataset = await _get_trajectory_dataset(session)
-        if dataset is None:
-            return []
-
-        table = await reflect_dataset_table(session, dataset)
-        entity_key = dataset["entity_key"]
-        step_key = dataset["step_key"]
-        time_key = dataset["time_key"]
-        required = [entity_key, step_key, time_key, "lng", "lat"]
-        if any(column_name not in table.c for column_name in required):
-            return []
-
-        query = select(
-            table.c[step_key],
-            table.c[time_key],
-            table.c.lng,
-            table.c.lat,
-        ).where(table.c[entity_key] == agent_id)
-        if start_step is not None:
-            query = query.where(table.c[step_key] >= start_step)
-        if end_step is not None:
-            query = query.where(table.c[step_key] <= end_step)
-        query = query.order_by(table.c[step_key])
-
-        result = await session.execute(query)
-        return [
-            {"step": step_value, "t": time_value, "lng": lng, "lat": lat}
-            for step_value, time_value, lng, lat in result.all()
-        ]
-
-
-@router.get(
-    "/{hypothesis_id}/{experiment_id}/agents/{agent_id}/dialog",
-    response_model=List[AgentDialog],
-)
-async def get_agent_dialogs(
-    hypothesis_id: str,
-    experiment_id: str,
-    agent_id: int,
-    workspace_path: str = Query(..., description="Workspace root path"),
-    dialog_type: Optional[int] = Query(
-        None,
-        description="Dialog type filter: 0=thought, 1=agent-to-agent, 2=user",
-    ),
-) -> List[AgentDialog]:
-    db_path = get_db_path(workspace_path, hypothesis_id, experiment_id)
-
-    async for session in get_db_session(db_path):
-        if not await _table_exists(session, AgentDialog.__tablename__):
-            return []
-        query = select(AgentDialog).where(AgentDialog.agent_id == agent_id)
-        if dialog_type is not None:
-            query = query.where(AgentDialog.type == dialog_type)
-        query = query.order_by(AgentDialog.step, AgentDialog.id)
-        result = await session.execute(query)
-        return result.scalars().all()
-
-
-@router.get(
-    "/{hypothesis_id}/{experiment_id}/dialogs/step/{step}",
-    response_model=List[AgentDialog],
-)
-async def get_dialogs_at_step(
-    hypothesis_id: str,
-    experiment_id: str,
-    step: int,
-    workspace_path: str = Query(..., description="Workspace root path"),
-    dialog_type: Optional[int] = Query(
-        None,
-        description="Dialog type filter: 0=thought/reflection; V2 currently uses only type 0",
-    ),
-) -> List[AgentDialog]:
-    db_path = get_db_path(workspace_path, hypothesis_id, experiment_id)
-
-    async for session in get_db_session(db_path):
-        if not await _table_exists(session, AgentDialog.__tablename__):
-            return []
-        query = select(AgentDialog).where(AgentDialog.step == step)
-        if dialog_type is not None:
-            query = query.where(AgentDialog.type == dialog_type)
-        query = query.order_by(AgentDialog.id)
-        result = await session.execute(query)
-        return result.scalars().all()
-
-
-@router.get(
-    "/{hypothesis_id}/{experiment_id}/social/users/{user_id}",
-    response_model=SocialUser,
-)
-async def get_social_user(
-    hypothesis_id: str,
-    experiment_id: str,
-    user_id: int,
-    workspace_path: str = Query(..., description="Workspace root path"),
-) -> SocialUser:
-    db_path = get_db_path(workspace_path, hypothesis_id, experiment_id)
-
-    async for session in get_db_session(db_path):
-        _, state_dataset = await _get_social_datasets(session)
-        profiles = await _load_agent_profiles(session)
-        profile = profiles.get(user_id)
-        latest_state: Dict[str, Any] = {}
-
-        if state_dataset is not None:
-            table = await reflect_dataset_table(session, state_dataset)
-            entity_key = state_dataset["entity_key"]
-            step_key = state_dataset.get("step_key")
-            query = select(table).where(table.c[entity_key] == user_id)
-            if step_key and step_key in table.c:
-                query = query.order_by(desc(table.c[step_key]))
-            result = await session.execute(query.limit(1))
-            state_row = result.mappings().first()
-            if state_row is not None:
-                latest_state = dict(state_row)
-
-        if profile is None and not latest_state:
-            raise HTTPException(status_code=404, detail="Social user not found")
-
-        return SocialUser(
-            user_id=user_id,
-            username=_display_name(profile, user_id),
-            bio=_extract_bio(profile),
-            created_at=None,
-            followers_count=int(latest_state.get("followers_count") or 0),
-            following_count=int(latest_state.get("following_count") or 0),
-            posts_count=int(latest_state.get("posts_count") or 0),
-            profile=profile.profile if profile is not None else None,
-        )
-
-
-@router.get(
-    "/{hypothesis_id}/{experiment_id}/social/users/{user_id}/posts",
-    response_model=List[SocialPost],
-)
-async def get_social_posts(
-    hypothesis_id: str,
-    experiment_id: str,
-    user_id: int,
-    workspace_path: str = Query(..., description="Workspace root path"),
-    max_step: Optional[int] = Query(
-        None,
-        description="Only posts with step <= max_step (timeline step)",
-    ),
-    limit: int = Query(200, ge=1, le=500),
-) -> List[SocialPost]:
-    db_path = get_db_path(workspace_path, hypothesis_id, experiment_id)
-
-    async for session in get_db_session(db_path):
-        events = await _load_social_events(session, max_step=max_step)
-        latest_like_actions: Dict[tuple[int, int], str] = {}
-        comments_count: defaultdict[int, int] = defaultdict(int)
-        reposts_count: defaultdict[int, int] = defaultdict(int)
-        posts: List[SocialPost] = []
-
-        for event in events:
-            action = str(event.get("action") or "")
-            target_id = event.get("target_id")
-            if target_id is not None:
-                target_post_id = int(target_id)
-                if action in {"like", "unlike"}:
-                    latest_like_actions[(int(event["sender_id"]), target_post_id)] = action
-                elif action == "comment":
-                    comments_count[target_post_id] += 1
-                elif action == "repost":
-                    reposts_count[target_post_id] += 1
-
-            if int(event["sender_id"]) != user_id or action not in SOCIAL_POST_ACTIONS:
-                continue
-
-            if action == "post" and target_id is not None:
-                post_id_value = int(target_id)
-                post_type = "original"
-                parent_id = None
-            else:
-                post_id_value = int(event["id"])
-                post_type = "repost"
-                parent_id = int(target_id) if target_id is not None else None
-
-            posts.append(
-                SocialPost(
-                    post_id=post_id_value,
-                    step=int(event["step"]),
-                    author_id=int(event["sender_id"]),
-                    content=str(event.get("content") or ""),
-                    post_type=post_type,
-                    parent_id=parent_id,
-                    created_at=event.get("t"),
-                    likes_count=0,
-                    reposts_count=0,
-                    comments_count=0,
-                    view_count=0,
-                    tags=[],
-                    topic_category=None,
-                )
-            )
-
-        likes_count: defaultdict[int, int] = defaultdict(int)
-        for (_, post_id_value), action in latest_like_actions.items():
-            if action == "like":
-                likes_count[post_id_value] += 1
-
-        for post in posts:
-            post.likes_count = likes_count.get(post.post_id, 0)
-            post.comments_count = comments_count.get(post.post_id, 0)
-            post.reposts_count = reposts_count.get(post.post_id, 0)
-
-        posts.sort(
-            key=lambda post: (post.step, post.created_at or datetime.min, post.post_id),
-            reverse=True,
-        )
-        return posts[:limit]
-
-
-@router.get(
-    "/{hypothesis_id}/{experiment_id}/social/posts",
-    response_model=List[SocialPost],
-)
-async def get_all_social_posts(
-    hypothesis_id: str,
-    experiment_id: str,
-    workspace_path: str = Query(..., description="Workspace root path"),
-    max_step: Optional[int] = Query(
-        None,
-        description="Only posts with step <= max_step (timeline step)",
-    ),
-    limit: int = Query(500, ge=1, le=2000),
-) -> List[SocialPost]:
-    db_path = get_db_path(workspace_path, hypothesis_id, experiment_id)
-
-    async for session in get_db_session(db_path):
-        events = await _load_social_events(session, max_step=max_step)
-        latest_like_actions: Dict[tuple[int, int], str] = {}
-        comments_count: defaultdict[int, int] = defaultdict(int)
-        reposts_count: defaultdict[int, int] = defaultdict(int)
-        posts: List[SocialPost] = []
-
-        for event in events:
-            action = str(event.get("action") or "")
-            target_id = event.get("target_id")
-            if target_id is not None:
-                target_post_id = int(target_id)
-                if action in {"like", "unlike"}:
-                    latest_like_actions[(int(event["sender_id"]), target_post_id)] = action
-                elif action == "comment":
-                    comments_count[target_post_id] += 1
-                elif action == "repost":
-                    reposts_count[target_post_id] += 1
-
-            if action not in SOCIAL_POST_ACTIONS:
-                continue
-
-            if action == "post" and target_id is not None:
-                post_id_value = int(target_id)
-                post_type = "original"
-                parent_id = None
-            else:
-                post_id_value = int(event["id"])
-                post_type = "repost"
-                parent_id = int(target_id) if target_id is not None else None
-
-            posts.append(
-                SocialPost(
-                    post_id=post_id_value,
-                    step=int(event["step"]),
-                    author_id=int(event["sender_id"]),
-                    content=str(event.get("content") or ""),
-                    post_type=post_type,
-                    parent_id=parent_id,
-                    created_at=event.get("t"),
-                    likes_count=0,
-                    reposts_count=0,
-                    comments_count=0,
-                    view_count=0,
-                    tags=[],
-                    topic_category=None,
-                )
-            )
-
-        likes_count: defaultdict[int, int] = defaultdict(int)
-        for (_, post_id_value), action in latest_like_actions.items():
-            if action == "like":
-                likes_count[post_id_value] += 1
-
-        for post in posts:
-            post.likes_count = likes_count.get(post.post_id, 0)
-            post.comments_count = comments_count.get(post.post_id, 0)
-            post.reposts_count = reposts_count.get(post.post_id, 0)
-
-        posts.sort(
-            key=lambda post: (post.step, post.created_at or datetime.min, post.post_id),
-            reverse=True,
-        )
-        return posts[:limit]
-
-
-@router.get(
-    "/{hypothesis_id}/{experiment_id}/social/posts/{post_id}/comments",
-    response_model=List[SocialComment],
-)
-async def get_post_comments(
-    hypothesis_id: str,
-    experiment_id: str,
-    post_id: int,
-    workspace_path: str = Query(..., description="Workspace root path"),
-) -> List[SocialComment]:
-    db_path = get_db_path(workspace_path, hypothesis_id, experiment_id)
-
-    async for session in get_db_session(db_path):
-        events = await _load_social_events(session)
-        comments = [event for event in events if str(event.get("action")) == "comment" and int(event.get("target_id") or -1) == post_id]
-        return [
-            SocialComment(
-                comment_id=int(event["id"]),
-                step=int(event["step"]),
-                post_id=int(event["target_id"]),
-                author_id=int(event["sender_id"]),
-                content=str(event.get("content") or ""),
-                created_at=event.get("t"),
-                likes_count=0,
-            )
-            for event in comments
-        ]
-
-
-@router.get(
-    "/{hypothesis_id}/{experiment_id}/social/users/{user_id}/events",
-    response_model=List[SocialEvent],
-)
-async def get_social_user_events(
-    hypothesis_id: str,
-    experiment_id: str,
-    user_id: int,
-    workspace_path: str = Query(..., description="Workspace root path"),
-    max_step: Optional[int] = Query(
-        None,
-        description="Only events with step <= max_step (timeline step)",
-    ),
-    limit: int = Query(200, ge=1, le=1000),
-) -> List[SocialEvent]:
-    db_path = get_db_path(workspace_path, hypothesis_id, experiment_id)
-
-    async for session in get_db_session(db_path):
-        profiles = await _load_agent_profiles(session)
-        events = await _load_social_events(session, max_step=max_step)
-        post_author_map = _build_post_author_map(events)
-        related_events = []
-
-        for event in events:
-            sender_id = int(event["sender_id"])
-            receiver_id = (
-                int(event["receiver_id"])
-                if event.get("receiver_id") is not None
-                else None
-            )
-            target_id = (
-                int(event["target_id"]) if event.get("target_id") is not None else None
-            )
-            target_author_id = (
-                post_author_map.get(target_id) if target_id is not None else None
-            )
-            if user_id in {sender_id, receiver_id, target_author_id}:
-                related_events.append(event)
-
-        related_events.sort(
-            key=lambda event: (
-                int(event["step"]),
-                event.get("t") or datetime.min,
-                int(event["id"]),
-            ),
-            reverse=True,
-        )
-
-        response: List[SocialEvent] = []
-        for event in related_events[:limit]:
-            sender_id = int(event["sender_id"])
-            receiver_id = (
-                int(event["receiver_id"])
-                if event.get("receiver_id") is not None
-                else None
-            )
-            target_id = (
-                int(event["target_id"]) if event.get("target_id") is not None else None
-            )
-            target_author_id = (
-                post_author_map.get(target_id) if target_id is not None else None
-            )
-            sender_name = _display_name(profiles.get(sender_id), sender_id)
-            receiver_name = (
-                _display_name(profiles.get(receiver_id), receiver_id)
-                if receiver_id is not None
-                else None
-            )
-            target_author_name = (
-                _display_name(profiles.get(target_author_id), target_author_id)
-                if target_author_id is not None
-                else None
-            )
-            action = str(event["action"])
-            content = str(event.get("content") or "").strip() or None
-
-            if sender_id == user_id:
-                summary_map = {
-                    "post": "Published a post",
-                    "repost": f"Reposted post #{target_id}",
-                    "comment": f"Commented on post #{target_id}",
-                    "like": f"Liked post #{target_id}",
-                    "unlike": f"Removed like from post #{target_id}",
-                    "follow": f"Followed {receiver_name}",
-                    "unfollow": f"Unfollowed {receiver_name}",
-                }
-                summary = summary_map.get(action, f"Performed {action}")
-            elif receiver_id == user_id:
-                summary_map = {
-                    "follow": f"{sender_name} followed you",
-                    "unfollow": f"{sender_name} unfollowed you",
-                }
-                summary = summary_map.get(action, f"{sender_name} triggered {action}")
-            elif target_author_id == user_id:
-                summary_map = {
-                    "like": f"{sender_name} liked your post #{target_id}",
-                    "unlike": f"{sender_name} removed like from your post #{target_id}",
-                    "comment": f"{sender_name} commented on your post #{target_id}",
-                    "repost": f"{sender_name} reposted your post #{target_id}",
-                }
-                summary = summary_map.get(action, f"{sender_name} acted on your post")
-            else:
-                summary_map = {
-                    "post": f"{sender_name} published a post",
-                    "repost": f"{sender_name} reposted post #{target_id}",
-                    "comment": f"{sender_name} commented on post #{target_id}",
-                    "like": f"{sender_name} liked post #{target_id}",
-                    "unlike": f"{sender_name} removed like from post #{target_id}",
-                    "follow": f"{sender_name} followed {receiver_name}",
-                    "unfollow": f"{sender_name} unfollowed {receiver_name}",
-                }
-                summary = summary_map.get(action, f"{sender_name} performed {action}")
-
-            if content:
-                summary = f"{summary}: {content}"
-
-            response.append(
-                SocialEvent(
-                    event_id=int(event["id"]),
-                    step=int(event["step"]),
-                    t=event.get("t"),
-                    sender_id=sender_id,
-                    sender_name=sender_name,
-                    action=action,
-                    content=content,
-                    receiver_id=receiver_id,
-                    receiver_name=receiver_name,
-                    target_id=target_id,
-                    target_author_id=target_author_id,
-                    target_author_name=target_author_name,
-                    summary=summary,
-                )
-            )
-        return response
-
-
-@router.get(
-    "/{hypothesis_id}/{experiment_id}/social/network",
-    response_model=SocialNetwork,
-)
-async def get_social_network(
-    hypothesis_id: str,
-    experiment_id: str,
-    workspace_path: str = Query(..., description="Workspace root path"),
-) -> SocialNetwork:
-    db_path = get_db_path(workspace_path, hypothesis_id, experiment_id)
-
-    async for session in get_db_session(db_path):
-        profiles = await _load_agent_profiles(session)
-        event_dataset, state_dataset = await _get_social_datasets(session)
-        participant_ids: set[int] = set()
-
-        if state_dataset is not None:
-            table = await reflect_dataset_table(session, state_dataset)
-            entity_key = state_dataset["entity_key"]
-            result = await session.execute(select(table.c[entity_key]).distinct())
-            participant_ids.update(int(row[0]) for row in result.all())
-
-        if event_dataset is None:
-            nodes = [
-                SocialNetworkNode(
-                    user_id=user_id,
-                    username=_display_name(profiles.get(user_id), user_id),
-                )
-                for user_id in sorted(participant_ids)
-            ]
-            return SocialNetwork(nodes=nodes, edges=[])
-
-        events = await _load_dataset_mappings(session, event_dataset)
-        latest_actions: Dict[tuple[int, int], str] = {}
-        for event in events:
-            sender_id = int(event["sender_id"])
-            participant_ids.add(sender_id)
-            receiver_id = (
-                int(event["receiver_id"])
-                if event.get("receiver_id") is not None
-                else None
-            )
-            if receiver_id is not None:
-                participant_ids.add(receiver_id)
-            if str(event.get("action")) in {"follow", "unfollow"} and receiver_id is not None:
-                latest_actions[(sender_id, receiver_id)] = str(event["action"])
-
-        nodes = [
-            SocialNetworkNode(
-                user_id=user_id,
-                username=_display_name(profiles.get(user_id), user_id),
-            )
-            for user_id in sorted(participant_ids)
-        ]
-        edges = [
-            SocialNetworkEdge(source=follower_id, target=followee_id)
-            for (follower_id, followee_id), action in latest_actions.items()
-            if action == "follow"
-        ]
-        return SocialNetwork(nodes=nodes, edges=edges)
-
-
-@router.get(
-    "/{hypothesis_id}/{experiment_id}/social/activity",
-    response_model=SocialActivityResponse,
-)
-async def get_social_activity_at_step(
-    hypothesis_id: str,
-    experiment_id: str,
-    step: int = Query(..., ge=0, description="Simulation step to query"),
-    workspace_path: str = Query(..., description="Workspace root path"),
-) -> SocialActivityResponse:
-    db_path = get_db_path(workspace_path, hypothesis_id, experiment_id)
-
-    async for session in get_db_session(db_path):
-        events = await _load_social_events(session, max_step=step)
-        if not events:
-            return SocialActivityResponse(step=step, highlighted_agent_ids=[])
-
-        step_events = [event for event in events if int(event["step"]) == step]
-        post_author_map = _build_post_author_map(events)
-        highlighted_agent_ids: set[int] = set()
-
-        for event in step_events:
-            action = str(event["action"])
-            receiver_id = (
-                int(event["receiver_id"])
-                if event.get("receiver_id") is not None
-                else None
-            )
-            target_id = (
-                int(event["target_id"]) if event.get("target_id") is not None else None
-            )
-            target_author_id = (
-                post_author_map.get(target_id) if target_id is not None else None
-            )
-
-            if action in SOCIAL_TARGETED_ACTIONS:
-                if receiver_id is not None:
-                    highlighted_agent_ids.add(receiver_id)
-                if target_author_id is not None:
-                    highlighted_agent_ids.add(target_author_id)
-
-        return SocialActivityResponse(
-            step=step,
-            highlighted_agent_ids=sorted(highlighted_agent_ids),
-        )
+        datasets = await load_dataset_catalog(session)
+        profiles = await _load_agent_profiles(session, datasets)
+        return sorted(profiles.values(), key=lambda profile: profile.id)
