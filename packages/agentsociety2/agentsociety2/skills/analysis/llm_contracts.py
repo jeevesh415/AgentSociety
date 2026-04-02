@@ -1,5 +1,7 @@
 """
-分析模块共享的 Prompt 模板。统一 XML 格式与裁判结构，便于维护与复用。
+分析模块与 LLM 交互的 **输出契约**（XML 片段与说明函数）。
+
+可组合的 **自然语言能力说明** 见 `instruction_md/`（`utils.get_analysis_skills`）；模块总览见 `README.md`。
 """
 
 # 通用裁判 XML 格式（分析/策略/可视化/报告等判断）
@@ -21,8 +23,7 @@ REPORT_XML = (
 # 报告裁判 XML
 REPORT_JUDGMENT_XML = (
     "<judgment><success>true</success><reason>...</reason>"
-    "<has_markdown_zh>true</has_markdown_zh><has_html_zh>true</has_html_zh>"
-    "<has_markdown_en>true</has_markdown_en><has_html_en>true</has_html_en>"
+    "<has_markdown>true</has_markdown><has_html>true</has_html>"
     "<should_retry>false</should_retry><retry_instruction>...</retry_instruction></judgment>"
 )
 
@@ -77,9 +78,25 @@ def strategy_xml_contract() -> str:
 <strategy>
   <analysis_strategy>...</analysis_strategy>
   <tools_to_use>
-    <tool><tool_name>...</tool_name><tool_type>code_executor|eda_profile|eda_sweetviz|builtin</tool_type><action>...</action><parameters>{{}}</parameters></tool>
+    <tool><tool_name>...</tool_name><tool_type>code_executor|eda_profile|eda_sweetviz|read_file|write_file|list_directory|glob|search_file_content|literature_search|load_literature|write_todos|run_shell_command</tool_type><action>...</action><parameters>{{}}</parameters></tool>
   </tools_to_use>
-</strategy>"""
+</strategy>
+
+Available tool types (use based on analysis needs):
+- code_executor: Run Python code for custom analysis/visualization
+- eda_profile: Generate ydata-profiling EDA report
+- eda_sweetviz: Generate Sweetviz EDA report
+- read_file: Read file contents (for artifacts, logs)
+- write_file: Write content to file
+- list_directory: List directory contents
+- glob: Find files matching pattern
+- search_file_content: Search for patterns in files
+- literature_search: Search literature database (if context requires)
+- load_literature: Load literature index
+- write_todos: Create task list for complex workflows
+- run_shell_command: Execute shell commands
+
+Not all tools are needed. Choose wisely based on data and analysis context."""
 
 
 def adjust_tools_xml_contract() -> str:

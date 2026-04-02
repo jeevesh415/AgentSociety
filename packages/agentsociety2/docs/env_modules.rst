@@ -55,8 +55,8 @@
 有关完整的参考实现，请参阅：
 
 * ``SimpleSocialSpace`` - 社交互动模块
-* ``PublicGoodsGame`` - 公共物品博弈模块
-* ``PrisonersDilemma`` - 囚徒困境模块
+* ``PublicGoodsEnv`` - 公共物品博弈模块
+* ``PrisonersDilemmaEnv`` - 囚徒困境模块
 
 @tool 装饰器
 ~~~~~~~~~~~~~~~~~~~
@@ -158,9 +158,9 @@
 示例
 --------
 
-请参阅 :mod:`agentsociety2.contrib.env` 包中的示例模块：
+请参阅 ``agentsociety2.contrib.env`` 中的内置环境类（类名以当前代码为准）：
 
-* :mod:`~agentsociety2.contrib.env.SimpleSocialSpace`
-* :mod:`~agentsociety2.contrib.env.PublicGoodsGame`
-* :mod:`~agentsociety2.contrib.env.PrisonersDilemma`
-* :mod:`~agentsociety2.contrib.env.TrustGame`
+* ``SimpleSocialSpace``（社交互动）
+* ``PublicGoodsEnv``（公共物品博弈）
+* ``PrisonersDilemmaEnv``（囚徒困境）
+* ``TrustGameEnv``（信任博弈）

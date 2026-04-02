@@ -18,7 +18,7 @@ from sqlalchemy.ext.asyncio import AsyncEngine, AsyncSession, create_async_engin
 from sqlalchemy.orm import sessionmaker
 from sqlmodel import SQLModel
 
-from .models import AgentProfile, AgentStatus
+from .models import AgentDialog, AgentProfile, AgentStatus
 from .replay_metadata import (
     COLUMN_CATALOG_TABLE,
     DATASET_CATALOG_TABLE,
@@ -40,10 +40,9 @@ class ReplayWriter:
     """
 
     def __init__(self, db_path: Path):
-        """Initialize the replay writer.
+        """创建回放写入器。
 
-        Args:
-            db_path: Path to the SQLite database file.
+        :param db_path: SQLite 数据库文件路径。
         """
         self._db_path = db_path
         self._engine: Optional[AsyncEngine] = None
@@ -53,7 +52,7 @@ class ReplayWriter:
         self._registered_datasets: Set[str] = set()
 
     async def init(self) -> None:
-        """Initialize database connection and create tables."""
+        """初始化数据库连接并创建框架表。"""
         # Ensure parent directory exists
         self._db_path.parent.mkdir(parents=True, exist_ok=True)
 
@@ -71,17 +70,17 @@ class ReplayWriter:
             await conn.run_sync(
                 lambda sync_conn: SQLModel.metadata.create_all(
                     sync_conn,
-                    tables=[AgentProfile.__table__, AgentStatus.__table__],
+                    tables=[AgentProfile.__table__, AgentStatus.__table__, AgentDialog.__table__],
                 )
             )
 
-        for name in (AgentProfile.__tablename__, AgentStatus.__tablename__):
+        for name in (AgentProfile.__tablename__, AgentStatus.__tablename__, AgentDialog.__tablename__):
             self._registered_tables.add(name)
         await self._ensure_catalog_tables()
 
 
     async def close(self) -> None:
-        """Flush pending writes and close database connection."""
+        """关闭数据库连接并释放资源。"""
         if self._engine:
             await self._engine.dispose()
             self._engine = None
@@ -203,10 +202,9 @@ class ReplayWriter:
         self._registered_datasets.add(spec.dataset_id)
 
     async def register_table(self, schema: TableSchema) -> None:
-        """Register and create a new table dynamically.
+        """动态注册并创建新表（用于环境模块自定义回放表）。
 
-        Args:
-            schema: TableSchema defining the table structure.
+        :param schema: 表结构定义。
         """
         if schema.name in self._registered_tables:
             return
@@ -231,11 +229,10 @@ class ReplayWriter:
             self._registered_tables.add(schema.name)
 
     async def write(self, table_name: str, data: Dict[str, Any]) -> None:
-        """Write a single row to a table.
+        """向指定表写入一行（通用写入，支持动态表）。
 
-        Args:
-            table_name: Name of the table to write to.
-            data: Dictionary of column names to values.
+        :param table_name: 表名。
+        :param data: 列名到值的映射。
         """
         # For statically defined tables, allow using generic write but process specially?
         # Actually, for dynamic tables, we need to construct INSERT statement
@@ -264,7 +261,7 @@ class ReplayWriter:
     async def write_batch(
         self, table_name: str, data_list: List[Dict[str, Any]]
     ) -> None:
-        """Write multiple rows to a table in a single transaction."""
+        """批量写入多行（单事务）。"""
         if not data_list:
             return
 
@@ -283,7 +280,7 @@ class ReplayWriter:
                 await session.commit()
     
     def _process_data_for_write(self, data: Dict[str, Any]) -> Dict[str, Any]:
-        """Convert objects into format suitable for SQLite/SQLAlchemy."""
+        """将数据转换为适合 SQLite/SQLAlchemy 的形式（datetime/JSON 等）。"""
         new_data = {}
         for k, v in data.items():
             if isinstance(v, datetime):
@@ -304,7 +301,7 @@ class ReplayWriter:
     async def write_agent_profile(
         self, agent_id: int, name: str, profile: Dict[str, Any]
     ) -> None:
-        """Write agent profile using ORM."""
+        """写入 agent_profile（ORM）。"""
         obj = AgentProfile(id=agent_id, name=name, profile=profile)
         async with self._lock:
             async with self._session_maker() as session:
@@ -314,7 +311,7 @@ class ReplayWriter:
     async def write_agent_profiles_batch(
         self, profiles: List[Tuple[int, str, Dict[str, Any]]]
     ) -> None:
-        """Write batch profiles."""
+        """批量写入 agent_profile（ORM）。"""
         objs = [
             AgentProfile(id=pid, name=name, profile=prof)
             for pid, name, prof in profiles
@@ -333,7 +330,7 @@ class ReplayWriter:
         action: Optional[str] = None,
         status: Optional[Dict[str, Any]] = None,
     ) -> None:
-        """Write agent status using ORM."""
+        """写入 agent_status（ORM）。"""
         obj = AgentStatus(
             id=agent_id, step=step, t=t, action=action, status=status or {}
         )
@@ -346,7 +343,7 @@ class ReplayWriter:
         self,
         statuses: List[Tuple[int, int, datetime, Optional[str], Optional[Dict[str, Any]]]],
     ) -> None:
-        """Write batch statuses."""
+        """批量写入 agent_status（ORM）。"""
         objs = [
             AgentStatus(
                 id=aid, step=step, t=t, action=action, status=status or {}
@@ -357,6 +354,49 @@ class ReplayWriter:
             async with self._session_maker() as session:
                 for obj in objs:
                     await session.merge(obj)
+                await session.commit()
+
+    async def write_agent_dialog(
+        self,
+        agent_id: int,
+        step: int,
+        t: datetime,
+        dialog_type: int,
+        speaker: str,
+        content: str,
+    ) -> None:
+        """写入 agent_dialog（ORM）。"""
+        obj = AgentDialog(
+            agent_id=agent_id,
+            step=step,
+            t=t,
+            type=dialog_type,
+            speaker=speaker,
+            content=content,
+        )
+        async with self._lock:
+            async with self._session_maker() as session:
+                session.add(obj)
+                await session.commit()
+
+    async def write_agent_dialogs_batch(
+        self, dialogs: List[Tuple[int, int, datetime, int, str, str]]
+    ) -> None:
+        """批量写入 agent_dialog（ORM）。"""
+        objs = [
+            AgentDialog(
+                agent_id=aid,
+                step=step,
+                t=t,
+                type=dtype,
+                speaker=spk,
+                content=cont,
+            )
+            for aid, step, t, dtype, spk, cont in dialogs
+        ]
+        async with self._lock:
+            async with self._session_maker() as session:
+                session.add_all(objs)
                 await session.commit()
 
     # Query methods for testing and debugging

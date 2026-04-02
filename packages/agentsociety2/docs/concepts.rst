@@ -70,7 +70,7 @@ AgentSociety 2 围绕三个主要组件构建：
            style=filled;
            color=lightyellow;
            Env1 [label="SocialSpace"];
-           Env2 [label="EconomyModule"];
+           Env2 [label="EconomySpace"];
            EnvN [label="... 自定义模块"];
        }
 

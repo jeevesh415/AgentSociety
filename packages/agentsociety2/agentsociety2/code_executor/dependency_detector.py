@@ -1,5 +1,7 @@
 """
 依赖检测器：使用 AST 静态分析 import 语句，推断需要安装的第三方依赖。
+
+该模块不执行导入，不会访问网络；仅解析代码文本并返回“可能需要安装”的 pip 包名列表。
 """
 
 import ast
@@ -12,7 +14,14 @@ logger = get_logger()
 
 
 class DependencyDetector:
-    """依赖检测器，仅基于 AST 分析 import 语句。"""
+    """依赖检测器（AST 静态分析）。
+
+    只关注 ``import x`` / ``from x import y``，并将顶层模块名映射为 pip 包名（可通过
+    :data:`~agentsociety2.code_executor.dependency_detector.DependencyDetector.IMPORT_TO_PACKAGE` 扩展）。
+
+    .. note::
+       该推断是启发式的：无法覆盖动态导入、条件导入、运行时插件机制等场景。
+    """
 
     # 标准库模块列表
     STANDARD_LIBRARY = {
@@ -123,19 +132,11 @@ class DependencyDetector:
     }
 
     def __init__(self):
-        """初始化依赖检测器（当前无状态）。"""
+        """初始化依赖检测器（无状态）。"""
         ...
 
     def _is_standard_library(self, module_name: str) -> bool:
-        """
-        判断模块是否属于标准库
-
-        Args:
-            module_name: 模块名
-
-        Returns:
-            如果是标准库返回True，否则返回False
-        """
+        """判断模块是否属于标准库。"""
         # 处理相对导入
         if module_name.startswith("."):
             return False
@@ -149,15 +150,7 @@ class DependencyDetector:
         return root_module in self.STANDARD_LIBRARY
 
     def _normalize_package_name(self, module_name: str) -> str:
-        """
-        将导入名转换为pip安装包名
-
-        Args:
-            module_name: 导入的模块名
-
-        Returns:
-            pip安装时的包名
-        """
+        """将导入名归一化为 pip 安装包名。"""
         # 获取根模块名
         root_module = module_name.split(".")[0]
 
@@ -168,15 +161,7 @@ class DependencyDetector:
         return root_module
 
     def _extract_imports_from_ast(self, code: str) -> Set[str]:
-        """
-        使用AST解析提取import语句
-
-        Args:
-            code: Python代码字符串
-
-        Returns:
-            检测到的模块名集合
-        """
+        """从代码 AST 中提取“疑似第三方”的顶层模块名集合。"""
         imports: Set[str] = set()
         try:
             tree = ast.parse(code)
@@ -203,14 +188,10 @@ class DependencyDetector:
         return imports
 
     def detect(self, code: str) -> List[str]:
-        """
-        从代码中检测依赖包（基于 AST 分析 import 语句）。
+        """从代码中检测依赖包（基于 AST import 分析）。
 
-        Args:
-            code: Python代码字符串
-
-        Returns:
-            检测到的依赖包列表（已转换为pip安装包名）
+        :param code: Python 代码字符串。
+        :returns: 依赖包名列表（去重并排序，已按映射规则转换为 pip 包名）。
         """
         imports = self._extract_imports_from_ast(code)
 

@@ -6,7 +6,7 @@ license: Proprietary. LICENSE.txt has complete terms
 
 # Data Analysis
 
-Analyze a single experiment's simulation data and generate comprehensive reports with visualizations.
+Analyze experiment data and generate reports. Supports single experiment, batch experiments, and synthesis.
 
 ## Quick Start
 
@@ -28,22 +28,32 @@ Use the `PYTHON_PATH` from your `.env` file to ensure the correct Python interpr
 
 | Parameter | Type | Required | Description |
 |-----------|------|----------|-------------|
-| --hypothesis-id | string | Yes | Hypothesis ID (e.g., '1', '2') |
-| --experiment-id | string | Yes | Experiment ID (e.g., '1', '2') |
+| --mode | string | No | `single` (default) \| `batch` \| `synthesize` |
+| --hypothesis-id | string | single/batch | Hypothesis ID (e.g., '1', '2') |
+| --experiment-id | string | single | Experiment ID (e.g., '1', '2') |
+| --experiment-ids | string[] | batch/synthesize | Experiment IDs list (default: auto-discover) |
+| --hypothesis-ids | string[] | synthesize | Hypothesis IDs list (default: auto-discover) |
 | --workspace | string | No | Workspace path (default: current directory) |
+| --instructions | string | No | Additional analysis/synthesis instructions |
+| --literature-summary | string | No | Optional literature summary to incorporate |
 
 ## What It Does
 
-This skill is executed by the unified `AnalysisAgent` sub-agent in `agentsociety2.skills.analysis`, so it can be used both as:
-- a VS Code skill workflow (`extension/skills/agentsociety-analysis`)
-- a programmatic sub-agent pipeline (`Analyzer`/`AnalysisAgent`)
+This skill calls `agentsociety2.skills.analysis` (same code as the Python package):
 
-For complex analysis, it runs as a **multi-stage sub-agent workflow** (not a one-shot call):
-- stage 1: context + schema understanding
-- stage 2: data-grounded insight generation
-- stage 3: tool execution (EDA/statistics/visualization)
-- stage 4: **summarize execution results before next iteration**
-- stage 5: report generation (Markdown + HTML)
+- **Orchestration**: `service.Analyzer` / `run_analysis_workflow`
+- **Core loop**: `agents.AnalysisAgent` — data-first insights, **ReAct-style tool rounds** (`executor.AnalysisRunner`), visualization + LLM judges
+- **Artifacts**: `output.Reporter` (bilingual MD/HTML); `output.EDAGenerator` (optional EDA / quick stats)
+- **LLM wiring**: XML shapes in `llm_contracts.py`; composable Markdown bullets in `instruction_md/` (loaded via `utils.get_analysis_skills`)
+
+For complex analysis, it runs as a **multi-stage workflow** (not one-shot):
+
+- stage 1: load experiment context
+- stage 2: `DataReader.read_full_summary()` + data-grounded insights
+- stage 3: strategy tools + iterative adjust (EDA / builtins / `code_executor`)
+- stage 4: compress/summarize tool history where needed
+- stage 5: visualization plan + chart generation
+- stage 6: report generation (Markdown + HTML, with retry/judge)
 
 The analysis follows a **data-first** approach:
 
@@ -62,22 +72,19 @@ presentation/hypothesis_{id}/experiment_{id}/
 ├── README.md                    # Output file guide
 ├── data/
 │   ├── analysis_summary.json    # Structured analysis results
-│   ├── eda_profile.html         # ydata-profiling output
-│   ├── eda_sweetviz.html        # sweetviz output
-│   ├── eda_missingno.png        # Missing value visualization
-│   └── eda_table_summary.png    # Multi-table summary
+│   ├── eda_profile.html         # ydata-profiling (if generated)
+│   └── eda_sweetviz.html        # Sweetviz (if generated)
 ├── charts/                      # Generated charts
 └── assets/                      # Report-embedded static resources
 ```
 
-## EDA Tools Used
+## EDA (when tools or fallback generate them)
 
-| Tool | Output | Purpose |
-|------|--------|---------|
-| ydata-profiling | `eda_profile.html` | Comprehensive data profile |
-| Sweetviz | `eda_sweetviz.html` | Correlation & target analysis |
-| missingno | `eda_missingno.png` | Missing value patterns |
-| Quick stats | Markdown text | pandas.describe() summary |
+| Source | Output | Notes |
+|--------|--------|--------|
+| ydata-profiling | `eda_profile.html` | Sampled table via `EDAGenerator` |
+| Sweetviz | `eda_sweetviz.html` | Sampled table via `EDAGenerator` |
+| Quick stats | Injected into report prompt | Markdown from `DataReader` / `EDAGenerator.generate_quick_stats` |
 
 ## Analysis Capabilities
 

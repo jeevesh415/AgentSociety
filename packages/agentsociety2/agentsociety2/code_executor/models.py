@@ -81,6 +81,10 @@ class ExecutionResult(BaseModel):
     artifacts_path: Optional[str] = Field(
         default=None, description="执行产物保存目录（如有）"
     )
+    artifacts: list[str] = Field(
+        default_factory=list,
+        description="执行产物列表（相对 artifacts_path 的相对路径，如无则为空）",
+    )
     """
     代码执行耗时，单位为秒。
     """

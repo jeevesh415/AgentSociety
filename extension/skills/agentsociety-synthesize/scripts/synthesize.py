@@ -68,6 +68,10 @@ Examples:
         "--instructions",
         help="Additional synthesis instructions",
     )
+    parser.add_argument(
+        "--literature-summary",
+        help="Optional literature summary to incorporate",
+    )
 
     args = parser.parse_args()
 
@@ -91,16 +95,13 @@ Examples:
         print("Experiments: Auto-discover all")
     print("=" * 60)
 
-    try:
-        result = await run_synthesis(
-            workspace_path=str(workspace_path),
-            hypothesis_ids=args.hypothesis_ids,
-            experiment_ids=args.experiment_ids,
-            custom_instructions=args.instructions,
-        )
-    except Exception as e:
-        print(f"Error: {e}")
-        return 1
+    result = await run_synthesis(
+        workspace_path=str(workspace_path),
+        hypothesis_ids=args.hypothesis_ids,
+        experiment_ids=args.experiment_ids,
+        custom_instructions=args.instructions,
+        literature_summary=args.literature_summary,
+    )
 
     print("\n" + "=" * 60)
     print("Synthesis Completed")

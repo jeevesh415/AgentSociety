@@ -102,28 +102,6 @@ scan_result = scan_and_register_custom_modules(
 
 ### 1.5 模块查询接口
 
-#### 命令行脚本
-
-```bash
-# 列出所有模块
-PYTHONPATH=/workspace uv run extension/skills/agentsociety-experiment-config/scripts/module_info.py --list --workspace /workspace
-
-# 查询特定环境模块
-PYTHONPATH=/workspace uv run extension/skills/agentsociety-experiment-config/scripts/module_info.py --env reputation_game_env --workspace /workspace
-
-# 查询特定 Agent
-PYTHONPATH=/workspace uv run extension/skills/agentsociety-experiment-config/scripts/module_info.py --agent person_agent --workspace /workspace
-
-# 包含预填充参数
-PYTHONPATH=/workspace uv run extension/skills/agentsociety-experiment-config/scripts/module_info.py --prefill --workspace /workspace
-
-# 扫描自定义模块
-PYTHONPATH=/workspace uv run extension/skills/agentsociety-experiment-config/scripts/module_info.py --scan-custom --workspace /workspace
-
-# JSON 输出
-PYTHONPATH=/workspace uv run extension/skills/agentsociety-experiment-config/scripts/module_info.py --list --json
-```
-
 #### API 接口
 
 ```
@@ -245,10 +223,7 @@ GET /api/v1/prefill-params/agent/person_agent?workspace_path=/path
 
 #### 验证脚本
 
-```bash
-PYTHONPATH=/workspace uv run extension/skills/agentsociety-experiment-config/scripts/validate_config.py \
-  --hypothesis-id 1 --experiment-id 1 --workspace /workspace
-```
+``extension/skills/agentsociety-experiment-config/scripts/validate_config.py`` 用于对生成的配置做端到端校验。
 
 **验证内容：**
 1. 加载 `init_config.json`

@@ -36,7 +36,6 @@ Example::
 """
 
 import asyncio
-import json
 import logging
 import os
 from abc import ABC, abstractmethod
@@ -62,8 +61,24 @@ from pydantic import BaseModel, ValidationError
 T = TypeVar("T", bound=BaseModel)
 
 
+def _llm_content_to_parsed_json(content: str) -> Any:
+    """从 LLM 正文中取出 JSON 片段并用 json_repair 解析为 Python 对象。"""
+    json_str = extract_json(content)
+    if json_str is None:
+        s = content.strip()
+        if s.startswith(("{", "[")):
+            json_str = s
+    if json_str is None or not str(json_str).strip():
+        raise ValueError("Failed to extract JSON from LLM response")
+    return json_repair.loads(json_str)
+
+
 def _is_rate_limit_like_error(error: Exception) -> bool:
-    """Check if the error is a rate-limit related exception."""
+    """判断异常是否“类似速率限制”。
+
+    :param error: 捕获到的异常对象。
+    :returns: 若可判定为 429/无可用 deployment 等限流相关错误则返回 ``True``。
+    """
     if isinstance(error, (RateLimitError, RouterRateLimitError)):
         return True
     # Fallback for version differences where RouterRateLimitError class is not importable.
@@ -78,6 +93,7 @@ def _is_rate_limit_like_error(error: Exception) -> bool:
 
 __all__ = [
     "AgentBase",
+    "DIALOG_TYPE_REFLECTION",
     "LLMInteractionHistory",
 ]
 
@@ -88,10 +104,26 @@ _ENABLE_LLM_HISTORY = os.getenv("ENABLE_LLM_HISTORY", "false").lower() in (
     "yes",
 )
 
+# Dialog type for replay
+DIALOG_TYPE_REFLECTION = 0
+
+
 @dataclass
 class LLMInteractionHistory:
-    """
-    Record of a single LLM interaction.
+    """单次 LLM 交互记录。
+
+    用于记录 Agent 与 LLM 之间的完整交互历史，包括请求消息、
+    响应内容、时间戳等信息。支持通过开关控制是否启用记录。
+
+    Attributes:
+        agent_id: 智能体 ID。
+        model_name: 调用的模型名称。
+        messages: 发送给 LLM 的消息列表。
+        response: LLM 的响应对象。
+        tick: 当前仿真步的时间尺度（秒）。
+        t: 当前仿真时间。
+        method_name: 调用 LLM 的方法名。
+        timestamp: 记录创建时间。
     """
 
     agent_id: int
@@ -140,14 +172,12 @@ class AgentBase(ABC):
         name: Optional[str] = None,
         replay_writer: Optional["ReplayWriter"] = None,
     ):
-        """
-        Initialize the `Agent`.
+        """初始化 Agent 实例。
 
-        Args:
-            id: The ID of the agent.
-            profile: The profile of the agent with any type. The agent should parse the profile to its own attributes.
-            name: Optional display name. If not provided, derived from profile["name"] or "Agent_{id}".
-            replay_writer: Optional ReplayWriter for storing simulation state. Can also be set via set_replay_writer().
+        :param id: 智能体唯一标识符。
+        :param profile: 智能体画像对象（dict 或任意可解析类型）。子类应负责把 profile 解析为自身状态。
+        :param name: 可选显示名称；为空时按 ``profile["name"]`` 或 ``Agent_{id}`` 推导。
+        :param replay_writer: 可选回放写入器（也可后续通过 :meth:`set_replay_writer` 注入）。
         """
         self._id = id
         self._profile = profile
@@ -172,19 +202,12 @@ class AgentBase(ABC):
 
     @classmethod
     def mcp_description(cls) -> str:
-        """
-        Return a description text for MCP agent module candidate list.
-        Includes parameter descriptions.
+        """返回用于 MCP 候选列表展示的描述文本（Markdown）。
 
-        Returns:
-            A string description of the agent class for MCP registration.
+        :returns: Markdown 文本，通常包含类简介、初始化参数说明与示例配置。
 
-        Format:
-            The description uses Markdown format with the following structure:
-            - Class name and brief description
-            - Detailed description section
-            - Initialization parameters
-            - Example config or JSON schema (if applicable)
+        .. note::
+           该返回值的目标受众是“工具/模块发现界面”，因此采用 Markdown 而非 reST。
         """
         # Check if this is the base class being called directly
         if cls is AgentBase:
@@ -235,10 +258,24 @@ class AgentBase(ABC):
 
     @property
     def id(self) -> int:
+        """智能体唯一标识符。"""
         return self._id
+
+    def env_codegen_ctx_overlay(self) -> dict[str, Any]:
+        """生成 CodeGenRouter.ask 的上下文覆盖。
+
+        返回稳定的身份键（id, agent_id, person_id），由框架提供，
+        与具体 skill 无关。后合并时覆盖模型误传。
+
+        Returns:
+            包含 id, agent_id, person_id 的字典。
+        """
+        i = self.id
+        return {"id": i, "agent_id": i, "person_id": i}
 
     @property
     def logger(self) -> logging.Logger:
+        """智能体专属 logger 实例。"""
         return self._logger
 
     def _record_llm_interaction(
@@ -249,15 +286,16 @@ class AgentBase(ABC):
         t: datetime | None = None,
         method_name: str = "",
     ):
-        """
-        Record an LLM interaction to the agent's history list if enabled.
+        """记录 LLM 交互到历史列表（需启用）。
+
+        仅在 ENABLE_LLM_HISTORY 环境变量为 true 时记录。
 
         Args:
-            messages: The messages sent to the LLM.
-            response: The response from the LLM.
-            tick: The time scale (duration) of this simulation step in seconds.
-            t: The current datetime of the simulation after this step.
-            method_name: The name of the method that made the LLM call.
+            messages: 发送给 LLM 的消息列表。
+            response: LLM 返回的响应对象。
+            tick: 当前仿真步的时间尺度（秒）。
+            t: 当前仿真时间。
+            method_name: 调用 LLM 的方法名称。
         """
         if not _ENABLE_LLM_HISTORY:
             return
@@ -278,8 +316,10 @@ class AgentBase(ABC):
         self._llm_interaction_history.append(history_record)
 
     def _record_token_usage(self, response: Any) -> None:
-        """
-        Record token usage statistics for the agent's LLM calls.
+        """记录 LLM 调用的 token 使用统计。
+
+        Args:
+            response: LLM 响应对象，需包含 usage 信息。
         """
         if not isinstance(response, ModelResponse):
             return
@@ -296,8 +336,11 @@ class AgentBase(ABC):
         self._log_token_usage_stats(model_name, stats)
 
     def _log_token_usage_stats(self, model_name: str, stats: TokenUsageStats) -> None:
-        """
-        Log current token usage stats for this agent (agent-only output).
+        """记录当前 token 使用统计到日志。
+
+        Args:
+            model_name: 模型名称。
+            stats: Token 使用统计对象。
         """
         self._logger.info(
             "Agent %s token usage - model=%s calls=%s input=%s output=%s",
@@ -309,24 +352,27 @@ class AgentBase(ABC):
         )
 
     def get_llm_interaction_history(self) -> list[LLMInteractionHistory]:
-        """
-        Get the list of all LLM interaction history records for this agent.
+        """获取所有 LLM 交互历史记录的副本。
 
         Returns:
-            List of LLM interaction history records.
+            LLM 交互历史记录列表的浅拷贝。
         """
         return self._llm_interaction_history.copy()
 
     def clear_llm_interaction_history(self):
-        """
-        Clear all LLM interaction history records for this agent.
-        """
+        """清除所有 LLM 交互历史记录。"""
         self._llm_interaction_history.clear()
 
     def get_token_usages(self) -> dict[str, TokenUsageStats]:
+        """获取 Token 使用统计的副本。
+
+        Returns:
+            按模型名索引的 Token 使用统计字典。
+        """
         return self._token_usage_stats.copy()
 
     def reset_token_usages(self):
+        """重置所有 Token 使用统计。"""
         self._token_usage_stats.clear()
 
     # ==================== Skill State Management ====================
@@ -412,8 +458,14 @@ class AgentBase(ABC):
         messages: list[AllMessageValues],
         stream: bool = False,
     ):
-        """
-        Send a completion request to the agent's LLM.
+        """向 LLM 发送补全请求。
+
+        Args:
+            messages: 消息列表，包含角色和内容。
+            stream: 是否启用流式响应。默认 False。
+
+        Returns:
+            ModelResponse 或 CustomStreamWrapper，取决于 stream 参数。
         """
         assert (
             self._router is not None and self._model_name is not None
@@ -436,16 +488,17 @@ class AgentBase(ABC):
     async def acompletion_with_system_prompt(
         self, messages: list[AllMessageValues], tick: int, t: datetime
     ):
-        """
-        Send a completion request to the agent's LLM with the system prompt.
+        """向 LLM 发送带系统提示的补全请求。
+
+        自动在消息前添加系统提示，包含智能体身份、仿真时间上下文等信息。
 
         Args:
-            messages: The messages to send to the LLM.
-            tick: The time scale (duration) of this simulation step in seconds.
-            t: The current datetime of the simulation after this step.
+            messages: 消息列表，包含角色和内容。
+            tick: 当前仿真步的时间尺度（秒）。
+            t: 当前仿真时间。
 
         Returns:
-            The response from the LLM.
+            LLM 响应对象。
         """
         assert (
             self._router is not None and self._model_name is not None
@@ -469,15 +522,17 @@ class AgentBase(ABC):
         return response
 
     def get_system_prompt(self, tick: int, t: datetime) -> str:
-        """
-        Get the system prompt of the agent for LLM acompletion.
-        The prompt will be prepended to the messages to make LLM understand.
+        """获取智能体的系统提示词。
+
+        生成的提示词将预置到 LLM 消息中，使 LLM 理解自身作为 AgentSociety
+        仿真环境中模拟真实人类行为的智能体角色。
 
         Args:
-            tick: The time scale (duration) of this simulation step in seconds.
-                  Represents how long one iteration/decision cycle lasts.
-                  Range: from 60 seconds (1 minute) to approximately one month.
-            t: The current datetime of the simulation after this step.
+            tick: 当前仿真步的时间尺度（秒）。范围从 60 秒（1分钟）到约一个月。
+            t: 当前仿真步结束后的时间。
+
+        Returns:
+            完整的系统提示词字符串，包含时间上下文、仿真环境说明和行为指南。
         """
         # Format time scale description
         if tick < 3600:  # Less than 1 hour
@@ -541,129 +596,106 @@ You interact with the world built by multiple environment modules through an env
 Remember: You are simulating a real person living in a simulated world. Your behavior should be natural, time-appropriate, and consistent with human psychology and social norms."""
 
     async def ask_env(self, ctx: dict, message: str, readonly: bool, template_mode: bool = False):
-        """
-        Ask the agent a question from the environment.
+        """向环境路由器发送请求。
+
+        封装了与仿真环境的交互，支持模板模式和上下文变量替换。
 
         Args:
-            ctx: The context of the agent. Can contain 'variables' key for template mode.
-            message: The message to ask the agent. In template mode, this is treated as a template instruction.
-            readonly: The readonly flag to pass to the environment.
-            template_mode: Whether to enable template mode. When True, the message is treated as a
-                          template instruction where variables from ctx['variables'] are substituted
-                          using {variable_name} syntax (similar to Python f-strings).
+            ctx: 上下文字典，可包含 'variables' 键用于模板模式。
+            message: 请求消息。在模板模式下作为模板指令处理。
+            readonly: 是否只读模式。
+            template_mode: 是否启用模板模式。启用时，message 中的
+                {variable_name} 变量将从 ctx['variables'] 中替换。
 
         Returns:
-            A tuple of (result, answer)
-                - result: Structured result dict returned by the router (for example tool outputs in `results`)
-                - answer: The natural-language summary returned by the router
+            元组 (ctx, answer): 更新后的上下文和环境响应。
         """
         assert self._env is not None, "Environment is not initialized"
-        if "id" not in ctx:
-            ctx["id"] = self._id
-        ctx, answer = await self._env.ask(ctx, message, readonly=readonly, template_mode=template_mode)
+        merged_ctx = {**ctx, **self.env_codegen_ctx_overlay()}
+        ctx, answer = await self._env.ask(
+            merged_ctx, message, readonly=readonly, template_mode=template_mode
+        )
         return ctx, answer
-
-    @staticmethod
-    def _extract_json_list_from_text(text: str) -> list[Any]:
-        decoder = json.JSONDecoder()
-        for idx, ch in enumerate(text):
-            if ch != "[":
-                continue
-            try:
-                value, _ = decoder.raw_decode(text[idx:])
-            except json.JSONDecodeError:
-                continue
-            if isinstance(value, list):
-                return value
-        return []
-
-    def _extract_env_list_result(
-        self,
-        env_result: Any,
-        answer: str,
-        key: str,
-    ) -> list[Any]:
-        if isinstance(env_result, list):
-            return env_result
-        if isinstance(env_result, dict):
-            value = env_result.get(key)
-            if isinstance(value, list):
-                return value
-        return self._extract_json_list_from_text(answer)
 
     async def init(
         self,
         env: RouterBase,
     ):
-        """
-        Initialize the agent.
+        """初始化智能体。
+
+        子类应在调用父类 init 后执行额外的初始化逻辑。
 
         Args:
-            env: The environment router of the agent.
+            env: 环境路由器实例。
         """
         self._env = env
 
     @abstractmethod
     async def dump(self) -> dict:
-        """
-        Dump the agent's profile to a dict. The dict should be serializable.
+        """序列化智能体状态为字典。
+
+        Returns:
+            可序列化的字典，包含智能体完整状态。
         """
         raise NotImplementedError
 
     @abstractmethod
     async def load(self, dump_data: dict):
-        """
-        Load the agent's profile from a dict. The dict should be deserializable.
+        """从字典反序列化智能体状态。
+
+        Args:
+            dump_data: 包含智能体状态的字典。
         """
         raise NotImplementedError
 
     @abstractmethod
     async def ask(self, message: str, readonly: bool = True) -> str:
-        """
-        Ask the agent a question.
+        """处理来自环境的问题。
 
         Args:
-            message: The message to ask the agent.
-            readonly: The readonly flag to pass to the agent.
+            message: 问题消息。
+            readonly: 是否只读模式。
 
         Returns:
-            The answer from the agent.
+            智能体的回答字符串。
         """
         raise NotImplementedError
 
     @abstractmethod
     async def step(self, tick: int, t: datetime) -> str:
-        """
-        Run forward one step.
+        """执行一个仿真步。
 
         Args:
-            tick: The number of ticks of this simulation step.
-            t: The current datetime of the simulation after this step with the ticks.
+            tick: 当前仿真步的时间尺度（秒）。
+            t: 当前仿真时间。
+
+        Returns:
+            步执行结果的描述字符串。
         """
         raise NotImplementedError
 
     async def close(self):
-        """
-        Close the agent.
+        """关闭智能体并释放资源。
+
+        子类可重写此方法以执行额外的清理逻辑。
         """
         ...
 
     # ==================== Replay Data Methods ====================
 
     def set_replay_writer(self, writer: "ReplayWriter") -> None:
-        """Set the replay data writer for this agent.
+        """设置回放数据写入器。
 
         Args:
-            writer: The ReplayWriter instance to use for storing replay data.
+            writer: ReplayWriter 实例，用于存储回放数据。
         """
         self._replay_writer = writer
 
     def get_profile(self) -> Dict[str, Any]:
-        """Get the agent's profile as a dictionary.
+        """获取智能体画像。
 
         Returns:
-            The agent's profile data. Subclasses should override this
-            to return structured profile data.
+            包含智能体画像数据的字典。子类可重写以返回结构化数据。
         """
         if isinstance(self._profile, dict):
             return self._profile
@@ -674,7 +706,7 @@ Remember: You are simulating a real person living in a simulated world. Your beh
 
     @property
     def name(self) -> str:
-        """Get the agent's name (set at init from parameter or profile)."""
+        """智能体显示名称。"""
         return self._name
 
     async def _write_status_snapshot(
@@ -684,19 +716,19 @@ Remember: You are simulating a real person living in a simulated world. Your beh
         action: Optional[str] = None,
         status: Optional[Dict[str, Any]] = None,
     ) -> None:
-        """Write agent status snapshot to replay database.
+        """写入智能体状态快照到回放数据库。
 
-        This method is called by subclasses to record state at each step.
-        
+        子类在每一步调用此方法以记录状态。
+
         Note:
-            Position data (lng/lat) should be written by MobilitySpace module
-            using its own table, not through this method.
+            位置数据（经纬度）应由 MobilitySpace 模块写入其自己的表，
+            而非通过此方法。
 
         Args:
-            step: The simulation step number.
-            t: The simulation datetime.
-            action: Current action description (optional).
-            status: Status data dictionary (optional).
+            step: 仿真步编号。
+            t: 仿真时间。
+            action: 当前动作描述（可选）。
+            status: 状态数据字典（可选）。
         """
         if self._replay_writer is not None:
             await self._replay_writer.write_agent_status(
@@ -707,14 +739,45 @@ Remember: You are simulating a real person living in a simulated world. Your beh
                 status=status or {},
             )
 
-    async def _get_position(self) -> Tuple[Optional[float], Optional[float]]:
-        """Get the agent's current position.
+    async def _write_dialog(
+        self,
+        step: int,
+        t: datetime,
+        dialog_type: int,
+        speaker: str,
+        content: str,
+    ) -> None:
+        """写入智能体对话记录到回放数据库。
 
-        This method can be overridden by subclasses or set via callback
-        to retrieve position from environment modules like MobilitySpace.
+        子类调用此方法以记录对话和思考。AgentBase 仅支持类型 0（反思），
+        其他类型应由其他模块写入。
+
+        Args:
+            step: 仿真步编号。
+            t: 仿真时间。
+            dialog_type: 对话类型。AgentBase 必须是 0（反思）。
+            speaker: 说话者名称。
+            content: 对话内容。
+        """
+        if dialog_type != DIALOG_TYPE_REFLECTION:
+            return
+        if self._replay_writer is not None:
+            await self._replay_writer.write_agent_dialog(
+                agent_id=self._id,
+                step=step,
+                t=t,
+                dialog_type=dialog_type,
+                speaker=speaker,
+                content=content,
+            )
+
+    async def _get_position(self) -> Tuple[Optional[float], Optional[float]]:
+        """获取智能体当前位置。
+
+        可由子类重写或通过回调设置，从环境模块（如 MobilitySpace）获取位置。
 
         Returns:
-            A tuple of (longitude, latitude), or (None, None) if not available.
+            元组 (经度, 纬度)，不可用时返回 (None, None)。
         """
         # Check if a position callback has been set
         if hasattr(self, "_get_position_callback") and self._get_position_callback:
@@ -732,45 +795,42 @@ Remember: You are simulating a real person living in a simulated world. Your beh
         max_delay: float = 60.0,
         error_feedback_prompt: str | None = None,
     ) -> T:
-        """
-        Send a completion request to the agent's LLM and validate the response against a Pydantic model.
-        Supports multi-turn conversation to provide error feedback to LLM for correction.
+        """发送补全请求并验证响应是否符合 Pydantic 模型。
 
-        This function will:
-        1. Send the initial request to LLM
-        2. Extract JSON from the response
-        3. Attempt to validate against the Pydantic model
-        4. If validation fails, provide error feedback to LLM and retry immediately
-        5. If a 429 (rate limit) error occurs, retry with binary exponential backoff
-        6. Return the validated Pydantic model instance
+        支持多轮对话以向 LLM 提供错误反馈并进行修正。
+
+        流程：
+        1. 发送初始请求到 LLM
+        2. 从响应中提取 JSON 片段（``extract_json``），整段即以 ``{``/``[`` 开头时回退用全文；统一用 ``json_repair.loads`` 解析
+        3. 尝试根据 Pydantic 模型验证
+        4. 验证失败时，向 LLM 提供错误反馈并立即重试
+        5. 发生 429（速率限制）错误时，使用二进制指数退避重试
+        6. 返回验证通过的 Pydantic 模型实例
 
         Args:
-            model_type: The Pydantic model type to validate against.
-            messages: The messages to send to the LLM.
-            tick: The time scale (duration) of this simulation step in seconds.
-            t: The current datetime of the simulation after this step.
-            max_retries: Maximum number of retry attempts (default: 3).
-            base_delay: Base delay in seconds for exponential backoff when 429 error occurs (default: 1.0).
-                       Only used for 429 rate limit errors. Other errors retry immediately.
-            max_delay: Maximum delay in seconds for exponential backoff (default: 60.0).
-            error_feedback_prompt: Optional custom prompt template for error feedback.
-                                  If None, a default prompt will be used.
-                                  The template should contain {error_message} placeholder.
+            model_type: 用于验证的 Pydantic 模型类型。
+            messages: 发送给 LLM 的消息列表。
+            tick: 当前仿真步的时间尺度（秒）。
+            t: 当前仿真时间。
+            max_retries: 最大重试次数（默认 10）。
+            base_delay: 429 错误发生时指数退避的基准延迟秒数（默认 1.0）。
+                仅用于 429 速率限制错误。其他错误立即重试。
+            max_delay: 指数退避的最大延迟秒数（默认 60.0）。
+            error_feedback_prompt: 可选的自定义错误反馈提示模板。
+                如为 None，将使用默认提示模板。模板应包含 {error_message} 占位符。
 
         Returns:
-            The validated Pydantic model instance.
+            验证通过的 Pydantic 模型实例。
 
         Raises:
-            ValueError: If the response cannot be parsed or validated after all retries.
-            AssertionError: If LLM is not initialized.
+            ValueError: 响应无法解析或验证所有重试后失败。
+            AssertionError: LLM 未初始化。
 
         Note:
-            Binary exponential backoff is only applied when a 429 (rate limit) error is detected.
-            For validation errors and other non-rate-limit errors, the function retries immediately
-            without delay to provide faster feedback to the LLM.
+            二进制指数退避仅在检测到 429（速率限制）错误时应用。
+            对于验证错误和其他非速率限制错误，函数立即重试以向 LLM 提供更快的反馈。
 
         Example:
-            ```python
             class MyModel(BaseModel):
                 name: str
                 age: int
@@ -782,7 +842,6 @@ Remember: You are simulating a real person living in a simulated world. Your beh
                 t=datetime.now(),
             )
             print(result.name, result.age)
-            ```
         """
         assert (
             self._router is not None and self._model_name is not None
@@ -842,17 +901,7 @@ Your corrected response:
                     raise ValueError("LLM returned empty content")
                 conversation_messages.append({"role": "assistant", "content": content})
 
-                # Extract JSON from response
-
-                json_str = extract_json(content)
-                if json_str is None:
-                    raise ValueError("Failed to extract JSON from LLM response")
-
-                # Repair JSON if needed
-                try:
-                    parsed_data = json_repair.loads(json_str)
-                except Exception as e:
-                    raise ValueError(f"Failed to parse JSON: {str(e)}")
+                parsed_data = _llm_content_to_parsed_json(content)
 
                 # Validate against Pydantic model
                 try:

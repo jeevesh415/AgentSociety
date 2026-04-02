@@ -42,7 +42,7 @@ _disable_posthog_import()
 
 from agentsociety2.agent import AgentBase
 from agentsociety2.env import CodeGenRouter, EnvBase
-from agentsociety2.registry import get_registered_env_modules, get_registered_agent_modules
+from agentsociety2.registry import get_registered_env_modules, get_registered_agent_modules, scan_and_register_custom_modules
 from agentsociety2.storage import ReplayWriter
 from agentsociety2.society.models import (
     InitConfig,
@@ -202,8 +202,6 @@ class ExperimentRunner:
         env_modules = []
         env_type_map = {module_type: env_class for module_type, env_class in get_registered_env_modules()}
 
-        workspace_root = self.run_dir.resolve()
-
         for module_type in env_module_types:
             if module_type not in env_type_map:
                 raise ValueError(
@@ -214,8 +212,6 @@ class ExperimentRunner:
             env_class = env_type_map[module_type]
             module_kwargs = env_kwargs.get(module_type, {})
             env_module = env_class(**module_kwargs)
-
-            setattr(env_module, "workspace_path", str(workspace_root))
             env_modules.append(env_module)
 
         return env_modules
@@ -375,6 +371,20 @@ class ExperimentRunner:
             start_t = datetime.fromisoformat(steps_config.start_t)
             steps = steps_config.steps
 
+            # 扫描并注册自定义模块（在创建环境模块之前）
+            workspace_path = self.run_dir.resolve()
+            # 向上查找包含 custom/ 目录的工作区根目录
+            custom_root = workspace_path
+            while custom_root.parent != custom_root:
+                if (custom_root / "custom").is_dir():
+                    break
+                custom_root = custom_root.parent
+            if (custom_root / "custom").is_dir():
+                logger.info(f"Scanning custom modules from {custom_root}")
+                scan_and_register_custom_modules(custom_root)
+            else:
+                logger.info("No custom/ directory found, skipping custom module scan")
+
             # 创建环境模块
             logger.info("Creating environment modules...")
             env_modules = self._create_env_modules(env_module_types, env_kwargs)
@@ -391,13 +401,8 @@ class ExperimentRunner:
                 replay_writer=replay_writer,
                 final_summary_enabled=config.codegen_router.final_summary_enabled,
             )
-            # Expose experiment root to helpers/skills (optional) and to agent runtimes that
-            # prefer router-level workspace hints.
-            try:
-                setattr(env_router, "workspace_path", str(self.run_dir.resolve()))
-                setattr(env_router, "run_dir", self.run_dir.resolve())
-            except Exception:
-                pass
+            # Expose experiment root to helpers/skills
+            env_router.run_dir = self.run_dir.resolve()
 
             logger.info(f"Creating {len(agent_args)} agents...")
             agents = self._create_agents(agent_args, replay_writer=replay_writer)

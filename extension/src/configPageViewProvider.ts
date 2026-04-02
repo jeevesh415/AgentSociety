@@ -207,6 +207,9 @@ export class ConfigPageViewProvider {
       nanoLlmApiKey: envConfig.nanoLlmApiKey || '',
       nanoLlmApiBase: envConfig.nanoLlmApiBase || '',
       nanoLlmModel: envConfig.nanoLlmModel || 'qwen3-next-80b-a3b-instruct',
+      analysisLlmApiKey: envConfig.analysisLlmApiKey || '',
+      analysisLlmApiBase: envConfig.analysisLlmApiBase || '',
+      analysisLlmModel: envConfig.analysisLlmModel || 'glm-5',
       embeddingApiKey: envConfig.embeddingApiKey || '',
       embeddingApiBase: envConfig.embeddingApiBase || '',
       embeddingModel: envConfig.embeddingModel || 'bge-m3',
@@ -297,6 +300,9 @@ export class ConfigPageViewProvider {
       nanoLlmApiKey: config.nanoLlmApiKey,
       nanoLlmApiBase: config.nanoLlmApiBase,
       nanoLlmModel: config.nanoLlmModel,
+      analysisLlmApiKey: config.analysisLlmApiKey,
+      analysisLlmApiBase: config.analysisLlmApiBase,
+      analysisLlmModel: config.analysisLlmModel,
       embeddingApiKey: config.embeddingApiKey,
       embeddingApiBase: config.embeddingApiBase,
       embeddingModel: config.embeddingModel,
@@ -355,6 +361,11 @@ export class ConfigPageViewProvider {
         apiKey = config.nanoLlmApiKey || '';
         apiBase = config.nanoLlmApiBase || '';
         model = config.nanoLlmModel || 'qwen3-next-80b-a3b-instruct';
+        break;
+      case 'analysis':
+        apiKey = config.analysisLlmApiKey || '';
+        apiBase = config.analysisLlmApiBase || '';
+        model = config.analysisLlmModel || 'glm-5';
         break;
       case 'embedding':
         apiKey = config.embeddingApiKey || '';

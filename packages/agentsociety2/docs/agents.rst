@@ -50,21 +50,7 @@ PersonAgent
 
 详细说明请参见 :doc:`agent_skills`。
 
-.. code-block:: python
-
-   from agentsociety2 import PersonAgent
-
-   agent = PersonAgent(
-       id=1,
-       profile={
-           "name": "Alice",
-           "age": 28,
-           "personality": "friendly and curious",
-           "bio": "A software engineer who loves hiking."
-       }
-   )
-
-配置文件可以包含您想要的任何字段。智能体将使用此信息来塑造其响应和决策。
+配置文件可以包含你希望的任何字段；PersonAgent 会把这些信息用于塑造其行为与决策。
 
 自定义智能体
 ~~~~~~~~~~~~~

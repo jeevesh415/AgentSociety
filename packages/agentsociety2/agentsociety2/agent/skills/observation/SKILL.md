@@ -9,11 +9,11 @@ You are a situated agent in a simulated world. This skill fetches the latest sen
 
 ## When to Use
 
-Activate this skill at the **start of every step**. Observation is the foundation for all downstream reasoning (needs, cognition, plan, memory).
+Activate this skill when you need fresh perception for the current tick. Other skills **may** read `observation.txt` / `observation_ctx.json` if those files exist—there is no hard activation order.
 
 ## Workflow
 
-1. Call `codegen` with `instruction: "<observe>"` and `ctx: {}`.
+1. Call `codegen` with `instruction: "<observe>"` and `ctx: {"id": <your_agent_id>}` (replace <your_agent_id> with your actual agent ID from the Agent Identity section).
 2. Parse the response:
    - `stdout` contains the observation text (natural language description of what you perceive).
    - `ctx` contains structured environment data (positions, nearby agents, objects, time, weather, etc.).
@@ -30,17 +30,73 @@ workspace_write("observation.txt", <stdout text>)
 workspace_write("observation_ctx.json", <ctx as JSON string>)
 ```
 
+## Persisting perception
+
+After a successful observe, if you want a durable trace, append one line to `memory.jsonl` with `type: "observation"` (or `event`) and a short factual `summary`. Skip if this tick’s perception duplicates the latest entry.
+
 ## What Observation Contains
 
 The observation text typically includes:
-- **Location**: where you are (building, street, park, etc.)
-- **Nearby entities**: other agents, objects, items you can interact with
-- **Events**: things happening around you (conversations, weather changes, etc.)
-- **Time/state**: current time of day, any ongoing activities
+
+### Location Information
+- Where you are (building, street, park, etc.)
+- Your current coordinates or position
+- Available exits or directions
+
+### Nearby Entities
+- Other agents in the vicinity
+- Objects and items you can interact with
+- Points of interest (shops, landmarks, etc.)
+
+### Environmental Context
+- Current time of day
+- Weather conditions
+- Any ongoing events or activities
+
+### Available Actions
+- What actions are possible in the current location
+- What interactions are available with nearby entities
+
+## Re-observation After Actions
+
+After performing any action via `codegen`, always re-observe to get the updated environment state:
+
+1. Execute action via `codegen`
+2. Check the response status
+3. Call `codegen` with `"<observe>"` again
+4. Update `observation.txt` and `observation_ctx.json`
+
+This ensures the agent's internal state matches the environment state.
+
+## Observation Context Structure
+
+The `observation_ctx.json` typically contains:
+
+```json
+{
+  "agent_id": 1,
+  "position": {"x": 100, "y": 200},
+  "location": "park_entrance",
+  "nearby_agents": [
+    {"id": 2, "name": "Alice", "distance": 5.2}
+  ],
+  "nearby_objects": [
+    {"id": "bench_01", "type": "bench", "distance": 2.0}
+  ],
+  "time": {"hour": 10, "minute": 30},
+  "weather": "sunny",
+  "available_actions": ["move", "interact", "wait"]
+}
+```
 
 ## Important Notes
 
-- Always write `observation.txt` even if the observation seems mundane—downstream skills depend on it.
-- Do NOT skip observation. Without it, needs/cognition/plan have no input.
-- The `ctx` JSON may be large; you don't need to memorize it all—just write it to the workspace file. Other skills can `workspace_read` specific fields as needed.
-- If `codegen` returns an error, write the error to `observation.txt` so the issue is visible to downstream skills, then proceed.
+- Prefer writing `observation.txt` every time you observe so the workspace stays self-consistent.
+- If you skip observation, other skills have less grounding—work from profile + whatever files already exist.
+- The `ctx` JSON may be large; you don't need to memorize it all—write it to `observation_ctx.json` and let readers pull fields as needed.
+- If `codegen` returns an error, write a short note into `observation.txt` so later reads see what failed.
+
+## Notes on State
+
+This skill only produces **observation artifacts** (`observation.txt`, optional `observation_ctx.json`).
+Higher-level “agent state snapshot / replay logging” is considered **system functionality** rather than a human-like capability skill, and should be handled by the runtime/framework if needed.

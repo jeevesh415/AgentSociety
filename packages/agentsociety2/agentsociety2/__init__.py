@@ -21,7 +21,8 @@
 - ``tool``: 工具装饰器
 
 **Society 模块**:
-- ``AgentSocietyHelper``: 模拟编排助手
+- ``AgentSociety``: 主模拟编排器（位于 ``agentsociety2.society``）
+- ``AgentSocietyHelper``: 模拟编排助手（顶层 re-export）
 
 **Storage 模块**:
 - ``ReplayWriter``: 回放数据写入器
@@ -29,6 +30,7 @@
 使用示例::
 
     from agentsociety2 import AgentBase, PersonAgent, EnvBase, tool
+    from agentsociety2.society import AgentSociety
 
     # 定义自定义环境
     class MyEnv(EnvBase):
