@@ -2,7 +2,6 @@
 
 import json
 import re
-import sqlite3
 from datetime import datetime
 from pathlib import Path
 from typing import Any, Dict, List, Optional, Tuple
@@ -349,25 +348,6 @@ class Analyzer:
                     status = ExperimentStatus.UNKNOWN
             except (json.JSONDecodeError, ValueError, OSError) as e:
                 errors.append(f"Failed to read pid.json: {e}")
-        try:
-            conn = sqlite3.connect(str(db_path))
-            cursor = conn.cursor()
-            cursor.execute(
-                "SELECT name FROM sqlite_master WHERE type='table' AND name NOT LIKE 'sqlite_%'"
-            )
-            tables = {row[0] for row in cursor.fetchall()}
-            if completion == 0.0 and "step_executions" in tables:
-                try:
-                    cursor.execute("SELECT COUNT(*) FROM step_executions")
-                    r = cursor.fetchone()
-                    if r and r[0] and r[0] > 0:
-                        completion = 50.0
-                except sqlite3.OperationalError:
-                    pass
-            conn.close()
-        except sqlite3.Error as e:
-            errors.append(f"Database read error: {e}")
-
         # 补充采集 run/artifacts 与 output.log 中的失败信号，使分析上下文更贴近真实实验运行结果。
         runtime_errors = self._collect_runtime_failures(run_path)
         for msg in runtime_errors:

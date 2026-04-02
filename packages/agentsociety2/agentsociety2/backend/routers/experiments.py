@@ -82,19 +82,6 @@ class ExperimentInfo(BaseModel):
     step_count: int
 
 
-class StepExecution(BaseModel):
-    """步骤执行记录"""
-
-    id: int
-    step_index: int
-    step_type: str
-    step_config: Dict[str, Any]
-    start_time: str
-    end_time: Optional[str] = None
-    success: bool
-    result: Optional[str] = None
-
-
 # ============================================================================
 # 辅助函数
 # ============================================================================
@@ -473,35 +460,11 @@ def _get_agent_dataset_summary(
     )
 
 
-def _load_step_executions(
-    cursor: sqlite3.Cursor,
-) -> List[Tuple[int, int, str, str, Optional[str], Optional[int], Optional[str]]]:
-    if not _table_exists(cursor, "step_executions"):
-        return []
-
-    cursor.execute(
-        """
-        SELECT id, step_index, step_type, start_time, end_time, success, result
-        FROM step_executions
-        ORDER BY step_index ASC
-        """
-    )
-    return cursor.fetchall()
-
-
 def _get_first_timestamp(
     status_rows: List[Dict[str, Any]],
-    step_rows: List[Tuple[int, int, str, str, Optional[str], Optional[int], Optional[str]]],
 ) -> Optional[datetime]:
     if status_rows:
         return status_rows[0]["timestamp"]
-    for _, _, _, start_time, _, _, _ in step_rows:
-        if not start_time:
-            continue
-        try:
-            return datetime.fromisoformat(start_time)
-        except ValueError:
-            continue
     return None
 
 
@@ -584,11 +547,7 @@ async def get_experiment_info(
                 _, _, _, agent_count = _get_agent_dataset_summary(cursor)
 
             # 获取step数量
-            if _table_exists(cursor, "step_executions"):
-                cursor.execute("SELECT COUNT(*) FROM step_executions")
-                row = cursor.fetchone()
-                step_count = row[0] if row else 0
-            elif _table_exists(cursor, "agent_status"):
+            if _table_exists(cursor, "agent_status"):
                 cursor.execute("SELECT COUNT(DISTINCT step) FROM agent_status")
                 row = cursor.fetchone()
                 step_count = row[0] if row else 0
@@ -643,10 +602,9 @@ async def get_timeline(
     cursor = conn.cursor()
 
     status_rows = _load_agent_status_entries(cursor)
-    step_rows = _load_step_executions(cursor)
 
     timeline: List[TimePoint] = []
-    first_time = _get_first_timestamp(status_rows, step_rows)
+    first_time = _get_first_timestamp(status_rows)
 
     if status_rows and first_time is not None:
         seen_steps: set[int] = set()
@@ -660,19 +618,6 @@ async def get_timeline(
             timeline.append(
                 TimePoint(day=day, t=t, timestamp=timestamp.isoformat())
             )
-    elif step_rows and first_time is not None:
-        for _, step_index, _, start_time, _, _, _ in step_rows:
-            if not start_time:
-                continue
-            try:
-                timestamp = datetime.fromisoformat(start_time)
-            except ValueError:
-                continue
-            day, t = _datetime_to_day_t(timestamp, first_time)
-            timeline.append(
-                TimePoint(day=day, t=t, timestamp=timestamp.isoformat())
-            )
-
     conn.close()
     return timeline
 
@@ -765,8 +710,7 @@ async def get_agent_status(
 
     status_rows = _load_agent_status_entries(cursor, agent_id=agent_id)
     all_status_rows = _load_agent_status_entries(cursor)
-    step_rows = _load_step_executions(cursor)
-    first_time = _get_first_timestamp(all_status_rows, step_rows)
+    first_time = _get_first_timestamp(all_status_rows)
 
     statuses: List[AgentStatus] = []
     if first_time is not None:
@@ -791,84 +735,6 @@ async def get_agent_status(
 
     conn.close()
     return statuses
-
-
-@router.get("/{hypothesis_id}/{experiment_id}/steps")
-async def get_step_executions(
-    hypothesis_id: str,
-    experiment_id: str,
-    workspace_path: str = Query(..., description="Workspace directory path"),
-) -> List[StepExecution]:
-    """
-    获取步骤执行记录
-
-    返回实验中所有步骤的执行记录，包括ask、intervene、step等操作。
-
-    Args:
-        hypothesis_id: 假设ID
-        experiment_id: 实验ID
-        workspace_path: 工作区根目录路径
-
-    Returns:
-        List[StepExecution]: 步骤执行记录列表，每条记录包含：
-            - id: 记录ID
-            - step_index: 步骤索引
-            - step_type: 步骤类型 (ask/intervene/step)
-            - step_config: 步骤配置参数
-            - start_time: 开始时间
-            - end_time: 结束时间
-            - success: 是否成功执行
-            - result: 执行结果
-
-    Raises:
-        HTTPException: 404 - 数据库不存在
-    """
-    workspace = Path(workspace_path)
-    exp_path = _get_experiment_path(workspace, hypothesis_id, experiment_id)
-    db_file = exp_path / "run" / "sqlite.db"
-
-    conn = _get_db_connection(db_file)
-    cursor = conn.cursor()
-
-    cursor.execute("""
-        SELECT id, step_index, step_type, step_config, start_time, end_time, success, result
-        FROM step_executions
-        ORDER BY step_index ASC
-    """)
-
-    steps = []
-    for row in cursor.fetchall():
-        (
-            step_id,
-            step_index,
-            step_type,
-            step_config_json,
-            start_time,
-            end_time,
-            success,
-            result,
-        ) = row
-
-        try:
-            step_config = json.loads(step_config_json)
-        except json.JSONDecodeError:
-            step_config = {}
-
-        steps.append(
-            StepExecution(
-                id=step_id,
-                step_index=step_index,
-                step_type=step_type,
-                step_config=step_config,
-                start_time=start_time,
-                end_time=end_time,
-                success=bool(success),
-                result=result,
-            )
-        )
-
-    conn.close()
-    return steps
 
 
 @router.get("/{hypothesis_id}/{experiment_id}/state")
@@ -906,13 +772,12 @@ async def get_latest_state(
 
     profiles = _load_agent_profiles_compat(cursor)
     status_rows = _load_agent_status_entries(cursor)
-    step_rows = _load_step_executions(cursor)
     conn.close()
 
     if not profiles and status_rows:
         profiles = _build_profiles_from_status_entries(status_rows)
 
-    if not profiles and not status_rows and not step_rows:
+    if not profiles and not status_rows:
         raise HTTPException(status_code=404, detail="No state data found")
 
     latest_timestamp: Optional[datetime] = None
@@ -920,17 +785,6 @@ async def get_latest_state(
     if status_rows:
         latest_step = max(int(entry["step"]) for entry in status_rows)
         latest_timestamp = max(entry["timestamp"] for entry in status_rows)
-    elif step_rows:
-        latest_step = len(step_rows)
-        for _, _, _, _, end_time, _, _ in reversed(step_rows):
-            candidate = end_time
-            if not candidate:
-                continue
-            try:
-                latest_timestamp = datetime.fromisoformat(candidate)
-                break
-            except ValueError:
-                continue
 
     latest_status_by_agent: Dict[int, Dict[str, Any]] = {}
     for status_entry in status_rows:

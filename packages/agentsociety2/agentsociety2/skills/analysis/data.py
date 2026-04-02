@@ -494,27 +494,6 @@ class ContextLoader:
             except Exception as e:
                 errors.append(f"Failed to read pid.json: {e}")
 
-        # 从数据库读取更多状态信息
-        try:
-            conn = sqlite3.connect(str(db_path))
-            cursor = conn.cursor()
-            cursor.execute(
-                "SELECT name FROM sqlite_master WHERE type='table' AND name NOT LIKE 'sqlite_%'"
-            )
-            tables = {row[0] for row in cursor.fetchall()}
-            if completion == 0.0 and "step_executions" in tables:
-                try:
-                    cursor.execute("SELECT COUNT(*) FROM step_executions")
-                    row = cursor.fetchone()
-                    if row and row[0] and row[0] > 0:
-                        completion = 50.0
-                except sqlite3.OperationalError:
-                    pass
-
-            conn.close()
-        except sqlite3.Error as e:
-            errors.append(f"Database read error: {e}")
-
         # 从 run 目录收集运行时错误
         runtime_errors = self._collect_runtime_failures(run_path)
         errors.extend(runtime_errors)

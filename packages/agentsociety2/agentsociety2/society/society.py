@@ -126,23 +126,12 @@ class AgentSociety:
             self._replay_writer = ReplayWriter(db_path)
             await self._replay_writer.init()
 
-        for agent in self._agents:
-            self._setup_agent_position_callback(agent)
-
         if self._replay_writer is not None:
             self._env_router.set_replay_writer(self._replay_writer)
 
         await self._env_router.init(self._t)
         for agent in self._agents:
             await agent.init(env=self._env_router)
-
-    def _setup_agent_position_callback(self, agent: AgentBase) -> None:
-        """为 agent 注入“从环境查询位置”的回调。"""
-        async def get_position_from_env():
-            # Try to get position from environment router
-            return await self._env_router.get_agent_position(agent.id)
-
-        agent._get_position_callback = get_position_from_env
 
     async def close(self):
         for agent in self._agents:

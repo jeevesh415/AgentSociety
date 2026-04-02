@@ -40,7 +40,7 @@ import os
 from abc import ABC, abstractmethod
 from dataclasses import dataclass, field
 from datetime import datetime
-from typing import Any, Dict, Literal, Optional, Tuple, Type, TypeVar, overload
+from typing import Any, Dict, Literal, Optional, Type, TypeVar, overload
 
 import json_repair
 from agentsociety2.config import extract_json
@@ -683,19 +683,6 @@ Remember: You are simulating a real person living in a simulated world. Your beh
     def name(self) -> str:
         """智能体显示名称。"""
         return self._name
-
-    async def _get_position(self) -> Tuple[Optional[float], Optional[float]]:
-        """获取智能体当前位置。
-
-        可由子类重写或通过回调设置，从环境模块（如 MobilitySpace）获取位置。
-
-        Returns:
-            元组 (经度, 纬度)，不可用时返回 (None, None)。
-        """
-        # Check if a position callback has been set
-        if hasattr(self, "_get_position_callback") and self._get_position_callback:
-            return await self._get_position_callback()
-        return None, None
 
     async def acompletion_with_pydantic_validation(
         self,

@@ -457,22 +457,6 @@ class MobilitySpace(EnvBase):
             )
         get_logger().info(f"Routing server is ready on {self._server_addr}")
 
-    async def get_agent_position(self, agent_id: int) -> Tuple[Optional[float], Optional[float]]:
-        """Get the position of an agent.
-
-        Args:
-            agent_id: The ID of the agent (person).
-
-        Returns:
-            A tuple of (longitude, latitude), or (None, None) if not available.
-        """
-        if agent_id not in self._persons:
-            return None, None
-        person = self._persons[agent_id]
-        lng, lat = person.position.lnglat
-        return lng, lat
-
-
     @property
     def map(self):
         assert self._map is not None, "Map not initialized"
@@ -863,7 +847,6 @@ class MobilitySpace(EnvBase):
         self._step_counter += 1
 
     # ==================== Replay Data Methods ====================
-    # Note: get_agent_position and _write_position are defined earlier in the class
 
     def _dump_state(self) -> dict:
         """
