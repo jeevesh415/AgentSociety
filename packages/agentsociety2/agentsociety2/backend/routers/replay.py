@@ -8,20 +8,22 @@ Replay data query API for simulation playback.
 
 from __future__ import annotations
 
+import asyncio
 from collections import defaultdict
 from datetime import datetime
 import json
 from pathlib import Path
-from typing import Any, Dict, List, Optional
+from typing import Any, Dict, List, Literal, Optional
 
 from fastapi import APIRouter, HTTPException, Query
 from pydantic import BaseModel, Field
 from sqlalchemy import inspect as sa_inspect
-from sqlalchemy.ext.asyncio import AsyncSession, create_async_engine
+from sqlalchemy.ext.asyncio import AsyncEngine, AsyncSession, create_async_engine
 from sqlalchemy.orm import sessionmaker
 from sqlmodel import desc, func, select
 
 from ...backend.services.replay_catalog import (
+    fetch_dataset_rows,
     find_dataset_by_capability,
     get_dataset_by_id,
     load_dataset_catalog,
@@ -32,6 +34,8 @@ from ...storage.replay_metadata import AGENT_PROFILE_DATASET_CAPABILITY
 from ...storage.models import AgentDialog, AgentProfile, AgentStatus
 
 router = APIRouter(prefix="/replay", tags=["replay"])
+_DB_CACHE_LOCK = asyncio.Lock()
+_DB_SESSIONMAKER_CACHE: dict[str, tuple[int, AsyncEngine, sessionmaker]] = {}
 
 
 class ExperimentInfo(BaseModel):
@@ -99,6 +103,55 @@ class ReplayDatasetRows(BaseModel):
     columns: List[str]
     rows: List[Dict[str, Any]]
     total: int
+
+
+class ReplayPanelSchema(BaseModel):
+    agent_profile_dataset: Optional[ReplayDatasetInfo] = None
+    agent_state_datasets: List[ReplayDatasetInfo] = Field(default_factory=list)
+    env_state_datasets: List[ReplayDatasetInfo] = Field(default_factory=list)
+    geo_dataset: Optional[ReplayDatasetInfo] = None
+    trajectory_dataset: Optional[ReplayDatasetInfo] = None
+    primary_agent_state_dataset_id: Optional[str] = None
+    layout_hint: Literal["map", "random"] = "random"
+    supports_map: bool = False
+
+
+class ReplayDatasetPanelRef(BaseModel):
+    dataset_id: str
+    module_name: str
+    title: str = ""
+
+
+class ReplayPosition(BaseModel):
+    agent_id: int
+    lng: Optional[float] = None
+    lat: Optional[float] = None
+
+
+class ReplayAgentStateAtStep(BaseModel):
+    dataset: ReplayDatasetPanelRef
+    rows_by_agent_id: Dict[str, Dict[str, Any]] = Field(default_factory=dict)
+
+
+class ReplayEnvStateAtStep(BaseModel):
+    dataset: ReplayDatasetPanelRef
+    row: Optional[Dict[str, Any]] = None
+
+
+class ReplayStepBundle(BaseModel):
+    step: int
+    t: Optional[datetime] = None
+    layout_hint: Literal["map", "random"] = "random"
+    positions: List[ReplayPosition] = Field(default_factory=list)
+    agent_state_rows: Dict[str, ReplayAgentStateAtStep] = Field(default_factory=dict)
+    env_state_rows: Dict[str, ReplayEnvStateAtStep] = Field(default_factory=dict)
+
+
+class ReplayAgentStateHistory(BaseModel):
+    agent_id: int
+    dataset_id: Optional[str] = None
+    rows: List[Dict[str, Any]] = Field(default_factory=list)
+    history_by_dataset: Dict[str, List[Dict[str, Any]]] = Field(default_factory=dict)
 
 
 class SocialNetworkNode(BaseModel):
@@ -188,17 +241,41 @@ def get_db_path(workspace_path: str, hypothesis_id: str, experiment_id: str) -> 
     )
 
 
-async def get_db_session(db_path: Path):
-    if not db_path.exists():
+async def _get_cached_sessionmaker(db_path: Path) -> tuple[sessionmaker, int]:
+    resolved_path = db_path.resolve()
+    if not resolved_path.exists():
         raise HTTPException(status_code=404, detail=f"Database not found: {db_path}")
 
-    engine = create_async_engine(f"sqlite+aiosqlite:///{db_path}", echo=False)
-    async_session = sessionmaker(engine, class_=AsyncSession, expire_on_commit=False)
+    cache_key = str(resolved_path)
+    mtime_ns = resolved_path.stat().st_mtime_ns
 
+    async with _DB_CACHE_LOCK:
+        cached = _DB_SESSIONMAKER_CACHE.get(cache_key)
+        if cached is not None:
+            cached_mtime_ns, _engine, cached_sessionmaker = cached
+            if cached_mtime_ns == mtime_ns:
+                return cached_sessionmaker, mtime_ns
+            await _engine.dispose()
+
+        engine = create_async_engine(
+            f"sqlite+aiosqlite:///{resolved_path}",
+            echo=False,
+        )
+        async_session = sessionmaker(
+            engine,
+            class_=AsyncSession,
+            expire_on_commit=False,
+        )
+        _DB_SESSIONMAKER_CACHE[cache_key] = (mtime_ns, engine, async_session)
+        return async_session, mtime_ns
+
+
+async def get_db_session(db_path: Path):
+    async_session, mtime_ns = await _get_cached_sessionmaker(db_path)
     async with async_session() as session:
+        session.info["replay_db_path"] = str(db_path.resolve())
+        session.info["replay_db_mtime_ns"] = mtime_ns
         yield session
-
-    await engine.dispose()
 
 
 async def _table_exists(session: AsyncSession, table_name: str) -> bool:
@@ -210,6 +287,134 @@ async def _table_exists(session: AsyncSession, table_name: str) -> bool:
 
 def _dataset_to_response(dataset: Dict[str, Any]) -> ReplayDatasetInfo:
     return ReplayDatasetInfo.model_validate(dataset)
+
+
+def _dataset_ref(dataset: Dict[str, Any]) -> ReplayDatasetPanelRef:
+    return ReplayDatasetPanelRef(
+        dataset_id=dataset["dataset_id"],
+        module_name=dataset.get("module_name") or "",
+        title=dataset.get("title") or "",
+    )
+
+
+def _list_agent_state_datasets(datasets: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
+    items = [
+        dataset
+        for dataset in datasets
+        if dataset.get("kind") == "entity_snapshot"
+        and "agent_snapshot" in dataset.get("capabilities", [])
+        and dataset.get("entity_key")
+        and dataset.get("step_key")
+    ]
+    items.sort(key=lambda item: item["dataset_id"])
+    return items
+
+
+def _list_env_state_datasets(datasets: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
+    items = [
+        dataset
+        for dataset in datasets
+        if dataset.get("kind") == "env_snapshot"
+        and "env_snapshot" in dataset.get("capabilities", [])
+        and dataset.get("step_key")
+    ]
+    items.sort(key=lambda item: item["dataset_id"])
+    return items
+
+
+def _select_geo_dataset(datasets: List[Dict[str, Any]]) -> Optional[Dict[str, Any]]:
+    candidates = [
+        dataset
+        for dataset in _list_agent_state_datasets(datasets)
+        if "geo_point" in dataset.get("capabilities", [])
+        and _dataset_has_columns(dataset, "lng", "lat")
+    ]
+    candidates.sort(key=lambda item: item["dataset_id"])
+    return candidates[0] if candidates else None
+
+
+def _select_trajectory_dataset(
+    datasets: List[Dict[str, Any]],
+) -> Optional[Dict[str, Any]]:
+    candidates = [
+        dataset
+        for dataset in _list_agent_state_datasets(datasets)
+        if "trajectory" in dataset.get("capabilities", [])
+        and dataset.get("time_key")
+        and _dataset_has_columns(dataset, "lng", "lat")
+    ]
+    candidates.sort(key=lambda item: item["dataset_id"])
+    return candidates[0] if candidates else None
+
+
+def _select_primary_agent_state_dataset(
+    datasets: List[Dict[str, Any]],
+) -> Optional[Dict[str, Any]]:
+    agent_state_datasets = _list_agent_state_datasets(datasets)
+    if not agent_state_datasets:
+        return None
+
+    non_geo_candidates = [
+        dataset
+        for dataset in agent_state_datasets
+        if "geo_point" not in dataset.get("capabilities", [])
+    ]
+    candidates = non_geo_candidates or agent_state_datasets
+    candidates.sort(key=lambda item: item["dataset_id"])
+    return candidates[0]
+
+
+def _find_time_value(rows: List[Dict[str, Any]], time_key: Optional[str]) -> Optional[datetime]:
+    if not time_key:
+        return None
+    for row in rows:
+        timestamp = _coerce_datetime(row.get(time_key))
+        if timestamp is not None:
+            return timestamp
+    return None
+
+
+def _build_positions_from_step_rows(
+    geo_dataset: Optional[Dict[str, Any]],
+    agent_state_groups: Dict[str, ReplayAgentStateAtStep],
+) -> List[ReplayPosition]:
+    agent_ids: set[int] = set()
+    for group in agent_state_groups.values():
+        for raw_agent_id in group.rows_by_agent_id.keys():
+            try:
+                agent_ids.add(int(raw_agent_id))
+            except (TypeError, ValueError):
+                continue
+
+    positions_by_agent_id: Dict[int, ReplayPosition] = {
+        agent_id: ReplayPosition(agent_id=agent_id, lng=None, lat=None)
+        for agent_id in sorted(agent_ids)
+    }
+    if geo_dataset is None:
+        return list(positions_by_agent_id.values())
+
+    geo_group = agent_state_groups.get(geo_dataset["dataset_id"])
+    if geo_group is None:
+        return list(positions_by_agent_id.values())
+
+    for raw_agent_id, row in geo_group.rows_by_agent_id.items():
+        try:
+            agent_id = int(raw_agent_id)
+        except (TypeError, ValueError):
+            continue
+        positions_by_agent_id[agent_id] = ReplayPosition(
+            agent_id=agent_id,
+            lng=row.get("lng"),
+            lat=row.get("lat"),
+        )
+    return list(positions_by_agent_id.values())
+
+
+def _split_columns_param(raw_columns: Optional[str]) -> Optional[List[str]]:
+    if raw_columns is None:
+        return None
+    columns = [column.strip() for column in raw_columns.split(",") if column.strip()]
+    return columns or None
 
 
 def _build_agent_status_response(
@@ -259,31 +464,23 @@ async def _find_optional_dataset_by_capability(
         raise
 
 
-async def _get_geo_dataset(session: AsyncSession) -> Optional[Dict[str, Any]]:
-    datasets = await load_dataset_catalog(session)
-    candidates = [
-        dataset
-        for dataset in datasets
-        if "geo_point" in dataset.get("capabilities", [])
-        and dataset.get("kind") == "entity_snapshot"
-        and dataset.get("entity_key")
-        and dataset.get("step_key")
-        and _dataset_has_columns(dataset, "lng", "lat")
-    ]
-    candidates.sort(key=lambda item: item["dataset_id"])
-    return candidates[0] if candidates else None
+async def _get_geo_dataset(
+    session: AsyncSession,
+    datasets: Optional[List[Dict[str, Any]]] = None,
+) -> Optional[Dict[str, Any]]:
+    catalog = datasets or await load_dataset_catalog(session)
+    return _select_geo_dataset(catalog)
 
 
-async def _get_agent_status_dataset(session: AsyncSession) -> Optional[Dict[str, Any]]:
-    datasets = await load_dataset_catalog(session)
+async def _get_agent_status_dataset(
+    session: AsyncSession,
+    datasets: Optional[List[Dict[str, Any]]] = None,
+) -> Optional[Dict[str, Any]]:
+    catalog = datasets or await load_dataset_catalog(session)
     candidates = [
         dataset
-        for dataset in datasets
-        if "agent_snapshot" in dataset.get("capabilities", [])
-        and dataset.get("kind") == "entity_snapshot"
-        and dataset.get("entity_key")
-        and dataset.get("step_key")
-        and dataset.get("time_key")
+        for dataset in _list_agent_state_datasets(catalog)
+        if dataset.get("time_key")
     ]
     candidates.sort(
         key=lambda item: (
@@ -294,11 +491,14 @@ async def _get_agent_status_dataset(session: AsyncSession) -> Optional[Dict[str,
     return candidates[0] if candidates else None
 
 
-async def _get_agent_profile_dataset(session: AsyncSession) -> Optional[Dict[str, Any]]:
-    datasets = await load_dataset_catalog(session)
+async def _get_agent_profile_dataset(
+    session: AsyncSession,
+    datasets: Optional[List[Dict[str, Any]]] = None,
+) -> Optional[Dict[str, Any]]:
+    catalog = datasets or await load_dataset_catalog(session)
     candidates = [
         dataset
-        for dataset in datasets
+        for dataset in catalog
         if AGENT_PROFILE_DATASET_CAPABILITY in dataset.get("capabilities", [])
         and dataset.get("entity_key")
     ]
@@ -306,20 +506,12 @@ async def _get_agent_profile_dataset(session: AsyncSession) -> Optional[Dict[str
     return candidates[0] if candidates else None
 
 
-async def _get_trajectory_dataset(session: AsyncSession) -> Optional[Dict[str, Any]]:
-    datasets = await load_dataset_catalog(session)
-    candidates = [
-        dataset
-        for dataset in datasets
-        if "trajectory" in dataset.get("capabilities", [])
-        and dataset.get("kind") == "entity_snapshot"
-        and dataset.get("entity_key")
-        and dataset.get("step_key")
-        and dataset.get("time_key")
-        and _dataset_has_columns(dataset, "lng", "lat")
-    ]
-    candidates.sort(key=lambda item: item["dataset_id"])
-    return candidates[0] if candidates else None
+async def _get_trajectory_dataset(
+    session: AsyncSession,
+    datasets: Optional[List[Dict[str, Any]]] = None,
+) -> Optional[Dict[str, Any]]:
+    catalog = datasets or await load_dataset_catalog(session)
+    return _select_trajectory_dataset(catalog)
 
 
 async def _get_social_datasets(
@@ -670,6 +862,13 @@ async def get_replay_dataset_rows(
     page_size: int = Query(20, ge=1, le=200),
     order_by: Optional[str] = Query(None),
     desc_order: bool = Query(False),
+    step: Optional[int] = Query(None, description="Exact step filter"),
+    entity_id: Optional[int] = Query(None, description="Exact entity filter"),
+    start_step: Optional[int] = Query(None, description="Start step (inclusive)"),
+    end_step: Optional[int] = Query(None, description="End step (inclusive)"),
+    max_step: Optional[int] = Query(None, description="Maximum step (inclusive)"),
+    columns: Optional[str] = Query(None, description="Comma-separated column whitelist"),
+    latest_per_entity: bool = Query(False, description="Return only the latest row per entity"),
 ) -> ReplayDatasetRows:
     db_path = get_db_path(workspace_path, hypothesis_id, experiment_id)
 
@@ -682,12 +881,196 @@ async def get_replay_dataset_rows(
             page_size=page_size,
             order_by=order_by,
             desc=desc_order,
+            step=step,
+            entity_id=entity_id,
+            start_step=start_step,
+            end_step=end_step,
+            max_step=max_step,
+            columns=_split_columns_param(columns),
+            latest_per_entity=latest_per_entity,
         )
         return ReplayDatasetRows(
             dataset_id=dataset_id,
             columns=rows["columns"],
             rows=rows["rows"],
             total=rows["total"],
+        )
+
+
+@router.get(
+    "/{hypothesis_id}/{experiment_id}/panel-schema",
+    response_model=ReplayPanelSchema,
+)
+async def get_replay_panel_schema(
+    hypothesis_id: str,
+    experiment_id: str,
+    workspace_path: str = Query(..., description="Workspace root path"),
+) -> ReplayPanelSchema:
+    db_path = get_db_path(workspace_path, hypothesis_id, experiment_id)
+
+    async for session in get_db_session(db_path):
+        datasets = await load_dataset_catalog(session)
+        agent_profile_dataset = await _get_agent_profile_dataset(session, datasets)
+        agent_state_datasets = _list_agent_state_datasets(datasets)
+        env_state_datasets = _list_env_state_datasets(datasets)
+        geo_dataset = _select_geo_dataset(datasets)
+        trajectory_dataset = _select_trajectory_dataset(datasets)
+        primary_agent_state_dataset = _select_primary_agent_state_dataset(datasets)
+        return ReplayPanelSchema(
+            agent_profile_dataset=(
+                _dataset_to_response(agent_profile_dataset)
+                if agent_profile_dataset is not None
+                else None
+            ),
+            agent_state_datasets=[
+                _dataset_to_response(dataset) for dataset in agent_state_datasets
+            ],
+            env_state_datasets=[
+                _dataset_to_response(dataset) for dataset in env_state_datasets
+            ],
+            geo_dataset=(
+                _dataset_to_response(geo_dataset) if geo_dataset is not None else None
+            ),
+            trajectory_dataset=(
+                _dataset_to_response(trajectory_dataset)
+                if trajectory_dataset is not None
+                else None
+            ),
+            primary_agent_state_dataset_id=(
+                primary_agent_state_dataset["dataset_id"]
+                if primary_agent_state_dataset is not None
+                else None
+            ),
+            layout_hint="map" if geo_dataset is not None else "random",
+            supports_map=geo_dataset is not None,
+        )
+
+
+@router.get(
+    "/{hypothesis_id}/{experiment_id}/steps/{step}/bundle",
+    response_model=ReplayStepBundle,
+)
+async def get_replay_step_bundle(
+    hypothesis_id: str,
+    experiment_id: str,
+    step: int,
+    workspace_path: str = Query(..., description="Workspace root path"),
+) -> ReplayStepBundle:
+    db_path = get_db_path(workspace_path, hypothesis_id, experiment_id)
+
+    async for session in get_db_session(db_path):
+        datasets = await load_dataset_catalog(session)
+        agent_state_datasets = _list_agent_state_datasets(datasets)
+        env_state_datasets = _list_env_state_datasets(datasets)
+        geo_dataset = _select_geo_dataset(datasets)
+        layout_hint: Literal["map", "random"] = (
+            "map" if geo_dataset is not None else "random"
+        )
+
+        step_timestamp: Optional[datetime] = None
+        agent_state_rows: Dict[str, ReplayAgentStateAtStep] = {}
+        for dataset in agent_state_datasets:
+            rows_result = await fetch_dataset_rows(session, dataset, step=step)
+            entity_key = dataset.get("entity_key")
+            if not entity_key:
+                continue
+            rows_by_agent_id: Dict[str, Dict[str, Any]] = {}
+            for row in rows_result["rows"]:
+                raw_agent_id = row.get(entity_key)
+                if raw_agent_id is None:
+                    continue
+                rows_by_agent_id[str(raw_agent_id)] = row
+            agent_state_rows[dataset["dataset_id"]] = ReplayAgentStateAtStep(
+                dataset=_dataset_ref(dataset),
+                rows_by_agent_id=rows_by_agent_id,
+            )
+            if step_timestamp is None:
+                step_timestamp = _find_time_value(rows_result["rows"], dataset.get("time_key"))
+
+        env_state_rows: Dict[str, ReplayEnvStateAtStep] = {}
+        for dataset in env_state_datasets:
+            rows_result = await fetch_dataset_rows(session, dataset, step=step, limit=1)
+            row = rows_result["rows"][0] if rows_result["rows"] else None
+            env_state_rows[dataset["dataset_id"]] = ReplayEnvStateAtStep(
+                dataset=_dataset_ref(dataset),
+                row=row,
+            )
+            if step_timestamp is None:
+                step_timestamp = _find_time_value(rows_result["rows"], dataset.get("time_key"))
+
+        positions = _build_positions_from_step_rows(geo_dataset, agent_state_rows)
+        return ReplayStepBundle(
+            step=step,
+            t=step_timestamp,
+            layout_hint=layout_hint,
+            positions=positions,
+            agent_state_rows=agent_state_rows,
+            env_state_rows=env_state_rows,
+        )
+
+
+@router.get(
+    "/{hypothesis_id}/{experiment_id}/agents/{agent_id}/state-history",
+    response_model=ReplayAgentStateHistory,
+)
+async def get_agent_state_history(
+    hypothesis_id: str,
+    experiment_id: str,
+    agent_id: int,
+    workspace_path: str = Query(..., description="Workspace root path"),
+    dataset_id: Optional[str] = Query(None, description="Optional dataset filter"),
+    limit: Optional[int] = Query(None, ge=1, le=1000),
+    start_step: Optional[int] = Query(None),
+    end_step: Optional[int] = Query(None),
+) -> ReplayAgentStateHistory:
+    db_path = get_db_path(workspace_path, hypothesis_id, experiment_id)
+
+    async for session in get_db_session(db_path):
+        datasets = await load_dataset_catalog(session)
+        agent_state_datasets = _list_agent_state_datasets(datasets)
+        if dataset_id is not None:
+            agent_state_datasets = [
+                dataset
+                for dataset in agent_state_datasets
+                if dataset["dataset_id"] == dataset_id
+            ]
+            if not agent_state_datasets:
+                raise HTTPException(
+                    status_code=404,
+                    detail=f"Agent state dataset '{dataset_id}' not found",
+                )
+
+        if dataset_id is not None and len(agent_state_datasets) == 1:
+            dataset = agent_state_datasets[0]
+            rows_result = await fetch_dataset_rows(
+                session,
+                dataset,
+                entity_id=agent_id,
+                start_step=start_step,
+                end_step=end_step,
+                limit=limit,
+            )
+            return ReplayAgentStateHistory(
+                agent_id=agent_id,
+                dataset_id=dataset["dataset_id"],
+                rows=rows_result["rows"],
+            )
+
+        history_by_dataset: Dict[str, List[Dict[str, Any]]] = {}
+        for dataset in agent_state_datasets:
+            rows_result = await fetch_dataset_rows(
+                session,
+                dataset,
+                entity_id=agent_id,
+                start_step=start_step,
+                end_step=end_step,
+                limit=limit,
+            )
+            history_by_dataset[dataset["dataset_id"]] = rows_result["rows"]
+
+        return ReplayAgentStateHistory(
+            agent_id=agent_id,
+            history_by_dataset=history_by_dataset,
         )
 
 

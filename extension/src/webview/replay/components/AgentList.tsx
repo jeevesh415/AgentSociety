@@ -8,7 +8,9 @@ import { useReplay } from '../store';
 
 export const AgentList: React.FC = () => {
   const { state, actions } = useReplay();
-  const { agentProfiles, agentStatuses, selectedAgentId } = state;
+  const { agentProfiles, agentStateRowsAtStep, selectedAgentId, panelSchema } = state;
+  const primaryDatasetId = panelSchema?.primary_agent_state_dataset_id ?? null;
+  const primaryRows = primaryDatasetId ? agentStateRowsAtStep[primaryDatasetId]?.rows_by_agent_id ?? {} : {};
 
   // Sort agents by ID
   const sortedAgents = React.useMemo(() => {
@@ -22,7 +24,7 @@ export const AgentList: React.FC = () => {
   return (
     <div className="agent-list">
       {sortedAgents.map((agent) => {
-        const status = agentStatuses.get(agent.id);
+        const status = primaryRows[String(agent.id)] ?? null;
         const isSelected = agent.id === selectedAgentId;
 
         // Get initials for avatar
@@ -43,7 +45,7 @@ export const AgentList: React.FC = () => {
             <div className="agent-info">
               <div className="agent-name">{agent.name}</div>
               <div className="agent-action">
-                {status?.action || status?.status?.thought || 'No activity'}
+                {status?.action || status?.thought || status?.t || 'No activity'}
               </div>
             </div>
           </div>

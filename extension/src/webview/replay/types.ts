@@ -16,40 +16,23 @@ export interface AgentProfile {
   profile: Record<string, any>;
 }
 
-/** Agent status at a specific step */
+/** Legacy agent status at a specific step */
 export interface AgentStatus {
   id: number;
   step: number;
-  t: string; // ISO datetime string
+  t: string;
   lng: number | null;
   lat: number | null;
   action: string | null;
-  status: {
-    satisfactions?: Record<string, number>;
-    emotion?: Record<string, number>;
-    emotion_type?: string;
-    thought?: string;
-    need?: Record<string, any>;
-    intention?: Record<string, any>;
-    plan?: {
-      target: string;
-      index: number;
-      completed: boolean;
-      failed: boolean;
-      steps: Array<{
-        intention: string;
-        status: string;
-      }>;
-    };
-  };
+  status: Record<string, any>;
 }
 
-/** Agent dialog record */
+/** Legacy dialog record */
 export interface AgentDialog {
   id: number;
   agent_id: number;
   step: number;
-  t: string; // ISO datetime string
+  t: string;
   type: DialogType;
   speaker: string;
   content: string;
@@ -57,13 +40,13 @@ export interface AgentDialog {
 
 /** Dialog types */
 export enum DialogType {
-  THOUGHT = 0,       // 思考/反思
+  THOUGHT = 0,
 }
 
 /** Timeline point */
 export interface TimelinePoint {
   step: number;
-  t: string; // ISO datetime string
+  t: string;
 }
 
 /** Experiment information */
@@ -74,13 +57,10 @@ export interface ExperimentInfo {
   start_time: string | null;
   end_time: string | null;
   agent_count: number;
-  /** Whether the experiment has social replay data. When false, do not request social APIs or show social panel. */
   has_social?: boolean;
 }
 
-// Metric removed
-
-/** Social media user profile */
+/** Legacy social media types kept for compatibility */
 export interface SocialUser {
   user_id: number;
   username: string;
@@ -92,7 +72,6 @@ export interface SocialUser {
   profile: Record<string, any>;
 }
 
-/** Social media post */
 export interface SocialPost {
   post_id: number;
   author_id: number;
@@ -109,7 +88,6 @@ export interface SocialPost {
   step?: number;
 }
 
-/** Social media comment on a post */
 export interface SocialComment {
   comment_id: number;
   post_id: number;
@@ -120,7 +98,6 @@ export interface SocialComment {
   likes_count?: number;
 }
 
-/** Social media event */
 export interface SocialEvent {
   event_id: number;
   step: number;
@@ -137,7 +114,6 @@ export interface SocialEvent {
   summary: string;
 }
 
-/** Social network graph */
 export interface SocialNetworkNode {
   user_id: number;
   username: string;
@@ -153,7 +129,6 @@ export interface SocialNetwork {
   edges: SocialNetworkEdge[];
 }
 
-/** Position data for trajectory */
 export interface PositionPoint {
   step: number;
   t: string;
@@ -173,12 +148,12 @@ export interface ViewState {
 /** Playback state */
 export interface PlaybackState {
   isPlaying: boolean;
-  speed: number; // ms per step
+  speed: number;
   currentStep: number;
 }
 
 /** Layout mode for agent visualization */
-export type LayoutMode = 'map' | 'network' | 'random';
+export type LayoutMode = 'map' | 'random';
 
 export interface ReplayDatasetColumn {
   column_name: string;
@@ -222,7 +197,55 @@ export interface ReplayDatasetRows {
   total: number;
 }
 
-/** Per-step social activity derived from social replay events */
+export interface ReplayDatasetPanelRef {
+  dataset_id: string;
+  module_name: string;
+  title: string;
+}
+
+export interface ReplayPanelSchema {
+  agent_profile_dataset?: ReplayDatasetInfo | null;
+  agent_state_datasets: ReplayDatasetInfo[];
+  env_state_datasets: ReplayDatasetInfo[];
+  geo_dataset?: ReplayDatasetInfo | null;
+  trajectory_dataset?: ReplayDatasetInfo | null;
+  primary_agent_state_dataset_id?: string | null;
+  layout_hint: LayoutMode;
+  supports_map: boolean;
+}
+
+export interface ReplayPosition {
+  agent_id: number;
+  lng: number | null;
+  lat: number | null;
+}
+
+export interface ReplayAgentStateAtStep {
+  dataset: ReplayDatasetPanelRef;
+  rows_by_agent_id: Record<string, Record<string, any>>;
+}
+
+export interface ReplayEnvStateAtStep {
+  dataset: ReplayDatasetPanelRef;
+  row: Record<string, any> | null;
+}
+
+export interface ReplayStepBundle {
+  step: number;
+  t?: string | null;
+  layout_hint: LayoutMode;
+  positions: ReplayPosition[];
+  agent_state_rows: Record<string, ReplayAgentStateAtStep>;
+  env_state_rows: Record<string, ReplayEnvStateAtStep>;
+}
+
+export interface ReplayAgentStateHistory {
+  agent_id: number;
+  dataset_id?: string | null;
+  rows: Record<string, any>[];
+  history_by_dataset: Record<string, Record<string, any>[]>;
+}
+
 export interface SocialActivityAtStep {
   step: number;
   highlightedAgentIds: number[];
@@ -234,6 +257,11 @@ export type ExtensionMessage =
   | { type: 'experimentInfo'; data: ExperimentInfo }
   | { type: 'timeline'; data: TimelinePoint[] }
   | { type: 'agentProfiles'; data: AgentProfile[] }
+  | { type: 'panelSchema'; data: ReplayPanelSchema }
+  | { type: 'stepBundle'; data: ReplayStepBundle }
+  | { type: 'agentStateHistory'; data: ReplayAgentStateHistory }
+  | { type: 'replayDatasets'; data: ReplayDatasetList }
+  | { type: 'replayDatasetRows'; data: ReplayDatasetRows }
   | { type: 'agentStatuses'; data: AgentStatus[] }
   | { type: 'agentStatusHistory'; data: AgentStatus[] }
   | { type: 'agentDialogs'; data: AgentDialog[] }
@@ -245,8 +273,6 @@ export type ExtensionMessage =
   | { type: 'allPosts'; data: SocialPost[] }
   | { type: 'postComments'; data: SocialComment[]; postId: number }
   | { type: 'trajectory'; data: PositionPoint[] }
-  | { type: 'replayDatasets'; data: ReplayDatasetList }
-  | { type: 'replayDatasetRows'; data: ReplayDatasetRows }
   | { type: 'error'; message: string };
 
 /** Initial data from extension */
@@ -263,6 +289,11 @@ export type WebviewMessage =
   | { command: 'fetchExperimentInfo' }
   | { command: 'fetchTimeline' }
   | { command: 'fetchAgentProfiles' }
+  | { command: 'fetchPanelSchema' }
+  | { command: 'fetchStepBundle'; step: number }
+  | { command: 'fetchAgentStateHistory'; agentId: number; datasetId?: string; startStep?: number; endStep?: number; limit?: number }
+  | { command: 'fetchReplayDatasets' }
+  | { command: 'fetchReplayDatasetRows'; datasetId: string; page?: number; pageSize?: number; step?: number; entityId?: number; startStep?: number; endStep?: number; maxStep?: number; columns?: string[]; descOrder?: boolean; latestPerEntity?: boolean }
   | { command: 'fetchAgentStatuses'; step?: number }
   | { command: 'fetchAgentStatusHistory'; agentId: number }
   | { command: 'fetchAgentDialogs'; agentId: number; dialogType?: DialogType }
@@ -274,7 +305,5 @@ export type WebviewMessage =
   | { command: 'fetchAllPosts'; step?: number }
   | { command: 'fetchPostComments'; postId: number }
   | { command: 'fetchTrajectory'; agentId: number; startStep?: number; endStep?: number }
-  | { command: 'fetchReplayDatasets' }
-  | { command: 'fetchReplayDatasetRows'; datasetId: string; page?: number; pageSize?: number }
   | { command: 'selectAgent'; agentId: number | null }
   | { command: 'error'; message: string };

@@ -10,33 +10,22 @@ import { useReplay } from '../store';
 export const MapPlaceholder: React.FC = () => {
   const { t } = useTranslation();
   const { state, actions } = useReplay();
-  const { agentProfiles, agentStatuses, selectedAgentId } = state;
+  const { agentProfiles, positionsAtStep, selectedAgentId } = state;
 
   // Get agents with positions
   const agentsWithPositions = React.useMemo(() => {
-    const result: Array<{
-      id: number;
-      name: string;
-      lng: number;
-      lat: number;
-      action: string | null;
-    }> = [];
-
-    agentStatuses.forEach((status, id) => {
-      if (status.lng != null && status.lat != null) {
-        const profile = agentProfiles.get(id);
-        result.push({
-          id,
-          name: profile?.name || `Agent ${id}`,
-          lng: status.lng,
-          lat: status.lat,
-          action: status.action,
-        });
-      }
-    });
-
-    return result;
-  }, [agentStatuses, agentProfiles]);
+    return positionsAtStep
+      .filter((position) => position.lng != null && position.lat != null)
+      .map((position) => {
+        const profile = agentProfiles.get(position.agent_id);
+        return {
+          id: position.agent_id,
+          name: profile?.name || `Agent ${position.agent_id}`,
+          lng: Number(position.lng),
+          lat: Number(position.lat),
+        };
+      });
+  }, [agentProfiles, positionsAtStep]);
 
   if (agentsWithPositions.length === 0) {
     return (
@@ -82,11 +71,6 @@ export const MapPlaceholder: React.FC = () => {
               <div style={{ fontSize: '12px', opacity: 0.8 }}>
                 📍 {agent.lng.toFixed(6)}, {agent.lat.toFixed(6)}
               </div>
-              {agent.action && (
-                <div style={{ fontSize: '11px', marginTop: '4px', opacity: 0.7 }}>
-                  {agent.action}
-                </div>
-              )}
             </div>
           );
         })}

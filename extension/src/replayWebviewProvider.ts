@@ -14,7 +14,19 @@
 
 import * as vscode from 'vscode';
 import * as path from 'path';
-import type { WebviewMessage, ExtensionMessage, InitData } from './webview/replay/types';
+import type {
+  AgentProfile,
+  ExperimentInfo,
+  ExtensionMessage,
+  InitData,
+  ReplayAgentStateHistory,
+  ReplayDatasetList,
+  ReplayDatasetRows,
+  ReplayPanelSchema,
+  ReplayStepBundle,
+  TimelinePoint,
+  WebviewMessage,
+} from './webview/replay/types';
 
 export class ReplayWebviewProvider {
   private readonly panel: vscode.WebviewPanel;
@@ -24,6 +36,8 @@ export class ReplayWebviewProvider {
   private readonly hypothesisId: string;
   private readonly experimentId: string;
   private disposables: vscode.Disposable[] = [];
+  private readonly requestControllers = new Map<string, AbortController>();
+  private readonly requestVersions = new Map<string, number>();
 
   /**
    * Create and show a new replay webview panel
@@ -105,6 +119,24 @@ export class ReplayWebviewProvider {
         await this.fetchAgentProfiles();
         break;
 
+      case 'fetchPanelSchema':
+        await this.fetchPanelSchema();
+        break;
+
+      case 'fetchStepBundle':
+        await this.fetchStepBundle(message.step);
+        break;
+
+      case 'fetchAgentStateHistory':
+        await this.fetchAgentStateHistory(
+          message.agentId,
+          message.datasetId,
+          message.startStep,
+          message.endStep,
+          message.limit
+        );
+        break;
+
       case 'fetchAgentStatuses':
         await this.fetchAgentStatuses(message.step);
         break;
@@ -154,7 +186,21 @@ export class ReplayWebviewProvider {
         break;
 
       case 'fetchReplayDatasetRows':
-        await this.fetchReplayDatasetRows(message.datasetId, message.page, message.pageSize);
+        await this.fetchReplayDatasetRows(
+          message.datasetId,
+          message.page,
+          message.pageSize,
+          {
+            step: message.step,
+            entityId: message.entityId,
+            startStep: message.startStep,
+            endStep: message.endStep,
+            maxStep: message.maxStep,
+            columns: message.columns,
+            descOrder: message.descOrder,
+            latestPerEntity: message.latestPerEntity,
+          }
+        );
         break;
 
       case 'error':
@@ -177,22 +223,71 @@ export class ReplayWebviewProvider {
     this.postMessage({ type: 'init', data: initData });
   }
 
-  /**
-   * Fetch experiment info from backend
-   */
-  private async fetchExperimentInfo(): Promise<void> {
+  private buildReplayUrl(pathname: string, query: Record<string, string | number | boolean | undefined>): string {
+    const params = new URLSearchParams({
+      workspace_path: this.workspacePath,
+    });
+    Object.entries(query).forEach(([key, value]) => {
+      if (value === undefined || value === null || value === '') {
+        return;
+      }
+      params.set(key, String(value));
+    });
+    return `${this.backendUrl}/api/v1/replay/${this.hypothesisId}/${this.experimentId}${pathname}?${params.toString()}`;
+  }
+
+  private startLatestRequest(group: string): { signal: AbortSignal; version: number } {
+    this.requestControllers.get(group)?.abort();
+    const controller = new AbortController();
+    this.requestControllers.set(group, controller);
+    const version = (this.requestVersions.get(group) ?? 0) + 1;
+    this.requestVersions.set(group, version);
+    return { signal: controller.signal, version };
+  }
+
+  private isLatestRequest(group: string, version: number): boolean {
+    return this.requestVersions.get(group) === version;
+  }
+
+  private async fetchJson<T>(
+    resource: string,
+    url: string,
+    options?: { latestGroup?: string }
+  ): Promise<T | undefined> {
+    const latestGroup = options?.latestGroup;
+    const latestRequest = latestGroup ? this.startLatestRequest(latestGroup) : null;
+
     try {
-      const url = `${this.backendUrl}/api/v1/replay/${this.hypothesisId}/${this.experimentId}/info?workspace_path=${encodeURIComponent(this.workspacePath)}`;
-      const response = await fetch(url);
+      const response = await fetch(url, {
+        signal: latestRequest?.signal,
+      });
 
       if (!response.ok) {
         throw new Error(`HTTP ${response.status}: ${response.statusText}`);
       }
 
-      const data = await response.json();
-      this.postMessage({ type: 'experimentInfo', data });
+      const data = await response.json() as T;
+      if (latestGroup && latestRequest && !this.isLatestRequest(latestGroup, latestRequest.version)) {
+        return undefined;
+      }
+      return data;
     } catch (error) {
-      this.handleFetchError('experiment info', error);
+      if (error instanceof Error && error.name === 'AbortError') {
+        return undefined;
+      }
+      this.handleFetchError(resource, error);
+      return undefined;
+    }
+  }
+
+  /**
+   * Fetch experiment info from backend
+   */
+  private async fetchExperimentInfo(): Promise<void> {
+    const url = this.buildReplayUrl('/info', {});
+    const data = await this.fetchJson<ExperimentInfo>('experiment info', url);
+    if (data) {
+      this.postMessage({ type: 'experimentInfo', data });
     }
   }
 
@@ -200,18 +295,10 @@ export class ReplayWebviewProvider {
    * Fetch timeline from backend
    */
   private async fetchTimeline(): Promise<void> {
-    try {
-      const url = `${this.backendUrl}/api/v1/replay/${this.hypothesisId}/${this.experimentId}/timeline?workspace_path=${encodeURIComponent(this.workspacePath)}`;
-      const response = await fetch(url);
-
-      if (!response.ok) {
-        throw new Error(`HTTP ${response.status}: ${response.statusText}`);
-      }
-
-      const data = await response.json();
+    const url = this.buildReplayUrl('/timeline', {});
+    const data = await this.fetchJson<TimelinePoint[]>('timeline', url);
+    if (data) {
       this.postMessage({ type: 'timeline', data });
-    } catch (error) {
-      this.handleFetchError('timeline', error);
     }
   }
 
@@ -219,18 +306,45 @@ export class ReplayWebviewProvider {
    * Fetch agent profiles from backend
    */
   private async fetchAgentProfiles(): Promise<void> {
-    try {
-      const url = `${this.backendUrl}/api/v1/replay/${this.hypothesisId}/${this.experimentId}/agents/profiles?workspace_path=${encodeURIComponent(this.workspacePath)}`;
-      const response = await fetch(url);
-
-      if (!response.ok) {
-        throw new Error(`HTTP ${response.status}: ${response.statusText}`);
-      }
-
-      const data = await response.json();
+    const url = this.buildReplayUrl('/agents/profiles', {});
+    const data = await this.fetchJson<AgentProfile[]>('agent profiles', url);
+    if (data) {
       this.postMessage({ type: 'agentProfiles', data });
-    } catch (error) {
-      this.handleFetchError('agent profiles', error);
+    }
+  }
+
+  private async fetchPanelSchema(): Promise<void> {
+    const url = this.buildReplayUrl('/panel-schema', {});
+    const data = await this.fetchJson<ReplayPanelSchema>('panel schema', url);
+    if (data) {
+      this.postMessage({ type: 'panelSchema', data });
+    }
+  }
+
+  private async fetchStepBundle(step: number): Promise<void> {
+    const url = this.buildReplayUrl(`/steps/${step}/bundle`, {});
+    const data = await this.fetchJson<ReplayStepBundle>('step bundle', url, { latestGroup: 'stepBundle' });
+    if (data) {
+      this.postMessage({ type: 'stepBundle', data });
+    }
+  }
+
+  private async fetchAgentStateHistory(
+    agentId: number,
+    datasetId?: string,
+    startStep?: number,
+    endStep?: number,
+    limit?: number
+  ): Promise<void> {
+    const url = this.buildReplayUrl(`/agents/${agentId}/state-history`, {
+      dataset_id: datasetId,
+      start_step: startStep,
+      end_step: endStep,
+      limit,
+    });
+    const data = await this.fetchJson<ReplayAgentStateHistory>('agent state history', url, { latestGroup: 'agentStateHistory' });
+    if (data) {
+      this.postMessage({ type: 'agentStateHistory', data });
     }
   }
 
@@ -446,37 +560,46 @@ export class ReplayWebviewProvider {
    * Fetch database tables
    */
   private async fetchReplayDatasets(): Promise<void> {
-    try {
-      const url = `${this.backendUrl}/api/v1/replay/${this.hypothesisId}/${this.experimentId}/datasets?workspace_path=${encodeURIComponent(this.workspacePath)}`;
-      const response = await fetch(url);
-
-      if (!response.ok) {
-        throw new Error(`HTTP ${response.status}: ${response.statusText}`);
-      }
-
-      const data = await response.json();
+    const url = this.buildReplayUrl('/datasets', {});
+    const data = await this.fetchJson<ReplayDatasetList>('replay datasets', url);
+    if (data) {
       this.postMessage({ type: 'replayDatasets', data });
-    } catch (error) {
-      this.handleFetchError('replay datasets', error);
     }
   }
 
   /**
    * Fetch replay dataset rows
    */
-  private async fetchReplayDatasetRows(datasetId: string, page: number = 1, pageSize: number = 50): Promise<void> {
-    try {
-      const url = `${this.backendUrl}/api/v1/replay/${this.hypothesisId}/${this.experimentId}/datasets/${encodeURIComponent(datasetId)}/rows?workspace_path=${encodeURIComponent(this.workspacePath)}&page=${page}&page_size=${pageSize}`;
-      const response = await fetch(url);
-
-      if (!response.ok) {
-        throw new Error(`HTTP ${response.status}: ${response.statusText}`);
-      }
-
-      const data = await response.json();
+  private async fetchReplayDatasetRows(
+    datasetId: string,
+    page: number = 1,
+    pageSize: number = 50,
+    options?: {
+      step?: number;
+      entityId?: number;
+      startStep?: number;
+      endStep?: number;
+      maxStep?: number;
+      columns?: string[];
+      descOrder?: boolean;
+      latestPerEntity?: boolean;
+    }
+  ): Promise<void> {
+    const url = this.buildReplayUrl(`/datasets/${encodeURIComponent(datasetId)}/rows`, {
+      page,
+      page_size: pageSize,
+      step: options?.step,
+      entity_id: options?.entityId,
+      start_step: options?.startStep,
+      end_step: options?.endStep,
+      max_step: options?.maxStep,
+      columns: options?.columns?.join(','),
+      desc_order: options?.descOrder,
+      latest_per_entity: options?.latestPerEntity,
+    });
+    const data = await this.fetchJson<ReplayDatasetRows>('replay dataset rows', url, { latestGroup: 'replayDatasetRows' });
+    if (data) {
       this.postMessage({ type: 'replayDatasetRows', data });
-    } catch (error) {
-      this.handleFetchError('replay dataset rows', error);
     }
   }
 
@@ -1103,6 +1226,9 @@ export class ReplayWebviewProvider {
    * Dispose the webview panel and resources
    */
   public dispose(): void {
+    this.requestControllers.forEach((controller) => controller.abort());
+    this.requestControllers.clear();
+    this.requestVersions.clear();
     this.disposables.forEach((d) => d.dispose());
     this.disposables = [];
   }

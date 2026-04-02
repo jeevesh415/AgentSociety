@@ -1,116 +1,81 @@
 import * as React from 'react';
 import type {
   AgentProfile,
-  AgentStatus,
-  AgentDialog,
-  TimelinePoint,
   ExperimentInfo,
   InitData,
-  PlaybackState,
-  ViewState,
-  PositionPoint,
-  SocialUser,
-  SocialPost,
-  SocialComment,
-  SocialEvent,
-  SocialNetwork,
-  SocialActivityAtStep,
   LayoutMode,
-  ReplayDatasetInfo,
+  PlaybackState,
+  ReplayAgentStateAtStep,
+  ReplayAgentStateHistory,
   ReplayDatasetRows,
+  ReplayEnvStateAtStep,
+  ReplayPanelSchema,
+  ReplayPosition,
+  TimelinePoint,
 } from './types';
 
 /** Replay store state */
 export interface ReplayState {
-  // Initialization
   initialized: boolean;
   loading: boolean;
   error: string | null;
 
-  // Experiment info
   initData: InitData | null;
   experimentInfo: ExperimentInfo | null;
+  panelSchema: ReplayPanelSchema | null;
 
-  // Timeline
   timeline: TimelinePoint[];
   currentStep: number;
   playback: PlaybackState;
-
-  // Layout
   layoutMode: LayoutMode;
 
-  // Agent data
   agentProfiles: Map<number, AgentProfile>;
-  agentStatuses: Map<number, AgentStatus>; // Current step statuses
-  /** Full status history for the selected agent (all steps) */
-  agentStatusHistory: AgentStatus[];
+  positionsAtStep: ReplayPosition[];
+  agentStateRowsAtStep: Record<string, ReplayAgentStateAtStep>;
+  envStateRowsAtStep: Record<string, ReplayEnvStateAtStep>;
+
   selectedAgentId: number | null;
-  selectedAgentDialogs: AgentDialog[];
-  selectedAgentTrajectory: PositionPoint[];
-  socialProfile: SocialUser | null;
-  socialPosts: SocialPost[];
-  socialEvents: SocialEvent[];
-  socialNetwork: SocialNetwork | null;
-  /** Per-step social activity derived from social replay events. */
-  socialActivityAtStep: SocialActivityAtStep | null;
-  /** All posts up to current step (timeline); for 帖子 panel */
-  allPosts: SocialPost[];
-  /** Comments by post_id for post detail modal */
-  postCommentsMap: Record<number, SocialComment[]>;
+  selectedAgentHistoryDatasetId: string | null;
+  selectedAgentHistoryByDataset: Record<string, Record<string, any>[]>;
 
-  // Database data
-  replayDatasets: ReplayDatasetInfo[];
   replayDatasetRows: ReplayDatasetRows | null;
-
-  // Map
-  viewState: ViewState;
-
 }
 
 /** Replay store actions */
 export interface ReplayActions {
   setInitData: (data: InitData) => void;
   setExperimentInfo: (info: ExperimentInfo) => void;
+  setPanelSchema: (schema: ReplayPanelSchema) => void;
   setTimeline: (timeline: TimelinePoint[]) => void;
   setAgentProfiles: (profiles: AgentProfile[]) => void;
-  setAgentStatuses: (statuses: AgentStatus[]) => void;
-  setAgentStatusHistory: (history: AgentStatus[]) => void;
+  setStepBundle: (bundle: {
+    layout_hint: LayoutMode;
+    positions: ReplayPosition[];
+    agent_state_rows: Record<string, ReplayAgentStateAtStep>;
+    env_state_rows: Record<string, ReplayEnvStateAtStep>;
+  }) => void;
+  setSelectedAgentHistory: (history: ReplayAgentStateHistory) => void;
   setCurrentStep: (step: number) => void;
   selectAgent: (agentId: number | null) => void;
-  setSelectedAgentDialogs: (dialogs: AgentDialog[]) => void;
-  setSelectedAgentTrajectory: (trajectory: PositionPoint[]) => void;
-  setSocialProfile: (profile: SocialUser | null) => void;
-  setSocialPosts: (posts: SocialPost[]) => void;
-  setSocialEvents: (events: SocialEvent[]) => void;
-  setSocialNetwork: (network: SocialNetwork | null) => void;
-  setSocialActivityAtStep: (activity: SocialActivityAtStep | null) => void;
-  setAllPosts: (posts: SocialPost[]) => void;
-  setPostComments: (postId: number, comments: SocialComment[]) => void;
-  setReplayDatasets: (datasets: ReplayDatasetInfo[]) => void;
+  setSelectedAgentHistoryDatasetId: (datasetId: string | null) => void;
   setReplayDatasetRows: (rows: ReplayDatasetRows | null) => void;
-  setViewState: (viewState: Partial<ViewState>) => void;
   setLoading: (loading: boolean) => void;
   setError: (error: string | null) => void;
   setInitialized: (initialized: boolean) => void;
-
-  // Playback controls
   play: () => void;
   pause: () => void;
   nextStep: () => void;
   prevStep: () => void;
   setPlaybackSpeed: (speed: number) => void;
-  setLayoutMode: (mode: LayoutMode) => void;
 }
 
-/** Initial state */
 const initialState: ReplayState = {
   initialized: false,
   loading: true,
   error: null,
-
   initData: null,
   experimentInfo: null,
-
+  panelSchema: null,
   timeline: [],
   currentStep: 0,
   playback: {
@@ -118,32 +83,15 @@ const initialState: ReplayState = {
     speed: 1000,
     currentStep: 0,
   },
-
-  layoutMode: 'map', // Default to map, will be auto-detected
-
+  layoutMode: 'random',
   agentProfiles: new Map(),
-  agentStatuses: new Map(),
-  agentStatusHistory: [],
+  positionsAtStep: [],
+  agentStateRowsAtStep: {},
+  envStateRowsAtStep: {},
   selectedAgentId: null,
-  selectedAgentDialogs: [],
-  selectedAgentTrajectory: [],
-  socialProfile: null,
-  socialPosts: [],
-  socialEvents: [],
-  socialNetwork: null,
-  socialActivityAtStep: null,
-  allPosts: [],
-  postCommentsMap: {},
-  replayDatasets: [],
+  selectedAgentHistoryDatasetId: null,
+  selectedAgentHistoryByDataset: {},
   replayDatasetRows: null,
-
-  viewState: {
-    longitude: 116.4,
-    latitude: 39.9,
-    zoom: 12,
-    pitch: 0,
-    bearing: 0,
-  },
 };
 
 /** Combined context type */
@@ -153,10 +101,8 @@ export interface ReplayContextType {
   sendMessage: (message: any) => void;
 }
 
-/** Create context */
 const ReplayContext = React.createContext<ReplayContextType | null>(null);
 
-/** Provider component */
 export interface ReplayProviderProps {
   children: React.ReactNode;
   vscode: any;
@@ -166,74 +112,79 @@ export const ReplayProvider: React.FC<ReplayProviderProps> = ({ children, vscode
   const [state, setState] = React.useState<ReplayState>(initialState);
   const playbackTimerRef = React.useRef<NodeJS.Timeout | null>(null);
 
-  // Create actions
   const actions: ReplayActions = React.useMemo(() => ({
     setInitData: (data) => setState((s) => ({ ...s, initData: data })),
 
     setExperimentInfo: (info) => setState((s) => ({ ...s, experimentInfo: info })),
 
+    setPanelSchema: (schema) =>
+      setState((s) => ({
+        ...s,
+        panelSchema: schema,
+        layoutMode: schema.layout_hint ?? s.layoutMode,
+        selectedAgentHistoryDatasetId:
+          s.selectedAgentHistoryDatasetId ?? schema.primary_agent_state_dataset_id ?? null,
+      })),
+
     setTimeline: (timeline) => setState((s) => ({ ...s, timeline })),
 
     setAgentProfiles: (profiles) => {
       const map = new Map<number, AgentProfile>();
-      profiles.forEach((p) => map.set(p.id, p));
+      profiles.forEach((profile) => map.set(profile.id, profile));
       setState((s) => ({ ...s, agentProfiles: map }));
     },
 
-    setAgentStatuses: (statuses) => {
-      const map = new Map<number, AgentStatus>();
-      statuses.forEach((status) => map.set(status.id, status));
-      setState((s) => ({ ...s, agentStatuses: map }));
-    },
+    setStepBundle: (bundle) =>
+      setState((s) => ({
+        ...s,
+        layoutMode: bundle.layout_hint ?? s.layoutMode,
+        positionsAtStep: bundle.positions ?? [],
+        agentStateRowsAtStep: bundle.agent_state_rows ?? {},
+        envStateRowsAtStep: bundle.env_state_rows ?? {},
+      })),
 
-    setAgentStatusHistory: (history: AgentStatus[]) => setState((s) => ({ ...s, agentStatusHistory: history })),
+    setSelectedAgentHistory: (history) =>
+      setState((s) => {
+        if (history.dataset_id) {
+          return {
+            ...s,
+            selectedAgentHistoryByDataset: {
+              ...s.selectedAgentHistoryByDataset,
+              [history.dataset_id]: history.rows ?? [],
+            },
+          };
+        }
+        return {
+          ...s,
+          selectedAgentHistoryByDataset: history.history_by_dataset ?? {},
+        };
+      }),
 
-    setCurrentStep: (step) => {
+    setCurrentStep: (step) =>
       setState((s) => ({
         ...s,
         currentStep: step,
         playback: { ...s.playback, currentStep: step },
-      }));
-    },
+      })),
 
-    selectAgent: (agentId) => {
+    selectAgent: (agentId) =>
       setState((s) => ({
         ...s,
         selectedAgentId: agentId,
-        agentStatusHistory: [], // cleared on selection change; filled when fetchAgentStatusHistory returns
-        selectedAgentDialogs: [],
-        selectedAgentTrajectory: [],
-        socialProfile: null,
-        socialPosts: [],
-        socialEvents: [],
-      }));
-    },
+        selectedAgentHistoryDatasetId:
+          agentId === null
+            ? s.selectedAgentHistoryDatasetId
+            : s.panelSchema?.primary_agent_state_dataset_id ?? s.selectedAgentHistoryDatasetId,
+        selectedAgentHistoryByDataset: {},
+      })),
 
-    setSelectedAgentDialogs: (dialogs) => setState((s) => ({ ...s, selectedAgentDialogs: dialogs })),
-
-    setSelectedAgentTrajectory: (trajectory) => setState((s) => ({ ...s, selectedAgentTrajectory: trajectory })),
-
-    setSocialProfile: (profile) => setState((s) => ({ ...s, socialProfile: profile })),
-
-    setSocialPosts: (posts) => setState((s) => ({ ...s, socialPosts: posts })),
-
-    setSocialEvents: (events) => setState((s) => ({ ...s, socialEvents: events })),
-
-    setSocialNetwork: (network) => setState((s) => ({ ...s, socialNetwork: network })),
-
-    setSocialActivityAtStep: (activity) => setState((s) => ({ ...s, socialActivityAtStep: activity })),
-
-    setAllPosts: (posts: SocialPost[]) => setState((s) => ({ ...s, allPosts: posts })),
-
-    setPostComments: (postId: number, comments: SocialComment[]) =>
-      setState((s) => ({ ...s, postCommentsMap: { ...s.postCommentsMap, [postId]: comments } })),
-
-    setReplayDatasets: (datasets) => setState((s) => ({ ...s, replayDatasets: datasets })),
+    setSelectedAgentHistoryDatasetId: (datasetId) =>
+      setState((s) => ({
+        ...s,
+        selectedAgentHistoryDatasetId: datasetId,
+      })),
 
     setReplayDatasetRows: (rows) => setState((s) => ({ ...s, replayDatasetRows: rows })),
-
-    setViewState: (viewState) =>
-      setState((s) => ({ ...s, viewState: { ...s.viewState, ...viewState } })),
 
     setLoading: (loading) => setState((s) => ({ ...s, loading })),
 
@@ -277,26 +228,19 @@ export const ReplayProvider: React.FC<ReplayProviderProps> = ({ children, vscode
       });
     },
 
-    setPlaybackSpeed: (speed) => {
+    setPlaybackSpeed: (speed) =>
       setState((s) => ({
         ...s,
         playback: { ...s.playback, speed },
-      }));
-    },
-
-    setLayoutMode: (mode) => {
-      setState((s) => ({ ...s, layoutMode: mode }));
-    },
+      })),
   }), []);
 
-  // Handle playback timer
   React.useEffect(() => {
     if (state.playback.isPlaying) {
       playbackTimerRef.current = setInterval(() => {
         setState((s) => {
           const nextIdx = s.currentStep + 1;
           if (nextIdx >= s.timeline.length) {
-            // Stop at the end
             return {
               ...s,
               playback: { ...s.playback, isPlaying: false },
@@ -309,11 +253,9 @@ export const ReplayProvider: React.FC<ReplayProviderProps> = ({ children, vscode
           };
         });
       }, state.playback.speed);
-    } else {
-      if (playbackTimerRef.current) {
-        clearInterval(playbackTimerRef.current);
-        playbackTimerRef.current = null;
-      }
+    } else if (playbackTimerRef.current) {
+      clearInterval(playbackTimerRef.current);
+      playbackTimerRef.current = null;
     }
 
     return () => {
@@ -327,7 +269,10 @@ export const ReplayProvider: React.FC<ReplayProviderProps> = ({ children, vscode
     vscode.postMessage(message);
   }, [vscode]);
 
-  const contextValue = React.useMemo(() => ({ state, actions, sendMessage }), [state, actions, sendMessage]);
+  const contextValue = React.useMemo(
+    () => ({ state, actions, sendMessage }),
+    [state, actions, sendMessage]
+  );
 
   return (
     <ReplayContext.Provider value={contextValue}>
@@ -336,7 +281,6 @@ export const ReplayProvider: React.FC<ReplayProviderProps> = ({ children, vscode
   );
 };
 
-/** Hook to use replay context */
 export const useReplay = (): ReplayContextType => {
   const context = React.useContext(ReplayContext);
   if (!context) {
