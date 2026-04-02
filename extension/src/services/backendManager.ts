@@ -21,6 +21,7 @@ import { spawn, ChildProcess, execSync } from 'child_process';
 import { localize } from '../i18n';
 import { EnvManager } from '../envManager';
 import { findAvailablePort, isPortAvailable } from '../portUtils';
+import { getBackendAccessUrl, getBackendBindHost, getBackendPort } from '../runtimeConfig';
 
 export interface BackendStatus {
   isRunning: boolean;
@@ -116,9 +117,8 @@ export class BackendManager {
             // 进程存在，尝试进行健康检查
             const envManager = new EnvManager();
             const envConfig = envManager.readEnv();
-            const host = envConfig.backendHost || '127.0.0.1';
-            const port = envConfig.backendPort || 8001;
-            const backendUrl = `http://${host}:${port}`;
+            const port = getBackendPort(envConfig);
+            const backendUrl = getBackendAccessUrl(envConfig);
 
             try {
               const response = await fetch(`${backendUrl}/health`, {
@@ -204,8 +204,8 @@ export class BackendManager {
     const env: Record<string, string> = {};
 
     // 后端服务配置
-    env.BACKEND_HOST = envConfig.backendHost || '127.0.0.1';
-    env.BACKEND_PORT = String(envConfig.backendPort ?? 8001);
+    env.BACKEND_HOST = getBackendBindHost(envConfig);
+    env.BACKEND_PORT = String(getBackendPort(envConfig));
     env.BACKEND_LOG_LEVEL = envConfig.backendLogLevel || 'info';
     env.PYTHON_PATH = envConfig.pythonPath || '';
 
@@ -330,9 +330,7 @@ export class BackendManager {
   async healthCheck(): Promise<boolean> {
     const envManager = new EnvManager();
     const envConfig = envManager.readEnv();
-    const host = envConfig.backendHost || '127.0.0.1';
-    const port = envConfig.backendPort || 8001;
-    const backendUrl = `http://${host}:${port}`;
+    const backendUrl = getBackendAccessUrl(envConfig);
 
     try {
       const response = await fetch(`${backendUrl}/health`, {
@@ -650,7 +648,7 @@ export class BackendManager {
   private async allocatePort(): Promise<number> {
     const envManager = new EnvManager();
     const envConfig = envManager.readEnv();
-    const configuredPort = envConfig.backendPort || 8001;
+    const configuredPort = getBackendPort(envConfig);
 
     // 首先检查配置的端口是否可用
     if (await isPortAvailable(configuredPort)) {
@@ -812,7 +810,7 @@ export class BackendManager {
   private async getPortFromEnv(): Promise<number> {
     const envManager = new EnvManager();
     const envConfig = envManager.readEnv();
-    return envConfig.backendPort || 8001;
+    return getBackendPort(envConfig);
   }
 
   /**

@@ -118,6 +118,16 @@ const ReplayAppInner: React.FC<ReplayAppProps> = ({ vscode }) => {
     });
   }, [initialized, selectedAgentId, selectedAgentHistoryDatasetId, vscode]);
 
+  if (error) {
+    return (
+      <div className="loading-container">
+        <div style={{ fontSize: '48px' }}>⚠️</div>
+        <div style={{ color: 'var(--vscode-errorForeground)' }}>{t('replay.errorTitle')}</div>
+        <div style={{ fontSize: '12px', maxWidth: '400px', textAlign: 'center' }}>{error}</div>
+      </div>
+    );
+  }
+
   if (loading || !initialized) {
     return (
       <div className="loading-container">
@@ -128,16 +138,6 @@ const ReplayAppInner: React.FC<ReplayAppProps> = ({ vscode }) => {
             {t('replay.loadingExperiment', { id: initData.experimentId })}
           </div>
         )}
-      </div>
-    );
-  }
-
-  if (error) {
-    return (
-      <div className="loading-container">
-        <div style={{ fontSize: '48px' }}>⚠️</div>
-        <div style={{ color: 'var(--vscode-errorForeground)' }}>{t('replay.errorTitle')}</div>
-        <div style={{ fontSize: '12px', maxWidth: '400px', textAlign: 'center' }}>{error}</div>
       </div>
     );
   }

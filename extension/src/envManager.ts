@@ -112,7 +112,7 @@ const ENV_KEY_MAP: Record<keyof EnvConfig, string> = {
 /**
  * Default values for configuration
  */
-const DEFAULT_VALUES: Partial<EnvConfig> = {
+export const DEFAULT_ENV_CONFIG: Partial<EnvConfig> = {
   llmApiBase: 'https://cloud.infini-ai.com/maas/v1',
   llmModel: 'qwen3-next-80b-a3b-instruct',
   backendHost: '127.0.0.1',
@@ -171,10 +171,10 @@ export class EnvManager {
   readEnv(): EnvConfig {
     const envPath = this.getEnvPath();
     if (!envPath || !fs.existsSync(envPath)) {
-      return { ...DEFAULT_VALUES };
+      return { ...DEFAULT_ENV_CONFIG };
     }
 
-    const config: EnvConfig = { ...DEFAULT_VALUES };
+    const config: EnvConfig = { ...DEFAULT_ENV_CONFIG };
     const content = fs.readFileSync(envPath, 'utf-8');
     const lines = content.split('\n');
 

@@ -14,6 +14,7 @@
 
 import * as vscode from 'vscode';
 import * as path from 'path';
+import { getBackendAccessUrl } from './runtimeConfig';
 import type {
   AgentProfile,
   ExperimentInfo,
@@ -31,7 +32,6 @@ import type {
 export class ReplayWebviewProvider {
   private readonly panel: vscode.WebviewPanel;
   private readonly extensionUri: vscode.Uri;
-  private readonly backendUrl: string;
   private readonly workspacePath: string;
   private readonly hypothesisId: string;
   private readonly experimentId: string;
@@ -81,10 +81,6 @@ export class ReplayWebviewProvider {
     this.hypothesisId = hypothesisId;
     this.experimentId = experimentId;
 
-    // Get backend URL from configuration
-    const config = vscode.workspace.getConfiguration('aiSocialScientist');
-    this.backendUrl = config.get('backendUrl', 'http://localhost:8001');
-
     // Set webview content
     this.panel.webview.html = this.getHtmlForWebview();
 
@@ -96,6 +92,10 @@ export class ReplayWebviewProvider {
       null,
       this.disposables
     );
+  }
+
+  private get backendUrl(): string {
+    return getBackendAccessUrl();
   }
 
   /**
@@ -670,7 +670,7 @@ export class ReplayWebviewProvider {
       `img-src ${this.panel.webview.cspSource} https://*.mapbox.com https://*.tiles.mapbox.com data: blob:`,
       `style-src ${this.panel.webview.cspSource} 'unsafe-inline' https://api.mapbox.com`,
       `script-src ${this.panel.webview.cspSource}`,
-      `connect-src ${this.panel.webview.cspSource} https://*.mapbox.com https://*.tiles.mapbox.com ${this.backendUrl} data: blob:`,
+      `connect-src ${this.panel.webview.cspSource} https://*.mapbox.com https://*.tiles.mapbox.com http://127.0.0.1:* http://localhost:* ${this.backendUrl} data: blob:`,
       `worker-src ${this.panel.webview.cspSource} blob:`,
       `font-src ${this.panel.webview.cspSource} https://api.mapbox.com https://*.mapbox.com data:`,
     ].join('; ');
