@@ -91,7 +91,7 @@ class AgentSociety:
         :param run_dir: 可选。运行目录（用于落地回放 sqlite 等）。
         :param enable_replay: 是否启用回放记录。
         :param replay_writer: 可选。外部传入的回放写入器；若提供则不会在 :meth:`init` 内部创建。
-            调用方需自行把 writer 注入到 agents / env_router（或后续调用 ``set_replay_writer``）。
+            该写入器仅用于环境模块回放。
         """
         self._env_router = env_router
         self._agents = agents
@@ -119,29 +119,22 @@ class AgentSociety:
         return self._step_count
 
     async def init(self):
-        # Replay writer: use provided one or create it before env/agent init so
+        # Replay writer: use provided one or create it before env init so
         # modules that register replay tables during init see a ready writer.
         if self._replay_writer is None and self._enable_replay and self._run_dir is not None:
             db_path = self._run_dir / "sqlite.db"
             self._replay_writer = ReplayWriter(db_path)
             await self._replay_writer.init()
 
+        for agent in self._agents:
+            self._setup_agent_position_callback(agent)
+
         if self._replay_writer is not None:
-            for agent in self._agents:
-                agent.set_replay_writer(self._replay_writer)
-                self._setup_agent_position_callback(agent)
             self._env_router.set_replay_writer(self._replay_writer)
 
         await self._env_router.init(self._t)
         for agent in self._agents:
             await agent.init(env=self._env_router)
-
-        if self._replay_writer is not None:
-            profiles = [
-                (agent.id, agent.name, agent.get_profile())
-                for agent in self._agents
-            ]
-            await self._replay_writer.write_agent_profiles_batch(profiles)
 
     def _setup_agent_position_callback(self, agent: AgentBase) -> None:
         """为 agent 注入“从环境查询位置”的回调。"""

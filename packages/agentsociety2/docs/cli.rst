@@ -267,4 +267,4 @@ AgentSociety 2 自动禁用所有遥测服务以防止外部连接：
    tail -f my_experiment/run/output.log
 
    # 5. 完成后分析结果
-   sqlite3 my_experiment/run/sqlite.db "SELECT * FROM agent_status LIMIT 10;"
+   sqlite3 my_experiment/run/sqlite.db "SELECT dataset_id, table_name FROM replay_dataset_catalog;"

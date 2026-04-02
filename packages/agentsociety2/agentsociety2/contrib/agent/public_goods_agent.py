@@ -55,7 +55,6 @@ This agent participates in a multi-round Public Goods Game. Each round, players 
         num_agents: int = 4,
         initial_endowment: int = 20,
         public_pool_multiplier: float = 1.6,
-        replay_writer=None,
     ):
         """Initialize PublicGoodsAgent
         
@@ -66,10 +65,9 @@ This agent participates in a multi-round Public Goods Game. Each round, players 
             num_agents: Number of agents in the game (default: 4)
             initial_endowment: Initial coins per agent per round (default: 20)
             public_pool_multiplier: Multiplier for public pool contributions (default: 1.6)
-            replay_writer: Optional replay writer injected by CLI
         """
         profile = {"name": name}
-        super().__init__(id=id, profile=profile, replay_writer=replay_writer)
+        super().__init__(id=id, profile=profile)
         self._name = name
         self.history = []  # Store history records
         self.num_rounds = num_rounds

@@ -40,16 +40,15 @@ This agent participates in a 10-round Tragedy of the Commons game where multiple
 """
         return description
 
-    def __init__(self, id: int, name: str, replay_writer=None):
+    def __init__(self, id: int, name: str):
         """Initialize CommonsTragedyAgent
         
         Args:
             id: Agent ID
             name: Agent name
-            replay_writer: Optional replay writer injected by CLI
         """
         profile = {"name": name}
-        super().__init__(id=id, profile=profile, replay_writer=replay_writer)
+        super().__init__(id=id, profile=profile)
         self._name = name
         self.history = []  # Store history records
         self.max_extraction = 10  # Maximum extraction amount

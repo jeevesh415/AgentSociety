@@ -62,7 +62,6 @@ Players aim to maximize cumulative coins while balancing personal gain and colle
         num_agents: int = 4,
         benefit_b: int = 100,
         cost_c: int = 40,
-        replay_writer=None,
     ):
         """Initialize VolunteerDilemmaAgent
         
@@ -73,10 +72,9 @@ Players aim to maximize cumulative coins while balancing personal gain and colle
             num_agents: Number of agents in the game (default: 4)
             benefit_b: Benefit for everyone if someone volunteers (default: 100)
             cost_c: Cost for a volunteer (default: 40)
-            replay_writer: Optional replay writer injected by CLI
         """
         profile = {"name": name}
-        super().__init__(id=id, profile=profile, replay_writer=replay_writer)
+        super().__init__(id=id, profile=profile)
         self._name = name
         self.history = []  # Store history records
         self.decision_options = ["Volunteer", "Stand by"]  # Possible choices

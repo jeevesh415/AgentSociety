@@ -35,15 +35,15 @@ PersonAgent
      :header-rows: 1
 
      * - 阶段
-         - 说明
+       - 说明
      * - 注入上下文
-         - system prompt 注入身份信息、技能目录、工具表。
+       - system prompt 注入身份信息、技能目录、工具表。
      * - 激活技能
-         - 需要某个技能时，先用 `activate_skill` 加载该技能完整说明（通常来自 ``SKILL.md``）。
+       - 需要某个技能时，先用 ``activate_skill`` 加载该技能完整说明（通常来自 ``SKILL.md``）。
      * - 执行技能/工具
-         - 用 `execute_skill` 执行技能，或直接调用 `bash`/`grep`/`glob`/`codegen` 等工具。
+       - 用 ``execute_skill`` 执行技能，或直接调用 ``bash`` / ``grep`` / ``glob`` / ``codegen`` 等工具。
      * - 结束条件
-         - 当主模型输出 `done=true` 时结束本 step。
+       - 当主模型输出 ``done=true`` 时结束本 step。
 
 常见内置技能包括 ``observation``、``needs``、``cognition``、``plan``、``memory``。
 它们都不再属于固定“必须执行层”，而是由 LLM 按上下文按需选择。
@@ -202,17 +202,21 @@ step() 方法
    # tick = duration in seconds, t = current simulation time
    action_description = await agent.step(tick=3600, t=datetime.now())
 
-回放跟踪
+持久化
 ~~~~~~~~~~~~~~~
 
-.. code-block:: python
+``PersonAgent`` 当前的持久化分成两层：
 
-   from agentsociety2.storage import ReplayWriter
+1. **Agent workspace 文件**：由 ``PersonAgent`` 自身维护，位于 ``run/agents/agent_xxxx/``。
+2. **环境 replay dataset**：由环境模块通过 ``ReplayWriter`` 写入 SQLite。
 
-   writer = ReplayWriter("experiment.db")
-   await writer.initialize()
+也就是说，``PersonAgent`` 不会把自己的 step 状态直接写入 ``agent_status`` 之类的
+SQLite 表；如果你需要检查 agent 过程数据，应优先查看：
 
-   agent = PersonAgent(id=1, profile=..., replay_writer=writer)
+* ``agent_config.json``
+* ``session_state.json``
+* ``tool_calls.jsonl``
+* ``thread_messages.jsonl``
 
 智能体记忆
 ------------

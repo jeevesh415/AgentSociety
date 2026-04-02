@@ -34,7 +34,6 @@ from agentsociety2.env import (
     merge_person_step_constraints,
 )
 from agentsociety2.logger import get_logger
-from agentsociety2.storage import ReplayWriter
 
 logger = get_logger()
 
@@ -121,7 +120,6 @@ class PersonAgent(AgentBase):
         id: int,
         profile: Any,
         name: Optional[str] = None,
-        replay_writer: Optional[ReplayWriter] = None,
         init_state: Optional[dict[str, Any]] = None,
         **capability_kwargs: Any,
     ):
@@ -130,7 +128,6 @@ class PersonAgent(AgentBase):
         :param id: Agent 唯一标识。
         :param profile: 画像对象（dict 或可序列化对象）。
         :param name: 可选显示名。
-        :param replay_writer: 可选回放写入器。
         :param init_state: 可选初始状态（会写入 workspace，默认不覆盖已存在文件）。
         :param capability_kwargs: 行为/能力参数（节选）：
 
@@ -140,7 +137,7 @@ class PersonAgent(AgentBase):
             - ``catalog_working_set_json``：用于 skill 的 ``paths`` 匹配信号文件（如 ``working_set.json``）
             - ``system_prompt_max_identity_chars``：Agent Identity JSON 总长度上限（默认 10000）
         """
-        super().__init__(id=id, profile=profile, name=name, replay_writer=replay_writer)
+        super().__init__(id=id, profile=profile, name=name)
         self._agent_state: dict[str, Any] = self._coerce_llm_dict(init_state)
         self._capability_kwargs: dict[str, Any] = dict(capability_kwargs)
 

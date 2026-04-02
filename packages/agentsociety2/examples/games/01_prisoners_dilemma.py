@@ -6,8 +6,8 @@ using AgentSociety to coordinate agents and environment.
 """
 
 import asyncio
-import re
 from datetime import datetime
+from pathlib import Path
 from agentsociety2 import PersonAgent
 from agentsociety2.env import CodeGenRouter
 from agentsociety2.contrib.env import PrisonersDilemma
@@ -17,8 +17,8 @@ from agentsociety2.society import AgentSociety
 
 async def main():
     # Setup replay writer
-    writer = ReplayWriter("prisoners_dilemma.db")
-    await writer.initialize()
+    writer = ReplayWriter(Path("prisoners_dilemma.db"))
+    await writer.init()
 
     print("=== Prisoner's Dilemma ===\n")
     print("Two agents are arrested and held in separate rooms.")
@@ -40,7 +40,6 @@ async def main():
             "personality": "strategic and rational",
             "strategy": "will analyze the situation carefully",
         },
-        replay_writer=writer
     )
 
     bob = PersonAgent(
@@ -50,7 +49,6 @@ async def main():
             "personality": "trusting but cautious",
             "strategy": "prefers cooperation but wary of betrayal",
         },
-        replay_writer=writer
     )
 
     # Create the society

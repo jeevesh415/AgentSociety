@@ -42,16 +42,15 @@ This agent participates in a 10-round Prisoner's Dilemma game where two players 
 """
         return description
 
-    def __init__(self, id: int, name: str, replay_writer=None):
+    def __init__(self, id: int, name: str):
         """Initialize PrisonersDilemmaAgent
         
         Args:
             id: Agent ID
             name: Agent name
-            replay_writer: Optional replay writer injected by CLI
         """
         profile = {"name": name}
-        super().__init__(id=id, profile=profile, replay_writer=replay_writer)
+        super().__init__(id=id, profile=profile)
         self._name = name
         self.history = []  # Store history records
 

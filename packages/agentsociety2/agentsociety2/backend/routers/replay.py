@@ -15,7 +15,7 @@ from typing import Any, Dict, List, Optional
 
 from fastapi import APIRouter, HTTPException, Query
 from pydantic import BaseModel, Field
-from sqlalchemy import Table, inspect as sa_inspect
+from sqlalchemy import inspect as sa_inspect
 from sqlalchemy.ext.asyncio import AsyncSession, create_async_engine
 from sqlalchemy.orm import sessionmaker
 from sqlmodel import desc, func, select
@@ -227,6 +227,17 @@ def _build_agent_status_response(
     )
 
 
+def _coerce_datetime(value: Any) -> Optional[datetime]:
+    if isinstance(value, datetime):
+        return value
+    if isinstance(value, str):
+        try:
+            return datetime.fromisoformat(value)
+        except ValueError:
+            return None
+    return None
+
+
 def _dataset_has_columns(dataset: Dict[str, Any], *column_names: str) -> bool:
     available = {column["column_name"] for column in dataset.get("columns", [])}
     return all(column_name in available for column_name in column_names)
@@ -258,6 +269,26 @@ async def _get_geo_dataset(session: AsyncSession) -> Optional[Dict[str, Any]]:
         and _dataset_has_columns(dataset, "lng", "lat")
     ]
     candidates.sort(key=lambda item: item["dataset_id"])
+    return candidates[0] if candidates else None
+
+
+async def _get_agent_status_dataset(session: AsyncSession) -> Optional[Dict[str, Any]]:
+    datasets = await load_dataset_catalog(session)
+    candidates = [
+        dataset
+        for dataset in datasets
+        if "agent_snapshot" in dataset.get("capabilities", [])
+        and dataset.get("kind") == "entity_snapshot"
+        and dataset.get("entity_key")
+        and dataset.get("step_key")
+        and dataset.get("time_key")
+    ]
+    candidates.sort(
+        key=lambda item: (
+            0 if "geo_point" in item.get("capabilities", []) else 1,
+            item["dataset_id"],
+        )
+    )
     return candidates[0] if candidates else None
 
 
@@ -339,8 +370,31 @@ async def _load_social_events(
 
 
 async def _load_agent_profiles(session: AsyncSession) -> Dict[int, AgentProfile]:
-    result = await session.execute(select(AgentProfile))
-    return {profile.id: profile for profile in result.scalars().all()}
+    if await _table_exists(session, AgentProfile.__tablename__):
+        result = await session.execute(select(AgentProfile))
+        return {profile.id: profile for profile in result.scalars().all()}
+
+    dataset = await _get_agent_status_dataset(session)
+    if dataset is None:
+        return {}
+
+    table = await reflect_dataset_table(session, dataset)
+    entity_key = dataset["entity_key"]
+    if entity_key not in table.c:
+        return {}
+
+    result = await session.execute(
+        select(table.c[entity_key]).distinct().order_by(table.c[entity_key])
+    )
+    return {
+        int(agent_id): AgentProfile(
+            id=int(agent_id),
+            name=f"Agent_{int(agent_id)}",
+            profile={},
+        )
+        for (agent_id,) in result.all()
+        if agent_id is not None
+    }
 
 
 def _display_name(profile: Optional[AgentProfile], user_id: int) -> str:
@@ -357,6 +411,106 @@ def _extract_bio(profile: Optional[AgentProfile]) -> Optional[str]:
         if isinstance(value, str) and value.strip():
             return value
     return None
+
+
+async def _get_agent_dataset_summary(
+    session: AsyncSession,
+) -> tuple[int, Optional[datetime], Optional[datetime], int]:
+    dataset = await _get_agent_status_dataset(session)
+    if dataset is None:
+        return 0, None, None, 0
+
+    table = await reflect_dataset_table(session, dataset)
+    entity_key = dataset["entity_key"]
+    step_key = dataset["step_key"]
+    time_key = dataset["time_key"]
+    if any(key not in table.c for key in (entity_key, step_key, time_key)):
+        return 0, None, None, 0
+
+    total_steps = (
+        await session.execute(select(func.count(func.distinct(table.c[step_key]))))
+    ).scalar() or 0
+    start_time = (
+        await session.execute(select(func.min(table.c[time_key])))
+    ).scalar()
+    end_time = (
+        await session.execute(select(func.max(table.c[time_key])))
+    ).scalar()
+    agent_count = (
+        await session.execute(select(func.count(func.distinct(table.c[entity_key]))))
+    ).scalar() or 0
+    return (
+        int(total_steps),
+        _coerce_datetime(start_time),
+        _coerce_datetime(end_time),
+        int(agent_count),
+    )
+
+
+def _mapping_to_agent_status_response(
+    row: Dict[str, Any],
+    dataset: Dict[str, Any],
+) -> Optional[AgentStatusResponse]:
+    payload = dict(row)
+    entity_key = dataset["entity_key"]
+    step_key = dataset["step_key"]
+    time_key = dataset["time_key"]
+
+    timestamp = _coerce_datetime(payload.pop(time_key, None))
+    if timestamp is None:
+        return None
+
+    agent_id = payload.pop(entity_key, None)
+    step = payload.pop(step_key, None)
+    if agent_id is None or step is None:
+        return None
+
+    lng = payload.pop("lng", None)
+    lat = payload.pop("lat", None)
+    action = payload.pop("action", None)
+    payload.pop("created_at", None)
+
+    return AgentStatusResponse(
+        id=int(agent_id),
+        step=int(step),
+        t=timestamp,
+        lng=lng,
+        lat=lat,
+        action=action,
+        status=payload,
+    )
+
+
+async def _load_agent_status_from_dataset(
+    session: AsyncSession,
+    *,
+    step: Optional[int] = None,
+    agent_id: Optional[int] = None,
+) -> List[AgentStatusResponse]:
+    dataset = await _get_agent_status_dataset(session)
+    if dataset is None:
+        return []
+
+    table = await reflect_dataset_table(session, dataset)
+    entity_key = dataset["entity_key"]
+    step_key = dataset["step_key"]
+    if entity_key not in table.c or step_key not in table.c:
+        return []
+
+    query = select(table)
+    if step is not None:
+        query = query.where(table.c[step_key] == step)
+    if agent_id is not None:
+        query = query.where(table.c[entity_key] == agent_id)
+    query = query.order_by(table.c[step_key], table.c[entity_key])
+
+    result = await session.execute(query)
+    responses: List[AgentStatusResponse] = []
+    for row in result.mappings().all():
+        response = _mapping_to_agent_status_response(dict(row), dataset)
+        if response is not None:
+            responses.append(response)
+    return responses
 
 
 def _build_post_author_map(events: List[Dict[str, Any]]) -> Dict[int, int]:
@@ -380,12 +534,27 @@ async def get_experiment_info(
     db_path = get_db_path(workspace_path, hypothesis_id, experiment_id)
 
     async for session in get_db_session(db_path):
-        total_steps = (
-            await session.execute(select(func.count(func.distinct(AgentStatus.step))))
-        ).scalar() or 0
-        start_time = (await session.execute(select(func.min(AgentStatus.t)))).scalar()
-        end_time = (await session.execute(select(func.max(AgentStatus.t)))).scalar()
-        agent_count = (await session.execute(select(func.count(AgentProfile.id)))).scalar() or 0
+        if await _table_exists(session, AgentStatus.__tablename__):
+            total_steps = (
+                await session.execute(select(func.count(func.distinct(AgentStatus.step))))
+            ).scalar() or 0
+            start_time = (
+                await session.execute(select(func.min(AgentStatus.t)))
+            ).scalar()
+            end_time = (
+                await session.execute(select(func.max(AgentStatus.t)))
+            ).scalar()
+        else:
+            total_steps, start_time, end_time, _ = await _get_agent_dataset_summary(
+                session
+            )
+
+        if await _table_exists(session, AgentProfile.__tablename__):
+            agent_count = (
+                await session.execute(select(func.count(AgentProfile.id)))
+            ).scalar() or 0
+        else:
+            _, _, _, agent_count = await _get_agent_dataset_summary(session)
 
         datasets = await load_dataset_catalog(session)
         has_social = any(
@@ -478,10 +647,36 @@ async def get_timeline(
     db_path = get_db_path(workspace_path, hypothesis_id, experiment_id)
 
     async for session in get_db_session(db_path):
+        if await _table_exists(session, AgentStatus.__tablename__):
+            result = await session.execute(
+                select(AgentStatus.step, AgentStatus.t)
+                .distinct()
+                .order_by(AgentStatus.step)
+            )
+            return [TimelinePoint(step=row[0], t=row[1]) for row in result.all()]
+
+        dataset = await _get_agent_status_dataset(session)
+        if dataset is None:
+            return []
+
+        table = await reflect_dataset_table(session, dataset)
+        step_key = dataset["step_key"]
+        time_key = dataset["time_key"]
+        if step_key not in table.c or time_key not in table.c:
+            return []
+
         result = await session.execute(
-            select(AgentStatus.step, AgentStatus.t).distinct().order_by(AgentStatus.step)
+            select(table.c[step_key], table.c[time_key])
+            .distinct()
+            .order_by(table.c[step_key])
         )
-        return [TimelinePoint(step=row[0], t=row[1]) for row in result.all()]
+        timeline: List[TimelinePoint] = []
+        for step_value, time_value in result.all():
+            timestamp = _coerce_datetime(time_value)
+            if timestamp is None:
+                continue
+            timeline.append(TimelinePoint(step=int(step_value), t=timestamp))
+        return timeline
 
 
 @router.get(
@@ -496,8 +691,8 @@ async def get_agent_profiles(
     db_path = get_db_path(workspace_path, hypothesis_id, experiment_id)
 
     async for session in get_db_session(db_path):
-        result = await session.execute(select(AgentProfile))
-        return result.scalars().all()
+        profiles = await _load_agent_profiles(session)
+        return list(profiles.values())
 
 
 @router.get(
@@ -513,6 +708,22 @@ async def get_agents_status_at_step(
     db_path = get_db_path(workspace_path, hypothesis_id, experiment_id)
 
     async for session in get_db_session(db_path):
+        if not await _table_exists(session, AgentStatus.__tablename__):
+            if step is None:
+                dataset = await _get_agent_status_dataset(session)
+                if dataset is None:
+                    return []
+                table = await reflect_dataset_table(session, dataset)
+                step_key = dataset["step_key"]
+                if step_key not in table.c:
+                    return []
+                step = (
+                    await session.execute(select(func.max(table.c[step_key])))
+                ).scalar()
+                if step is None:
+                    return []
+            return await _load_agent_status_from_dataset(session, step=int(step))
+
         if step is None:
             step = (await session.execute(select(func.max(AgentStatus.step)))).scalar()
             if step is None:
@@ -568,6 +779,9 @@ async def get_agent_status_history(
     db_path = get_db_path(workspace_path, hypothesis_id, experiment_id)
 
     async for session in get_db_session(db_path):
+        if not await _table_exists(session, AgentStatus.__tablename__):
+            return await _load_agent_status_from_dataset(session, agent_id=agent_id)
+
         geo_dataset = await _get_geo_dataset(session)
         if geo_dataset is None:
             result = await session.execute(

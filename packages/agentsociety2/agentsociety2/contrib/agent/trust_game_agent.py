@@ -62,7 +62,6 @@ Both roles aim to maximize cumulative coins while considering trust and reciproc
         initial_funds: int = 10,
         multiplication_factor: int = 3,
         partner_name: str = "",
-        replay_writer=None,
     ):
         """Initialize TrustGameAgent
         
@@ -74,10 +73,9 @@ Both roles aim to maximize cumulative coins while considering trust and reciproc
             initial_funds: Initial coins per Trustor per round (default: 10)
             multiplication_factor: Investment multiplication factor (default: 3)
             partner_name: Partner's name (will be set by environment)
-            replay_writer: Optional replay writer injected by CLI
         """
         profile = {"name": name}
-        super().__init__(id=id, profile=profile, replay_writer=replay_writer)
+        super().__init__(id=id, profile=profile)
         self._name = name
         self._role = role  # Role: "Trustor" or "Trustee"
         self.history = []  # Store history records

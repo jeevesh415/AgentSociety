@@ -10,6 +10,7 @@ This example uses AgentSociety to coordinate multiple agents.
 import asyncio
 import re
 from datetime import datetime
+from pathlib import Path
 from agentsociety2 import PersonAgent
 from agentsociety2.env import CodeGenRouter
 from agentsociety2.contrib.env import PublicGoodsGame
@@ -18,8 +19,8 @@ from agentsociety2.society import AgentSociety
 
 
 async def main():
-    writer = ReplayWriter("public_goods.db")
-    await writer.initialize()
+    writer = ReplayWriter(Path("public_goods.db"))
+    await writer.init()
 
     print("=== Public Goods Game ===\n")
     print("Each agent has an endowment they can contribute to a public good.")
@@ -41,7 +42,7 @@ async def main():
     ]
 
     for i, profile in enumerate(profiles, 1):
-        agent = PersonAgent(id=i, profile=profile, replay_writer=writer)
+        agent = PersonAgent(id=i, profile=profile)
         agents.append(agent)
 
     # Create the society
@@ -84,7 +85,7 @@ async def main():
         multiplied = int(total * game.contribution_factor)
         each_return = multiplied // len(agents)
 
-        print(f"Round Results:")
+        print("Round Results:")
         print(f"  Total contributions: ${total}")
         print(f"  After multiplier (${game.contribution_factor}x): ${multiplied}")
         print(f"  Each player receives: ${each_return}\n")

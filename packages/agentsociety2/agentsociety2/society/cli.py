@@ -219,9 +219,8 @@ class ExperimentRunner:
     def _create_agents(
         self,
         agent_args: List[Dict[str, Any]],
-        replay_writer: Optional[Any] = None,
     ) -> List[AgentBase]:
-        """创建agent实例。replay_writer 若提供则传入每个 agent 的 __init__。"""
+        """创建 agent 实例。"""
         agents = []
         agent_type_map = {
             agent_type: agent_class
@@ -255,9 +254,6 @@ class ExperimentRunner:
                 init_kwargs["id"] = int(agent_id)
             else:
                 init_kwargs["id"] = int(init_kwargs["id"])
-
-            if replay_writer is not None:
-                init_kwargs["replay_writer"] = replay_writer
 
             agent = agent_class(**init_kwargs)
             agents.append(agent)
@@ -389,7 +385,7 @@ class ExperimentRunner:
             logger.info("Creating environment modules...")
             env_modules = self._create_env_modules(env_module_types, env_kwargs)
 
-            # 若启用回放则先创建并初始化 ReplayWriter，再传入 router 与 agents
+            # 若启用回放则先创建并初始化 ReplayWriter，再传入 env router
             replay_writer: Optional[ReplayWriter] = None
             if self.run_dir is not None:
                 replay_writer = ReplayWriter(self.run_dir / "sqlite.db")
@@ -405,7 +401,7 @@ class ExperimentRunner:
             env_router.run_dir = self.run_dir.resolve()
 
             logger.info(f"Creating {len(agent_args)} agents...")
-            agents = self._create_agents(agent_args, replay_writer=replay_writer)
+            agents = self._create_agents(agent_args)
 
             logger.info("Creating AgentSociety instance...")
             self.society = AgentSociety(

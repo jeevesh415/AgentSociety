@@ -117,7 +117,7 @@ html_favicon = '_static/logo/square.png'
 
 intersphinx_mapping = {
     'python': ('https://docs.python.org/3', None),
-    'pydantic': ('https://docs.pydantic.dev/', None),
+    'pydantic': ('https://docs.pydantic.dev/latest/', None),
 }
 
 # -- Options for Napoleon -----------------------------------------------------

@@ -29,6 +29,7 @@ from fastapi import APIRouter, HTTPException, Query
 from pydantic import BaseModel
 
 from agentsociety2.logger import get_logger
+from agentsociety2.storage.replay_metadata import DATASET_CATALOG_TABLE
 
 logger = get_logger()
 
@@ -152,6 +153,110 @@ def _table_exists(cursor: sqlite3.Cursor, table_name: str) -> bool:
     return cursor.fetchone() is not None
 
 
+def _quote_identifier(name: str) -> str:
+    return '"' + name.replace('"', '""') + '"'
+
+
+def _coerce_datetime(raw: Any) -> Optional[datetime]:
+    if raw is None:
+        return None
+    if isinstance(raw, datetime):
+        return raw
+    if isinstance(raw, (bytes, bytearray)):
+        raw = raw.decode("utf-8", errors="ignore")
+    if isinstance(raw, str):
+        try:
+            return datetime.fromisoformat(raw)
+        except ValueError:
+            return None
+    return None
+
+
+def _load_dataset_catalog(cursor: sqlite3.Cursor) -> List[Dict[str, Any]]:
+    if not _table_exists(cursor, DATASET_CATALOG_TABLE):
+        return []
+
+    cursor.execute(
+        f"""
+        SELECT dataset_id, table_name, module_name, kind,
+               entity_key, step_key, time_key,
+               default_order_json, capabilities_json
+        FROM {DATASET_CATALOG_TABLE}
+        ORDER BY dataset_id ASC
+        """
+    )
+    datasets: List[Dict[str, Any]] = []
+    for row in cursor.fetchall():
+        (
+            dataset_id,
+            table_name,
+            module_name,
+            kind,
+            entity_key,
+            step_key,
+            time_key,
+            default_order_raw,
+            capabilities_raw,
+        ) = row
+        default_order = _parse_json_field(default_order_raw, [])
+        capabilities = _parse_json_field(capabilities_raw, [])
+        datasets.append(
+            {
+                "dataset_id": dataset_id,
+                "table_name": table_name,
+                "module_name": module_name,
+                "kind": kind,
+                "entity_key": entity_key,
+                "step_key": step_key,
+                "time_key": time_key,
+                "default_order": default_order if isinstance(default_order, list) else [],
+                "capabilities": capabilities if isinstance(capabilities, list) else [],
+            }
+        )
+    return datasets
+
+
+def _get_table_columns(cursor: sqlite3.Cursor, table_name: str) -> set[str]:
+    cursor.execute(f"PRAGMA table_info({_quote_identifier(table_name)})")
+    return {str(row[1]) for row in cursor.fetchall()}
+
+
+def _dataset_has_columns(
+    cursor: sqlite3.Cursor,
+    dataset: Dict[str, Any],
+    *column_names: str,
+) -> bool:
+    available = _get_table_columns(cursor, dataset["table_name"])
+    return all(column_name in available for column_name in column_names)
+
+
+def _get_agent_status_dataset(cursor: sqlite3.Cursor) -> Optional[Dict[str, Any]]:
+    candidates = [
+        dataset
+        for dataset in _load_dataset_catalog(cursor)
+        if dataset.get("kind") == "entity_snapshot"
+        and "agent_snapshot" in dataset.get("capabilities", [])
+        and dataset.get("entity_key")
+        and dataset.get("step_key")
+        and dataset.get("time_key")
+        and _table_exists(cursor, dataset["table_name"])
+        and _dataset_has_columns(
+            cursor,
+            dataset,
+            dataset["entity_key"],
+            dataset["step_key"],
+            dataset["time_key"],
+        )
+    ]
+    candidates.sort(
+        key=lambda item: (
+            0 if "geo_point" in item.get("capabilities", []) else 1,
+            item["dataset_id"],
+        )
+    )
+    return candidates[0] if candidates else None
+
+
 def _load_agent_profiles(cursor: sqlite3.Cursor) -> List[AgentProfile]:
     if not _table_exists(cursor, "agent_profile"):
         return []
@@ -176,6 +281,16 @@ def _build_profiles_from_status_rows(
     status_rows: List[Tuple[int, int, datetime, Optional[str], Dict[str, Any]]],
 ) -> List[AgentProfile]:
     agent_ids = sorted({agent_id for agent_id, _, _, _, _ in status_rows})
+    return [
+        AgentProfile(id=agent_id, name=f"Agent_{agent_id}", profile={})
+        for agent_id in agent_ids
+    ]
+
+
+def _build_profiles_from_status_entries(
+    status_entries: List[Dict[str, Any]],
+) -> List[AgentProfile]:
+    agent_ids = sorted({int(entry["id"]) for entry in status_entries})
     return [
         AgentProfile(id=agent_id, name=f"Agent_{agent_id}", profile={})
         for agent_id in agent_ids
@@ -212,6 +327,152 @@ def _load_agent_status_rows(
     return rows
 
 
+def _load_agent_profiles_from_dataset(
+    cursor: sqlite3.Cursor,
+    dataset: Dict[str, Any],
+) -> List[AgentProfile]:
+    entity_key = dataset["entity_key"]
+    table_name = dataset["table_name"]
+    cursor.execute(
+        f"""
+        SELECT DISTINCT {_quote_identifier(entity_key)}
+        FROM {_quote_identifier(table_name)}
+        WHERE {_quote_identifier(entity_key)} IS NOT NULL
+        ORDER BY {_quote_identifier(entity_key)} ASC
+        """
+    )
+    return [
+        AgentProfile(id=int(agent_id), name=f"Agent_{int(agent_id)}", profile={})
+        for (agent_id,) in cursor.fetchall()
+        if agent_id is not None
+    ]
+
+
+def _load_agent_status_entries_from_dataset(
+    cursor: sqlite3.Cursor,
+    dataset: Dict[str, Any],
+    *,
+    agent_id: Optional[int] = None,
+) -> List[Dict[str, Any]]:
+    entity_key = dataset["entity_key"]
+    step_key = dataset["step_key"]
+    time_key = dataset["time_key"]
+    table_name = dataset["table_name"]
+
+    query = f"SELECT * FROM {_quote_identifier(table_name)}"
+    params: tuple[Any, ...] = ()
+    if agent_id is not None:
+        query += f" WHERE {_quote_identifier(entity_key)} = ?"
+        params = (agent_id,)
+    query += (
+        f" ORDER BY {_quote_identifier(step_key)} ASC, "
+        f"{_quote_identifier(entity_key)} ASC"
+    )
+
+    cursor.execute(query, params)
+    column_names = [description[0] for description in cursor.description or []]
+
+    entries: List[Dict[str, Any]] = []
+    for row in cursor.fetchall():
+        payload = dict(zip(column_names, row))
+        timestamp = _coerce_datetime(payload.pop(time_key, None))
+        raw_agent_id = payload.pop(entity_key, None)
+        step = payload.pop(step_key, None)
+        if timestamp is None or raw_agent_id is None or step is None:
+            continue
+
+        lng = payload.pop("lng", None)
+        lat = payload.pop("lat", None)
+        action = payload.pop("action", None)
+        parent_id = payload.pop("parent_id", None)
+        payload.pop("created_at", None)
+
+        entries.append(
+            {
+                "id": int(raw_agent_id),
+                "step": int(step),
+                "timestamp": timestamp,
+                "lng": float(lng) if lng is not None else None,
+                "lat": float(lat) if lat is not None else None,
+                "parent_id": int(parent_id) if parent_id is not None else None,
+                "action": action,
+                "status": payload,
+            }
+        )
+    return entries
+
+
+def _load_agent_profiles_compat(cursor: sqlite3.Cursor) -> List[AgentProfile]:
+    if _table_exists(cursor, "agent_profile"):
+        return _load_agent_profiles(cursor)
+
+    dataset = _get_agent_status_dataset(cursor)
+    if dataset is None:
+        return []
+    return _load_agent_profiles_from_dataset(cursor, dataset)
+
+
+def _load_agent_status_entries(
+    cursor: sqlite3.Cursor,
+    *,
+    agent_id: Optional[int] = None,
+) -> List[Dict[str, Any]]:
+    if _table_exists(cursor, "agent_status"):
+        return [
+            {
+                "id": raw_agent_id,
+                "step": step,
+                "timestamp": timestamp,
+                "lng": None,
+                "lat": None,
+                "parent_id": None,
+                "action": action,
+                "status": status,
+            }
+            for raw_agent_id, step, timestamp, action, status in _load_agent_status_rows(
+                cursor, agent_id=agent_id
+            )
+        ]
+
+    dataset = _get_agent_status_dataset(cursor)
+    if dataset is None:
+        return []
+    return _load_agent_status_entries_from_dataset(cursor, dataset, agent_id=agent_id)
+
+
+def _get_agent_dataset_summary(
+    cursor: sqlite3.Cursor,
+) -> Tuple[int, Optional[datetime], Optional[datetime], int]:
+    dataset = _get_agent_status_dataset(cursor)
+    if dataset is None:
+        return 0, None, None, 0
+
+    table_name = dataset["table_name"]
+    entity_key = dataset["entity_key"]
+    step_key = dataset["step_key"]
+    time_key = dataset["time_key"]
+    cursor.execute(
+        f"""
+        SELECT COUNT(DISTINCT {_quote_identifier(step_key)}),
+               MIN({_quote_identifier(time_key)}),
+               MAX({_quote_identifier(time_key)}),
+               COUNT(DISTINCT {_quote_identifier(entity_key)})
+        FROM {_quote_identifier(table_name)}
+        """
+    )
+    row = cursor.fetchone()
+    if row is None:
+        return 0, None, None, 0
+
+    total_steps, start_raw, end_raw, agent_count = row
+    return (
+        int(total_steps or 0),
+        _coerce_datetime(start_raw),
+        _coerce_datetime(end_raw),
+        int(agent_count or 0),
+    )
+
+
 def _load_step_executions(
     cursor: sqlite3.Cursor,
 ) -> List[Tuple[int, int, str, str, Optional[str], Optional[int], Optional[str]]]:
@@ -229,11 +490,11 @@ def _load_step_executions(
 
 
 def _get_first_timestamp(
-    status_rows: List[Tuple[int, int, datetime, Optional[str], Dict[str, Any]]],
+    status_rows: List[Dict[str, Any]],
     step_rows: List[Tuple[int, int, str, str, Optional[str], Optional[int], Optional[str]]],
 ) -> Optional[datetime]:
     if status_rows:
-        return status_rows[0][2]
+        return status_rows[0]["timestamp"]
     for _, _, _, start_time, _, _, _ in step_rows:
         if not start_time:
             continue
@@ -312,13 +573,15 @@ async def get_experiment_info(
             conn = _get_db_connection(db_file)
             cursor = conn.cursor()
 
-            profiles = _load_agent_profiles(cursor)
+            profiles = _load_agent_profiles_compat(cursor)
             if profiles:
                 agent_count = len(profiles)
             elif _table_exists(cursor, "agent_status"):
                 cursor.execute("SELECT COUNT(DISTINCT id) FROM agent_status")
                 row = cursor.fetchone()
                 agent_count = row[0] if row else 0
+            else:
+                _, _, _, agent_count = _get_agent_dataset_summary(cursor)
 
             # 获取step数量
             if _table_exists(cursor, "step_executions"):
@@ -329,6 +592,8 @@ async def get_experiment_info(
                 cursor.execute("SELECT COUNT(DISTINCT step) FROM agent_status")
                 row = cursor.fetchone()
                 step_count = row[0] if row else 0
+            else:
+                step_count, _, _, _ = _get_agent_dataset_summary(cursor)
 
             conn.close()
         except Exception as e:
@@ -377,7 +642,7 @@ async def get_timeline(
     conn = _get_db_connection(db_file)
     cursor = conn.cursor()
 
-    status_rows = _load_agent_status_rows(cursor)
+    status_rows = _load_agent_status_entries(cursor)
     step_rows = _load_step_executions(cursor)
 
     timeline: List[TimePoint] = []
@@ -385,10 +650,12 @@ async def get_timeline(
 
     if status_rows and first_time is not None:
         seen_steps: set[int] = set()
-        for _, step, timestamp, _, _ in status_rows:
+        for status_entry in status_rows:
+            step = int(status_entry["step"])
             if step in seen_steps:
                 continue
             seen_steps.add(step)
+            timestamp = status_entry["timestamp"]
             day, t = _datetime_to_day_t(timestamp, first_time)
             timeline.append(
                 TimePoint(day=day, t=t, timestamp=timestamp.isoformat())
@@ -442,9 +709,9 @@ async def get_agents(
     conn = _get_db_connection(db_file)
     cursor = conn.cursor()
 
-    agents = _load_agent_profiles(cursor)
+    agents = _load_agent_profiles_compat(cursor)
     if not agents:
-        agents = _build_profiles_from_status_rows(_load_agent_status_rows(cursor))
+        agents = _build_profiles_from_status_entries(_load_agent_status_entries(cursor))
     conn.close()
     return agents
 
@@ -496,14 +763,15 @@ async def get_agent_status(
     conn = _get_db_connection(db_file)
     cursor = conn.cursor()
 
-    status_rows = _load_agent_status_rows(cursor, agent_id=agent_id)
-    all_status_rows = _load_agent_status_rows(cursor)
+    status_rows = _load_agent_status_entries(cursor, agent_id=agent_id)
+    all_status_rows = _load_agent_status_entries(cursor)
     step_rows = _load_step_executions(cursor)
     first_time = _get_first_timestamp(all_status_rows, step_rows)
 
     statuses: List[AgentStatus] = []
     if first_time is not None:
-        for _, _, timestamp, action, status in status_rows:
+        for status_entry in status_rows:
+            timestamp = status_entry["timestamp"]
             current_day, current_t = _datetime_to_day_t(timestamp, first_time)
             if day is not None and t is not None:
                 if current_day != day or abs(current_t - t) > 60:
@@ -513,11 +781,11 @@ async def get_agent_status(
                     id=agent_id,
                     day=current_day,
                     t=current_t,
-                    lng=None,
-                    lat=None,
-                    parent_id=None,
-                    action=action,
-                    status=status,
+                    lng=status_entry["lng"],
+                    lat=status_entry["lat"],
+                    parent_id=status_entry["parent_id"],
+                    action=status_entry["action"],
+                    status=status_entry["status"],
                 )
             )
 
@@ -636,13 +904,13 @@ async def get_latest_state(
     conn = _get_db_connection(db_file)
     cursor = conn.cursor()
 
-    profiles = _load_agent_profiles(cursor)
-    status_rows = _load_agent_status_rows(cursor)
+    profiles = _load_agent_profiles_compat(cursor)
+    status_rows = _load_agent_status_entries(cursor)
     step_rows = _load_step_executions(cursor)
     conn.close()
 
     if not profiles and status_rows:
-        profiles = _build_profiles_from_status_rows(status_rows)
+        profiles = _build_profiles_from_status_entries(status_rows)
 
     if not profiles and not status_rows and not step_rows:
         raise HTTPException(status_code=404, detail="No state data found")
@@ -650,8 +918,8 @@ async def get_latest_state(
     latest_timestamp: Optional[datetime] = None
     latest_step = 0
     if status_rows:
-        latest_step = max(step for _, step, _, _, _ in status_rows)
-        latest_timestamp = max(ts for _, _, ts, _, _ in status_rows)
+        latest_step = max(int(entry["step"]) for entry in status_rows)
+        latest_timestamp = max(entry["timestamp"] for entry in status_rows)
     elif step_rows:
         latest_step = len(step_rows)
         for _, _, _, _, end_time, _, _ in reversed(step_rows):
@@ -665,13 +933,13 @@ async def get_latest_state(
                 continue
 
     latest_status_by_agent: Dict[int, Dict[str, Any]] = {}
-    for raw_agent_id, step, timestamp, action, status in status_rows:
-        if step != latest_step:
+    for status_entry in status_rows:
+        if int(status_entry["step"]) != latest_step:
             continue
-        latest_status_by_agent[raw_agent_id] = {
-            "timestamp": timestamp,
-            "action": action,
-            "status": status,
+        latest_status_by_agent[int(status_entry["id"])] = {
+            "timestamp": status_entry["timestamp"],
+            "action": status_entry["action"],
+            "status": status_entry["status"],
         }
 
     agents_state = []

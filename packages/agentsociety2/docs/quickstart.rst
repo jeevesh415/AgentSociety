@@ -105,7 +105,7 @@
    await society.close()
 
 使用 CLI 运行实验
----------
+------------------
 
 AgentSociety 2 提供了一个强大的 CLI 用于运行实验。
 
@@ -135,7 +135,7 @@ AgentSociety 2 提供了一个强大的 CLI 用于运行实验。
 更多详情请参见 :doc:`cli`。
 
 运行实验（代码方式）
----------
+--------------------
 
 下面是一个使用 AgentSociety 的多智能体完整实验示例：
 
@@ -143,6 +143,7 @@ AgentSociety 2 提供了一个强大的 CLI 用于运行实验。
 
    import asyncio
    from datetime import datetime
+   from pathlib import Path
    from agentsociety2 import PersonAgent
    from agentsociety2.env import CodeGenRouter
    from agentsociety2.contrib.env import SimpleSocialSpace
@@ -150,16 +151,15 @@ AgentSociety 2 提供了一个强大的 CLI 用于运行实验。
    from agentsociety2.society import AgentSociety
 
    async def main():
-       # Set up replay writer for tracking
-       writer = ReplayWriter("my_experiment.db")
-       await writer.initialize()
+       # Set up replay writer for environment datasets
+       writer = ReplayWriter(Path("my_experiment.db"))
+       await writer.init()
 
        # Create agents first (SimpleSocialSpace needs this)
        agents = [
            PersonAgent(
                id=i,
                profile={"name": f"Player{i}", "personality": "competitive"},
-               replay_writer=writer
            )
            for i in range(1, 4)
        ]
@@ -168,11 +168,11 @@ AgentSociety 2 提供了一个强大的 CLI 用于运行实验。
        env_router = CodeGenRouter(
            env_modules=[SimpleSocialSpace(
                agent_id_name_pairs=[(a.id, a.name) for a in agents]
-           )]
+           )],
+           replay_writer=writer,
        )
-       env_router.set_replay_writer(writer)
 
-       # Create society with replay enabled
+       # Create society
        society = AgentSociety(
            agents=agents,
            env_router=env_router,
@@ -192,6 +192,12 @@ AgentSociety 2 提供了一个强大的 CLI 用于运行实验。
 
    if __name__ == "__main__":
        asyncio.run(main())
+
+.. note::
+
+   ``ReplayWriter`` 现在只记录环境侧 replay dataset。``PersonAgent`` 的本地状态、
+   thread 和工具日志会落在 ``run/agents/agent_xxxx/`` 目录，而不是 SQLite 的
+   ``agent_status`` / ``agent_profile`` 表。
 
 下一步
 ----------

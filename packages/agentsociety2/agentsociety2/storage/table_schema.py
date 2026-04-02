@@ -7,10 +7,6 @@
 
 除 SQL 列定义外，``ColumnDef`` 还可携带语义元数据（描述、逻辑类型、分析角色等），
 由 :class:`~agentsociety2.storage.ReplayWriter` 的 catalog 表单独持久化。
-
-框架自带表（``agent_profile`` / ``agent_status`` / ``agent_dialog``）在
-``agentsociety2.storage.models`` 中以 SQLModel 定义，并由 :meth:`~agentsociety2.storage.ReplayWriter.init`
-创建，不通过 TableSchema 注册。
 """
 
 from dataclasses import dataclass, field

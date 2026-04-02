@@ -1,13 +1,10 @@
 """数据层：SQLite 读取（`DataReader`）、实验目录上下文（`ContextLoader`）。"""
 
-import json
 import sqlite3
 from dataclasses import dataclass, field
 from datetime import datetime
 from pathlib import Path
 from typing import Any, Dict, List, Optional, Tuple
-
-import pandas as pd
 
 from agentsociety2.logger import get_logger
 
@@ -16,7 +13,6 @@ from .models import (
     ExperimentDesign,
     ExperimentStatus,
     DIR_ARTIFACTS,
-    DIR_RUN,
     FILE_EXPERIMENT_MD,
     FILE_HYPOTHESIS_MD,
     FILE_PID,
@@ -191,7 +187,6 @@ class DataReader:
             return DataStats()
 
         conn = sqlite3.connect(str(self.db_path))
-        cursor = conn.cursor()
 
         numeric_stats = self._compute_numeric_stats(conn, schema)
         categorical_stats = self._compute_categorical_stats(conn, schema)
@@ -477,7 +472,6 @@ class ContextLoader:
     ) -> Tuple[ExperimentStatus, float, List[str]]:
         """分析实验状态"""
         import json_repair
-        import re
 
         db_path = run_path / FILE_SQLITE
         pid_file = run_path / FILE_PID
@@ -504,26 +498,18 @@ class ContextLoader:
         try:
             conn = sqlite3.connect(str(db_path))
             cursor = conn.cursor()
-
-            # 检查 as_experiment 表
             cursor.execute(
-                "SELECT name FROM sqlite_master WHERE type='table' AND name='as_experiment'"
+                "SELECT name FROM sqlite_master WHERE type='table' AND name NOT LIKE 'sqlite_%'"
             )
-            if cursor.fetchone():
-                cursor.execute("PRAGMA table_info(as_experiment)")
-                cols = [row[1] for row in cursor.fetchall()]
-                if "status" in cols and "cur_day" in cols and "num_day" in cols:
-                    cursor.execute("SELECT status, cur_day, num_day FROM as_experiment LIMIT 1")
+            tables = {row[0] for row in cursor.fetchall()}
+            if completion == 0.0 and "step_executions" in tables:
+                try:
+                    cursor.execute("SELECT COUNT(*) FROM step_executions")
                     row = cursor.fetchone()
-                    if row:
-                        st, cur_day, num_day = row
-                        if status == ExperimentStatus.UNKNOWN and st is not None:
-                            if st == 2:
-                                status = ExperimentStatus.SUCCESSFUL
-                            elif st == 3:
-                                status = ExperimentStatus.FAILED
-                        if num_day and num_day > 0 and cur_day is not None:
-                            completion = min(100.0, max(0.0, 100.0 * cur_day / num_day))
+                    if row and row[0] and row[0] > 0:
+                        completion = 50.0
+                except sqlite3.OperationalError:
+                    pass
 
             conn.close()
         except sqlite3.Error as e:

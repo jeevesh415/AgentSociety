@@ -21,8 +21,8 @@ async def main():
     db_path = "example_replay.db"
     Path(db_path).unlink(missing_ok=True)
 
-    writer = ReplayWriter(db_path)
-    await writer.initialize()
+    writer = ReplayWriter(Path(db_path))
+    await writer.init()
 
     print("=== Replay System Example ===\n")
 
@@ -34,7 +34,6 @@ async def main():
                 "name": f"Agent{i}",
                 "personality": "friendly" if i % 2 == 0 else "curious",
             },
-            replay_writer=writer
         )
         for i in range(1, 4)
     ]
@@ -64,22 +63,10 @@ async def main():
         response = await society.ask(question)
         print(f"{agent._name}: {response[:100]}...")
 
-    print("\n=== Replay Data ===")
-
-    # Read back the data
-    print("\nAgent Profiles:")
-    profiles = await writer.read_agent_profiles()
-    for profile in profiles:
-        print(f"  Agent {profile.agent_id}: {profile.profile}")
-
-    print("\nAgent Statuses:")
-    statuses = await writer.read_agent_status()
-    for status in statuses:
-        print(f"  Agent {status.agent_id}: {status.status} - {status.current_activity}")
-
     # Cleanup
     await society.close()
-    print(f"\nReplay database saved to: {db_path}")
+    print("\nReplay database saved to:", db_path)
+    print("Agent replay tables are no longer written; inspect environment replay datasets instead.")
 
 
 if __name__ == "__main__":
