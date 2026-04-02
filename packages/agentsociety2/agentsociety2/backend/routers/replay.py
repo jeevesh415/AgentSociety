@@ -137,13 +137,6 @@ class ReplayStepBundle(BaseModel):
     env_state_rows: Dict[str, ReplayEnvStateAtStep] = Field(default_factory=dict)
 
 
-class ReplayAgentStateHistory(BaseModel):
-    agent_id: int
-    dataset_id: Optional[str] = None
-    rows: List[Dict[str, Any]] = Field(default_factory=list)
-    history_by_dataset: Dict[str, List[Dict[str, Any]]] = Field(default_factory=dict)
-
-
 def get_db_path(workspace_path: str, hypothesis_id: str, experiment_id: str) -> Path:
     return (
         Path(workspace_path)
@@ -692,71 +685,6 @@ async def get_replay_step_bundle(
             positions=positions,
             agent_state_rows=agent_state_rows,
             env_state_rows=env_state_rows,
-        )
-
-
-@router.get(
-    "/{hypothesis_id}/{experiment_id}/agents/{agent_id}/state-history",
-    response_model=ReplayAgentStateHistory,
-)
-async def get_agent_state_history(
-    hypothesis_id: str,
-    experiment_id: str,
-    agent_id: int,
-    workspace_path: str = Query(..., description="Workspace root path"),
-    dataset_id: Optional[str] = Query(None, description="Optional dataset filter"),
-    limit: Optional[int] = Query(None, ge=1, le=1000),
-    start_step: Optional[int] = Query(None),
-    end_step: Optional[int] = Query(None),
-) -> ReplayAgentStateHistory:
-    db_path = get_db_path(workspace_path, hypothesis_id, experiment_id)
-
-    async for session in get_db_session(db_path):
-        datasets = await load_dataset_catalog(session)
-        agent_state_datasets = _list_agent_state_datasets(datasets)
-        if dataset_id is not None:
-            agent_state_datasets = [
-                dataset
-                for dataset in agent_state_datasets
-                if dataset["dataset_id"] == dataset_id
-            ]
-            if not agent_state_datasets:
-                raise HTTPException(
-                    status_code=404,
-                    detail=f"Agent state dataset '{dataset_id}' not found",
-                )
-
-        if dataset_id is not None and len(agent_state_datasets) == 1:
-            dataset = agent_state_datasets[0]
-            rows_result = await fetch_dataset_rows(
-                session,
-                dataset,
-                entity_id=agent_id,
-                start_step=start_step,
-                end_step=end_step,
-                limit=limit,
-            )
-            return ReplayAgentStateHistory(
-                agent_id=agent_id,
-                dataset_id=dataset["dataset_id"],
-                rows=rows_result["rows"],
-            )
-
-        history_by_dataset: Dict[str, List[Dict[str, Any]]] = {}
-        for dataset in agent_state_datasets:
-            rows_result = await fetch_dataset_rows(
-                session,
-                dataset,
-                entity_id=agent_id,
-                start_step=start_step,
-                end_step=end_step,
-                limit=limit,
-            )
-            history_by_dataset[dataset["dataset_id"]] = rows_result["rows"]
-
-        return ReplayAgentStateHistory(
-            agent_id=agent_id,
-            history_by_dataset=history_by_dataset,
         )
 
 

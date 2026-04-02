@@ -29,8 +29,6 @@ const ReplayAppInner: React.FC<ReplayAppProps> = ({ vscode }) => {
     error,
     initData,
     currentStep,
-    selectedAgentId,
-    selectedAgentHistoryDatasetId,
     timeline,
   } = state;
 
@@ -73,12 +71,8 @@ const ReplayAppInner: React.FC<ReplayAppProps> = ({ vscode }) => {
           actions.setStepBundle(message.data);
           break;
 
-        case 'agentStateHistory':
-          actions.setSelectedAgentHistory(message.data);
-          break;
-
         case 'replayDatasetRows':
-          actions.setReplayDatasetRows(message.data);
+          actions.setReplayDatasetRows(message.requestKey ?? 'default', message.data);
           break;
 
         case 'error':
@@ -106,17 +100,6 @@ const ReplayAppInner: React.FC<ReplayAppProps> = ({ vscode }) => {
     }
     vscode.postMessage({ command: 'fetchStepBundle', step: stepNumber });
   }, [currentStep, initialized, timeline, vscode]);
-
-  React.useEffect(() => {
-    if (!initialized || selectedAgentId === null || !selectedAgentHistoryDatasetId) {
-      return;
-    }
-    vscode.postMessage({
-      command: 'fetchAgentStateHistory',
-      agentId: selectedAgentId,
-      datasetId: selectedAgentHistoryDatasetId,
-    });
-  }, [initialized, selectedAgentId, selectedAgentHistoryDatasetId, vscode]);
 
   if (error) {
     return (

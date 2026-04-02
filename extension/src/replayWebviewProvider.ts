@@ -19,7 +19,6 @@ import type {
   ExperimentInfo,
   ExtensionMessage,
   InitData,
-  ReplayAgentStateHistory,
   ReplayDatasetRows,
   ReplayPanelSchema,
   ReplayStepBundle,
@@ -125,19 +124,10 @@ export class ReplayWebviewProvider {
         await this.fetchStepBundle(message.step);
         break;
 
-      case 'fetchAgentStateHistory':
-        await this.fetchAgentStateHistory(
-          message.agentId,
-          message.datasetId,
-          message.startStep,
-          message.endStep,
-          message.limit
-        );
-        break;
-
       case 'fetchReplayDatasetRows':
         await this.fetchReplayDatasetRows(
           message.datasetId,
+          message.requestKey,
           message.page,
           message.pageSize,
           {
@@ -279,30 +269,12 @@ export class ReplayWebviewProvider {
     }
   }
 
-  private async fetchAgentStateHistory(
-    agentId: number,
-    datasetId?: string,
-    startStep?: number,
-    endStep?: number,
-    limit?: number
-  ): Promise<void> {
-    const url = this.buildReplayUrl(`/agents/${agentId}/state-history`, {
-      dataset_id: datasetId,
-      start_step: startStep,
-      end_step: endStep,
-      limit,
-    });
-    const data = await this.fetchJson<ReplayAgentStateHistory>('agent state history', url, { latestGroup: 'agentStateHistory' });
-    if (data) {
-      this.postMessage({ type: 'agentStateHistory', data });
-    }
-  }
-
   /**
    * Fetch replay dataset rows
    */
   private async fetchReplayDatasetRows(
     datasetId: string,
+    requestKey?: string,
     page: number = 1,
     pageSize: number = 50,
     options?: {
@@ -328,9 +300,10 @@ export class ReplayWebviewProvider {
       desc_order: options?.descOrder,
       latest_per_entity: options?.latestPerEntity,
     });
-    const data = await this.fetchJson<ReplayDatasetRows>('replay dataset rows', url, { latestGroup: 'replayDatasetRows' });
+    const latestGroup = requestKey ? `replayDatasetRows:${requestKey}` : 'replayDatasetRows:default';
+    const data = await this.fetchJson<ReplayDatasetRows>('replay dataset rows', url, { latestGroup });
     if (data) {
-      this.postMessage({ type: 'replayDatasetRows', data });
+      this.postMessage({ type: 'replayDatasetRows', data, requestKey });
     }
   }
 

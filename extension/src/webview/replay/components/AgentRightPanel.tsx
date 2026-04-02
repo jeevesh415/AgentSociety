@@ -9,6 +9,7 @@ import { useReplay } from '../store';
 import type { ReplayDatasetInfo } from '../types';
 
 const { Title, Text } = Typography;
+const ENV_RAW_ROWS_REQUEST_KEY = 'env-raw-rows';
 
 function renderValue(value: any): React.ReactNode {
   if (value === null || value === undefined) {
@@ -29,8 +30,14 @@ function getColumnLabel(dataset: ReplayDatasetInfo, key: string): string {
 }
 
 export const AgentRightPanel: React.FC = () => {
-  const { state, sendMessage } = useReplay();
-  const { panelSchema, envStateRowsAtStep, replayDatasetRows, timeline, currentStep } = state;
+  const { state, actions, sendMessage } = useReplay();
+  const {
+    panelSchema,
+    envStateRowsAtStep,
+    replayDatasetRowsByRequestKey,
+    timeline,
+    currentStep,
+  } = state;
   const envDatasets = panelSchema?.env_state_datasets ?? [];
   const [selectedDataset, setSelectedDataset] = React.useState<ReplayDatasetInfo | null>(null);
   const [currentPage, setCurrentPage] = React.useState(1);
@@ -38,6 +45,7 @@ export const AgentRightPanel: React.FC = () => {
   const [modalLoading, setModalLoading] = React.useState(false);
   const pageSize = 20;
   const currentStepNumber = timeline[currentStep]?.step;
+  const replayDatasetRows = replayDatasetRowsByRequestKey[ENV_RAW_ROWS_REQUEST_KEY] ?? null;
 
   React.useEffect(() => {
     if (!selectedDataset || !replayDatasetRows || replayDatasetRows.dataset_id !== selectedDataset.dataset_id) {
@@ -51,15 +59,17 @@ export const AgentRightPanel: React.FC = () => {
     setCurrentPage(page);
     setIsModalVisible(true);
     setModalLoading(true);
+    actions.setReplayDatasetRows(ENV_RAW_ROWS_REQUEST_KEY, null);
     sendMessage({
       command: 'fetchReplayDatasetRows',
+      requestKey: ENV_RAW_ROWS_REQUEST_KEY,
       datasetId: dataset.dataset_id,
       page,
       pageSize,
       endStep: currentStepNumber,
       descOrder: true,
     });
-  }, [currentStepNumber, sendMessage]);
+  }, [actions, currentStepNumber, sendMessage]);
 
   const columns = React.useMemo(() => {
     if (!replayDatasetRows || !selectedDataset) {

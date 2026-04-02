@@ -6,7 +6,6 @@ import type {
   LayoutMode,
   PlaybackState,
   ReplayAgentStateAtStep,
-  ReplayAgentStateHistory,
   ReplayDatasetRows,
   ReplayEnvStateAtStep,
   ReplayPanelSchema,
@@ -36,9 +35,7 @@ export interface ReplayState {
 
   selectedAgentId: number | null;
   selectedAgentHistoryDatasetId: string | null;
-  selectedAgentHistoryByDataset: Record<string, Record<string, any>[]>;
-
-  replayDatasetRows: ReplayDatasetRows | null;
+  replayDatasetRowsByRequestKey: Record<string, ReplayDatasetRows | null>;
 }
 
 /** Replay store actions */
@@ -54,11 +51,10 @@ export interface ReplayActions {
     agent_state_rows: Record<string, ReplayAgentStateAtStep>;
     env_state_rows: Record<string, ReplayEnvStateAtStep>;
   }) => void;
-  setSelectedAgentHistory: (history: ReplayAgentStateHistory) => void;
   setCurrentStep: (step: number) => void;
   selectAgent: (agentId: number | null) => void;
   setSelectedAgentHistoryDatasetId: (datasetId: string | null) => void;
-  setReplayDatasetRows: (rows: ReplayDatasetRows | null) => void;
+  setReplayDatasetRows: (requestKey: string, rows: ReplayDatasetRows | null) => void;
   setLoading: (loading: boolean) => void;
   setError: (error: string | null) => void;
   setInitialized: (initialized: boolean) => void;
@@ -90,8 +86,7 @@ const initialState: ReplayState = {
   envStateRowsAtStep: {},
   selectedAgentId: null,
   selectedAgentHistoryDatasetId: null,
-  selectedAgentHistoryByDataset: {},
-  replayDatasetRows: null,
+  replayDatasetRowsByRequestKey: {},
 };
 
 /** Combined context type */
@@ -143,23 +138,6 @@ export const ReplayProvider: React.FC<ReplayProviderProps> = ({ children, vscode
         envStateRowsAtStep: bundle.env_state_rows ?? {},
       })),
 
-    setSelectedAgentHistory: (history) =>
-      setState((s) => {
-        if (history.dataset_id) {
-          return {
-            ...s,
-            selectedAgentHistoryByDataset: {
-              ...s.selectedAgentHistoryByDataset,
-              [history.dataset_id]: history.rows ?? [],
-            },
-          };
-        }
-        return {
-          ...s,
-          selectedAgentHistoryByDataset: history.history_by_dataset ?? {},
-        };
-      }),
-
     setCurrentStep: (step) =>
       setState((s) => ({
         ...s,
@@ -175,7 +153,6 @@ export const ReplayProvider: React.FC<ReplayProviderProps> = ({ children, vscode
           agentId === null
             ? s.selectedAgentHistoryDatasetId
             : s.panelSchema?.primary_agent_state_dataset_id ?? s.selectedAgentHistoryDatasetId,
-        selectedAgentHistoryByDataset: {},
       })),
 
     setSelectedAgentHistoryDatasetId: (datasetId) =>
@@ -184,7 +161,14 @@ export const ReplayProvider: React.FC<ReplayProviderProps> = ({ children, vscode
         selectedAgentHistoryDatasetId: datasetId,
       })),
 
-    setReplayDatasetRows: (rows) => setState((s) => ({ ...s, replayDatasetRows: rows })),
+    setReplayDatasetRows: (requestKey, rows) =>
+      setState((s) => ({
+        ...s,
+        replayDatasetRowsByRequestKey: {
+          ...s.replayDatasetRowsByRequestKey,
+          [requestKey]: rows,
+        },
+      })),
 
     setLoading: (loading) => setState((s) => ({ ...s, loading })),
 

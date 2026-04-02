@@ -121,13 +121,6 @@ export interface ReplayStepBundle {
   env_state_rows: Record<string, ReplayEnvStateAtStep>;
 }
 
-export interface ReplayAgentStateHistory {
-  agent_id: number;
-  dataset_id?: string | null;
-  rows: Record<string, any>[];
-  history_by_dataset: Record<string, Record<string, any>[]>;
-}
-
 /** Message types from extension to webview */
 export type ExtensionMessage =
   | { type: 'init'; data: InitData }
@@ -136,8 +129,7 @@ export type ExtensionMessage =
   | { type: 'agentProfiles'; data: AgentProfile[] }
   | { type: 'panelSchema'; data: ReplayPanelSchema }
   | { type: 'stepBundle'; data: ReplayStepBundle }
-  | { type: 'agentStateHistory'; data: ReplayAgentStateHistory }
-  | { type: 'replayDatasetRows'; data: ReplayDatasetRows }
+  | { type: 'replayDatasetRows'; data: ReplayDatasetRows; requestKey?: string }
   | { type: 'error'; message: string };
 
 /** Initial data from extension */
@@ -156,6 +148,5 @@ export type WebviewMessage =
   | { command: 'fetchAgentProfiles' }
   | { command: 'fetchPanelSchema' }
   | { command: 'fetchStepBundle'; step: number }
-  | { command: 'fetchAgentStateHistory'; agentId: number; datasetId?: string; startStep?: number; endStep?: number; limit?: number }
-  | { command: 'fetchReplayDatasetRows'; datasetId: string; page?: number; pageSize?: number; step?: number; entityId?: number; startStep?: number; endStep?: number; maxStep?: number; columns?: string[]; descOrder?: boolean; latestPerEntity?: boolean }
+  | { command: 'fetchReplayDatasetRows'; datasetId: string; requestKey?: string; page?: number; pageSize?: number; step?: number; entityId?: number; startStep?: number; endStep?: number; maxStep?: number; columns?: string[]; descOrder?: boolean; latestPerEntity?: boolean }
   | { command: 'error'; message: string };
