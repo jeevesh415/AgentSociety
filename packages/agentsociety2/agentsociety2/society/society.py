@@ -83,17 +83,15 @@ class AgentSociety:
         enable_replay: bool = True,
         replay_writer: Optional[ReplayWriter] = None,
     ):
-        """
-        初始化 AgentSociety 实例
+        """创建仿真编排器。
 
-        Args:
-            agents (list[AgentBase]): 智能体列表
-            env_router (RouterBase): 环境路由器
-            start_t (datetime): 仿真开始时间
-            run_dir (Path, optional): 运行目录，用于存储回放数据。默认为 None。
-            enable_replay (bool): 是否启用回放数据记录。默认为 True。
-            replay_writer (ReplayWriter, optional): 已初始化的回放写入器。若提供，则不再在 init() 中创建；
-                调用方需已将其传入 env_router 与 agents 的 __init__ 或 set_replay_writer。
+        :param agents: 智能体列表。
+        :param env_router: 环境路由器。
+        :param start_t: 仿真开始时间。
+        :param run_dir: 可选。运行目录（用于落地回放 sqlite 等）。
+        :param enable_replay: 是否启用回放记录。
+        :param replay_writer: 可选。外部传入的回放写入器；若提供则不会在 :meth:`init` 内部创建。
+            调用方需自行把 writer 注入到 agents / env_router（或后续调用 ``set_replay_writer``）。
         """
         self._env_router = env_router
         self._agents = agents
@@ -112,22 +110,12 @@ class AgentSociety:
 
     @property
     def current_time(self) -> datetime:
-        """
-        Get the current simulation time.
-
-        Returns:
-            The current datetime of the simulation.
-        """
+        """:returns: 当前仿真时间。"""
         return self._t
 
     @property
     def step_count(self) -> int:
-        """
-        Get the number of simulation steps that have been executed.
-
-        Returns:
-            The total number of steps executed.
-        """
+        """:returns: 已执行的仿真步数。"""
         return self._step_count
 
     async def init(self):
@@ -155,11 +143,7 @@ class AgentSociety:
                 self._setup_agent_position_callback(agent)
 
     def _setup_agent_position_callback(self, agent: AgentBase) -> None:
-        """Set up position callback for an agent to query from environment modules.
-
-        Args:
-            agent: The agent to set up the callback for.
-        """
+        """为 agent 注入“从环境查询位置”的回调。"""
         async def get_position_from_env():
             # Try to get position from environment router
             return await self._env_router.get_agent_position(agent.id)
@@ -185,14 +169,12 @@ class AgentSociety:
         await self.close()
 
     async def step(self, tick: int):
-        """
-        Run forward one step for all agents and the environment.
-        The agents will step first, then the environment.
+        """推进一次仿真步（先 agents 后 env）。
 
-        Args:
-            tick: The number of ticks of this simulation step.
+        :param tick: 本步时间跨度（秒）。
         """
         self._t += timedelta(seconds=tick)
+        self._env_router.sync_simulation_clock(self._t)
         tasks = []
         for agent in self._agents:
             tasks.append(agent.step(tick, self._t))
@@ -201,12 +183,10 @@ class AgentSociety:
         self._step_count += 1
 
     async def run(self, num_steps: int, tick: int):
-        """
-        Run the simulation for a specified number of steps.
+        """运行多步仿真。
 
-        Args:
-            num_steps: The number of simulation steps to run.
-            tick: The duration (in seconds) of each step.
+        :param num_steps: 运行步数上限。
+        :param tick: 每步时间跨度（秒）。
         """
         for _ in range(num_steps):
             if self._should_terminate:
@@ -214,36 +194,26 @@ class AgentSociety:
             await self.step(tick)
 
     async def ask(self, question: str) -> str:
-        """
-        Ask the society a question.
-        In the society, the question is answered by the agents and the environment.
+        """向仿真系统提问（由 helper 协调 agents/env 作答）。
 
-        Args:
-            question: The question to ask the society.
-
-        Returns:
-            The answer from the society.
+        :param question: 问题文本。
+        :returns: 答案文本。
         """
         return await self._helper.ask(question)
 
     async def intervene(self, instruction: str) -> str:
-        """
-        Intervene in the society.
-        In the society, the intervention is executed by the agents and the environment.
+        """对仿真进行干预（由 helper 协调执行）。
 
-        Args:
-            instruction: The instruction to intervene in the society.
-
-        Returns:
-            The answer from the society.
+        :param instruction: 干预指令文本。
+        :returns: 执行结果/反馈文本。
         """
         return await self._helper.intervene(instruction)
 
     # ---- Dump & Load ----
     async def dump(self) -> dict:
-        """
-        Dump agents, environment router, and society variables into a dict.
-        Excludes MCP environments in the router dump.
+        """导出可序列化的仿真状态。
+
+        :returns: 包含 ``society``、``env_router``、``agents`` 的字典。
         """
         agents_dump: list[dict] = []
         for a in self._agents:
@@ -267,8 +237,9 @@ class AgentSociety:
         }
 
     async def load(self, dump_data: dict):
-        """
-        Load society variables, agents dump by matching existing instances via id & class, and env router.
+        """从 :meth:`dump` 的输出恢复仿真状态。
+
+        :param dump_data: 由 :meth:`dump` 产生的字典。
         """
         try:
             soc = dump_data.get("society") or {}

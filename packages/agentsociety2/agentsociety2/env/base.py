@@ -36,9 +36,23 @@ import inspect
 import json
 import re
 from copy import deepcopy
+from dataclasses import dataclass
 from datetime import datetime
 from pathlib import Path
-from typing import TYPE_CHECKING, Any, Callable, ClassVar, Dict, Literal, Optional, Tuple, TypeVar, overload
+from typing import (
+    TYPE_CHECKING,
+    Any,
+    Callable,
+    ClassVar,
+    Dict,
+    Literal,
+    Optional,
+    Tuple,
+    TypeVar,
+    overload,
+)
+
+from agentsociety2.logger import get_logger
 
 if TYPE_CHECKING:
     from agentsociety2.storage import ReplayWriter
@@ -47,7 +61,63 @@ from mcp.server.fastmcp.tools.base import Tool
 from mcp.server.fastmcp.tools.tool_manager import ToolManager
 from openai.types.chat import ChatCompletionToolParam
 
-__all__ = ["tool", "EnvBase"]
+__all__ = [
+    "EnvBase",
+    "PersonStepConstraints",
+    "merge_person_step_constraints",
+    "tool",
+]
+
+_constraints_logger = get_logger()
+
+
+@dataclass(frozen=True)
+class PersonStepConstraints:
+    """单仿真步内对 PersonAgent 可见技能与工具白名单的约束。
+
+    环境可实现 :meth:`EnvBase.person_step_constraints` 返回本结构；PersonAgent 合并后执行，不绑定单一实验。
+    """
+
+    hide_skills: frozenset[str] = frozenset()
+    pin_allowed_tools_to_skill: str | None = None
+    forbid_disabling_skills: frozenset[str] = frozenset()
+
+
+def merge_person_step_constraints(
+    env_modules: list[Any],
+) -> PersonStepConstraints | None:
+    """合并路由器上所有环境模块返回的约束（并集/冲突检测）。"""
+    hide: set[str] = set()
+    forbid: set[str] = set()
+    pin: str | None = None
+    for m in env_modules or []:
+        fn = getattr(m, "person_step_constraints", None)
+        if not callable(fn):
+            continue
+        c = fn()
+        if c is None:
+            continue
+        hide.update(c.hide_skills)
+        forbid.update(c.forbid_disabling_skills)
+        if c.pin_allowed_tools_to_skill:
+            p = c.pin_allowed_tools_to_skill.strip()
+            if not p:
+                continue
+            if pin is None:
+                pin = p
+            elif pin != p:
+                _constraints_logger.warning(
+                    "person_step_constraints: conflicting pin_allowed_tools_to_skill %r vs %r (using first)",
+                    pin,
+                    p,
+                )
+    if not hide and not forbid and not pin:
+        return None
+    return PersonStepConstraints(
+        hide_skills=frozenset(hide),
+        pin_allowed_tools_to_skill=pin,
+        forbid_disabling_skills=frozenset(forbid),
+    )
 
 
 F = TypeVar("F", bound=Callable)
@@ -81,26 +151,19 @@ def tool(
     description: str | None = None,
     kind: Literal["observe", "statistics"] | None = None,
 ) -> Callable[[F], F]:
-    """
-    Register a tool method to the environment module.
+    """将环境方法注册为可调用工具（供 Router/LLM 调用）。
 
-    Args:
-        readonly: If the tool is readonly. **Must be True when kind is 'observe' or 'statistics'.**
-        name: The name of the tool.
-        description: The description of the tool.
-        kind: The kind of tool. Can be "observe" (for observation functions that can accept
-            at most one parameter besides self, typically agent_id) or "statistics" (for
-            statistics functions that can only have self parameter). Default is None for
-            regular tools.
+    :param readonly: 是否只读。
+        当 ``kind`` 为 ``observe`` 或 ``statistics`` 时必须为 ``True``（运行时强校验）。
+    :param name: 可选。工具名（默认使用函数名）。
+    :param description: 可选。工具描述（用于模型函数调用 schema）。
+    :param kind: 可选。工具类型：
 
-            **Important**: When kind is 'observe' or 'statistics', readonly must be True.
-            This is enforced at runtime and will raise a ValueError if violated.
-
-    Returns:
-        The decorator function.
-
-    Raises:
-        ValueError: If kind is 'observe' or 'statistics' but readonly is False.
+        - ``observe``：观测工具（通常每步自动调用），除 ``self`` 外最多 1 个参数
+        - ``statistics``：统计工具，除 ``self`` 外不能有参数
+        - ``None``：普通工具
+    :returns: 装饰器函数。
+    :raises ValueError: ``kind`` 与 ``readonly``/参数签名不匹配时抛出。
     """
 
     def tool_decorator(func: F) -> F:
@@ -158,27 +221,27 @@ def tool(
         # Wrap the function to record call history
         original_func = func
         tool_name = name if name else func.__name__
-        
+
         # Get function signature to convert args to kwargs
         sig = inspect.signature(func)
         param_names = list(sig.parameters.keys())
         # Skip 'self' parameter for instance methods
-        if param_names and param_names[0] == 'self':
+        if param_names and param_names[0] == "self":
             param_names = param_names[1:]
 
         def _normalize_to_kwargs(args, kwargs):
             """
             Convert args and kwargs to unified kwargs dict based on function signature.
-            
+
             Args:
                 args: Positional arguments (excluding self)
                 kwargs: Keyword arguments
-                
+
             Returns:
                 Dict of arguments with parameter names as keys
             """
             normalized_kwargs = {}
-            
+
             # Process positional args first (map to parameter names by position)
             for i, arg in enumerate(args):
                 if i < len(param_names):
@@ -186,10 +249,10 @@ def tool(
                     # Only add if not already in kwargs (kwargs take precedence)
                     if param_name not in kwargs:
                         normalized_kwargs[param_name] = arg
-            
+
             # Add all kwargs
             normalized_kwargs.update(kwargs)
-            
+
             return normalized_kwargs
 
         def _create_call_record(
@@ -215,6 +278,7 @@ def tool(
             }
 
         if inspect.iscoroutinefunction(func):
+
             async def async_wrapper(self, *args, **kwargs):
                 exception_occurred = False
                 exception_info = None
@@ -307,9 +371,7 @@ def _serialize_to_literal(value: Any) -> Any:
 
 
 class EnvMeta(type):
-    """
-    Metaclass: Automatically collect the methods decorated with @tool and register them to tool_manager
-    """
+    """元类：收集 ``@tool`` 装饰的方法并注册到 tool_manager。"""
 
     def __new__(cls, name, bases, namespace, **kwargs):
         new_class = super().__new__(cls, name, bases, namespace, **kwargs)
@@ -360,7 +422,7 @@ class EnvBase(metaclass=EnvMeta):
         name = cls.__name__
         for suffix in ("Space", "Env", "Module"):
             if name.endswith(suffix) and len(name) > len(suffix):
-                name = name[:-len(suffix)]
+                name = name[: -len(suffix)]
                 break
         return re.sub(r"(?<=[a-z0-9])(?=[A-Z])", "_", name).lower()
 
@@ -450,68 +512,148 @@ It contains no functions or methods.
 **Note:** This subclass has not provided a detailed description. Please refer to the class documentation or source code for initialization parameters and usage.
 """
 
+    # ---- Skill Discovery ----
+
     @classmethod
-    def get_agent_skills_dir(cls) -> "Path | None":
-        """返回此 env 模块附带的 agent skill 目录。
+    def get_agent_skills_dirs(cls) -> list[Path]:
+        """Return directories containing agent skills provided by this environment module.
 
-        Env 模块可以在自身目录下放置 agent skill，当 PersonAgent
-        初始化时会自动扫描并注册，使 agent 在该环境中获得特定认知能力。
+        This method enables environment modules to bundle specialized skills that agents
+        should use when operating within that environment. Skills are discovered by scanning
+        the returned directories for SKILL.md files.
 
-        约定（按优先级）：
-          1. 目录型模块（如 mobility_space/）→ ``<dir>/agent_skills/``
-          2. 单文件模块（如 economy_space.py）→ ``<stem>_agent_skills/``
+        **Default Discovery Convention:**
 
-        子类可重写此方法指定自定义路径。
+        The base implementation automatically discovers skills from:
+
+        1. Package modules (e.g., ``mobility_space/__init__.py``):
+           Scans ``<module_dir>/agent_skills/`` directory.
+
+        2. Single-file modules (e.g., ``economy_space.py``):
+           Scans ``<module_dir>/<stem>_agent_skills/`` directory.
+
+        **Override for Custom Paths:**
+
+        Subclasses can override this method to specify custom skill directories:
+
+        ```python
+        @classmethod
+        def get_agent_skills_dirs(cls) -> list[Path]:
+            from pathlib import Path
+            # Point to a shared skills directory
+            skills_dir = Path(__file__).parent.parent / "skills"
+            return [skills_dir] if skills_dir.is_dir() else []
+        ```
+
+        **Skill Directory Structure:**
+
+        Each skill directory should contain subdirectories with SKILL.md files:
+
+        ```
+        agent_skills/
+        ├── navigation/
+        │   ├── SKILL.md          # Required: skill definition with YAML frontmatter
+        │   └── scripts/          # Optional: executable scripts
+        └── spatial_reasoning/
+            └── SKILL.md
+        ```
+
+        Returns:
+            List of Path objects pointing to directories containing skill subdirectories.
+            Empty list if no skills are provided.
         """
         import inspect
+
         module_file = Path(inspect.getfile(cls))
         parent = module_file.parent
-        # 单文件模块：economy_space.py → economy_space_agent_skills/
+        dirs: list[Path] = []
+
+        # Single-file module: economy_space.py → economy_space_agent_skills/
         stem_dir = parent / f"{module_file.stem}_agent_skills"
         if stem_dir.is_dir():
-            return stem_dir
-        # 目录型模块：mobility_space/ → mobility_space/agent_skills/
+            dirs.append(stem_dir)
+
+        # Package module: mobility_space/ → mobility_space/agent_skills/
         pkg_dir = parent / "agent_skills"
-        return pkg_dir if pkg_dir.is_dir() else None
+        if pkg_dir.is_dir():
+            dirs.append(pkg_dir)
+
+        return dirs
+
+    def get_default_skill(self) -> str | None:
+        """Return the default skill that should be auto-activated for agents in this environment.
+
+        When PersonAgent initializes within an environment, it automatically activates
+        the specified skill. This allows environments to override the default
+        observation-needs-cognition-plan decision flow with specialized behavior.
+
+        **Use Cases:**
+
+        - Game/experiment environments requiring specific decision protocols
+        - Domain-specific environments with specialized reasoning patterns
+        - Tutorial or guided scenarios with constrained agent behavior
+
+        **Example:**
+
+        ```python
+        def get_default_skill(self) -> str | None:
+            return "public-goods-experiment"  # Auto-activate experiment skill
+        ```
+
+        **Note:** The skill must be available (either built-in or discovered via
+        :meth:`get_agent_skills_dirs`). If the skill is not found, a warning is logged
+        and the agent uses the default skill set.
+
+        Returns:
+            Skill name to auto-activate, or None for default behavior.
+        """
+        return None
+
+    def person_step_constraints(self) -> Optional["PersonStepConstraints"]:
+        """可选：返回本步对 PersonAgent 的通用约束（隐藏技能、钉住 allowed-tools 等）。
+
+        默认无约束。需要「专用默认 skill 独占一步」类行为的环境应返回
+        :class:`PersonStepConstraints`，
+        由 PersonAgent 与具体实验/玩法解耦。
+
+        Returns:
+            PersonStepConstraints | None
+        """
+        return None
 
     async def init(self, start_datetime: datetime):
-        """
-        Initialize the environment module.
+        """初始化环境模块。
+
+        :param start_datetime: 仿真起始时间。
         """
         self.t = start_datetime
 
     async def step(self, tick: int, t: datetime):
-        """
-        Run forward one step.
+        """推进环境模块一个仿真步。
 
-        - **Args**:
-            - tick: The number of ticks of this simulation step.
-            - t: The current datetime of the simulation after this step with the ticks.
+        :param tick: 本步时间跨度（秒）。
+        :param t: 本步结束后的仿真时间。
+        :raises NotImplementedError: 基类不提供默认实现。
         """
         raise NotImplementedError
 
     async def close(self):
-        """
-        Close the environment module.
-        """
+        """关闭环境模块并释放资源（可选重写）。"""
         ...
 
     # ---- Dump & Load ----
     def _dump_state(self) -> dict:
-        """
-        Hook for subclasses to dump internal state. Override if needed.
-        """
+        """子类钩子：导出内部状态（如需持久化请重写）。"""
         return {}
 
     def _load_state(self, state: dict):
-        """
-        Hook for subclasses to load internal state. Override if needed.
-        """
+        """子类钩子：加载内部状态（与 :meth:`_dump_state` 配对）。"""
         return None
 
     async def dump(self) -> dict:
-        """
-        Dump the environment module state to a serializable dict.
+        """序列化环境模块状态。
+
+        :returns: 可序列化字典，包含 ``name``、``t`` 与 ``state``。
         """
         return {
             "name": self.name,
@@ -520,8 +662,9 @@ It contains no functions or methods.
         }
 
     async def load(self, dump_data: dict):
-        """
-        Load the environment module state from a dict produced by dump().
+        """从 :meth:`dump` 的输出恢复环境模块状态。
+
+        :param dump_data: 由 :meth:`dump` 产生的字典。
         """
         try:
             t_str = dump_data.get("t")
@@ -537,40 +680,28 @@ It contains no functions or methods.
             self._load_state(state)
 
     def get_tool_call_history(self) -> list[dict[str, Any]]:
-        """
-        Get the tool call history for this environment module.
+        """获取工具调用历史（浅拷贝）。
 
-        Returns:
-            A list of call records, each containing:
-            - function_name: str
-            - kwargs: dict (serialized, unified kwargs dict including both positional and keyword arguments)
-            - return_value: Any (serialized, None if exception occurred)
-            - exception_occurred: bool
-            - exception_info: dict | None (type and message if exception occurred)
-            - timestamp: str (ISO format)
-            
-        Note:
-            The kwargs dict contains all arguments (both positional and keyword) unified into
-            a single dict with parameter names as keys, according to the function signature.
+        :returns: 调用记录列表。每条包含 ``function_name``、``kwargs``、``return_value``、
+            ``exception_occurred``、``exception_info``、``timestamp``。
         """
         return self._tool_call_history.copy()
 
     def reset_tool_call_history(self):
-        """
-        Reset the tool call history for this environment module.
-        """
+        """清空工具调用历史。"""
         self._tool_call_history.clear()
 
     # ==================== Replay Data Methods ====================
 
     def set_replay_writer(self, writer: "ReplayWriter") -> None:
-        """Set the replay data writer for this environment module.
+        """设置回放写入器（用于自动建表与写入状态）。
 
-        Args:
-            writer: The ReplayWriter instance to use for storing replay data.
+        :param writer: :class:`~agentsociety2.storage.ReplayWriter` 实例。
         """
         self._replay_writer = writer
-        if writer is not None and (self._agent_state_columns or self._env_state_columns):
+        if writer is not None and (
+            self._agent_state_columns or self._env_state_columns
+        ):
             try:
                 loop = asyncio.get_running_loop()
                 task = loop.create_task(self._register_state_tables())
@@ -686,6 +817,4 @@ It contains no functions or methods.
         if not self._state_tables_registered:
             await self._register_state_tables()
         table_name = f"{self._state_table_prefix}_env_state"
-        await self._replay_writer.write(
-            table_name, {"step": step, "t": t, **data}
-        )
+        await self._replay_writer.write(table_name, {"step": step, "t": t, **data})

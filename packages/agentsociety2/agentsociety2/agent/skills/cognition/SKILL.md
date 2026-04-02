@@ -1,93 +1,120 @@
 ---
 name: cognition
-description: Generate emotion, thought, and intention based on observation and needs.
-requires:
-  - observation
-  - needs
+description: Produce emotion.json and intention.json from workspace context.
 ---
 
 # Cognition
 
-This is your inner mind. Given what you observe and what you need, produce three outputs that represent your cognitive state: **emotion**, **thought**, and **intention**.
+Read available workspace context and produce `emotion.json` and `intention.json`.
 
-## Inputs
+## Output Files
 
-Read these workspace files before reasoning:
+- `emotion.json`: Current emotional state
+- `intention.json`: Current intention/goal
 
-| File | Content |
-|------|---------|
-| `observation.txt` | What you currently perceive |
-| `needs.json` | Your four need levels (satiety, energy, safety, social) |
-| `current_need.txt` | Your most urgent need |
-| `memory.jsonl` | Past experiences (read last few entries for recent context) |
+## Input Files (optional, read if present)
 
-Also consider your **profile** (personality, background, relationships) from the system prompt's Agent Identity section.
+Read any existing files from the workspace as context. Common inputs include:
 
-## Output 1: Emotion
+| File | Use |
+|------|-----|
+| `observation.txt` | Main grounding for this tick |
+| `thought.txt` | Inner monologue context |
+| `needs.json`, `current_need.txt` | Urgency context |
+| `memory.jsonl` | Last 5–10 lines for continuity |
+| `emotion.json`, `intention.json` | Prior state for continuity |
+| `plan_state.json` | Whether a multi-step plan is in flight |
 
-Write `emotion.json` with your current emotional state:
+Also use **Agent Identity** from the system prompt. Other JSON in the workspace (`beliefs.json`, etc.) can be read if present. **Skip missing files gracefully.**
+
+## What to do
+
+1. Integrate whatever inputs exist into one appraisal.
+2. Write `emotion.json`: `primary`, dimensional `intensities`, plus `valence` / `arousal` / `note`.
+3. Write `intention.json`: one chosen goal with TPB scores.
+
+## Emotion
+
+### Intensities (0–10 integers)
+
+Dimensions: `sadness`, `joy`, `fear`, `disgust`, `anger`, `surprise`
+
+| Band | Level |
+|------|-------|
+| 0–2 | very low |
+| 3–4 | low |
+| 5–6 | moderate |
+| 7–8 | high |
+| 9–10 | very high |
+
+- Combine recent events (`memory.jsonl` tail, `observation.txt`) with any urgency signals present in the workspace (e.g., need levels if available).
+- If a previous `emotion.json` exists, change intensities only when the situation meaningfully shifted; otherwise stay near prior values.
+
+### Primary Emotion Label
+
+Exactly **one** English label, case-sensitive, from:
+
+`Joy`, `Distress`, `Resentment`, `Pity`, `Hope`, `Fear`, `Satisfaction`, `Relief`, `Disappointment`, `Pride`, `Admiration`, `Shame`, `Reproach`, `Liking`, `Disliking`, `Gratitude`, `Anger`, `Gratification`, `Remorse`, `Love`, `Hate`
+
+## Intention (Theory of Planned Behavior)
+
+| Field | Range | Meaning |
+|-------|-------|---------|
+| `attitude` | 0–1 | How much you favor doing it |
+| `subjective_norm` | 0–1 | Social pressure / what others expect |
+| `perceived_control` | 0–1 | How controllable / feasible it feels |
+
+Higher values on all three → stronger commitment. `priority`: lower number = more urgent this tick.
+
+### Selection Procedure
+
+1. List up to 5 candidate goals (fewer is fine).
+2. If the workspace contains urgency signals (e.g., unmet needs), prefer candidates that address them; otherwise leisure or exploration is appropriate.
+3. Score each candidate with the three TPB fields; assign `priority` to each.
+4. Emit only the best candidate as `intention.json` (lowest `priority` wins).
+5. Phrase `intention` as a goal ("Eat lunch at the café"), not step-by-step motor instructions.
+
+## Output File Schemas
+
+### emotion.json
 
 ```json
 {
-  "primary": "curious",
-  "valence": 0.6,
+  "primary": "Hope",
+  "valence": 0.5,
   "arousal": 0.4,
-  "note": "Noticed a new shop opened nearby; feeling intrigued."
+  "intensities": {
+    "sadness": 3,
+    "joy": 6,
+    "fear": 2,
+    "disgust": 1,
+    "anger": 1,
+    "surprise": 3
+  },
+  "note": "Brief first-person gloss"
 }
 ```
 
-Fields:
-- `primary`: a single emotion word (happy, sad, anxious, angry, curious, content, lonely, excited, bored, fearful, etc.)
-- `valence`: −1.0 (very negative) to 1.0 (very positive)
-- `arousal`: 0.0 (calm) to 1.0 (agitated/excited)
-- `note`: one sentence explaining why you feel this way
-
-**Guidelines**: Your emotion should be consistent with your personality and situation. Don't default to "happy" every tick. If nothing notable is happening and needs are satisfied, "content" or "neutral" is appropriate. If a need is critical, you should feel the corresponding distress.
-
-## Output 2: Thought
-
-Write `thought.txt` with a brief inner monologue (1–3 sentences, first person):
-
-```
-I notice the café across the street is open. My energy is getting low, and I could use some food too. Maybe I should head over there.
-```
-
-**Guidelines**: Think like a real person. Reference what you observe, what you need, and what you remember. This is NOT a planning step—just natural reflection.
-
-## Output 3: Intention
-
-Write `intention.json` with what you want to do next:
+### intention.json
 
 ```json
 {
-  "action_type": "move",
-  "target": "café",
-  "reason": "Low energy and satiety; want to eat and rest.",
-  "priority": "high"
+  "intention": "Have lunch at the café",
+  "priority": 1,
+  "attitude": 0.9,
+  "subjective_norm": 0.7,
+  "perceived_control": 0.8,
+  "reasoning": "One or two sentences"
 }
 ```
 
-Fields:
-- `action_type`: what kind of action (e.g., `move`, `interact`, `communicate`, `rest`, `explore`, `wait`, `work`)
-- `target`: the object, location, or agent you want to act on
-- `reason`: one sentence explaining the motivation
-- `priority`: `high` (urgent need or important event), `medium` (normal), `low` (idle/optional)
+## Execution Sequence
 
-**Guidelines**:
-- The intention should logically follow from your observation + needs + thought.
-- If a need is critical (< 0.2), your intention should address it unless there's an overriding emergency (safety).
-- If nothing pressing, it's fine to have a `low` priority intention like exploring or socializing.
-- If the observation indicates an ongoing multi-step activity (e.g., you're in the middle of a conversation), your intention should continue it rather than abruptly switching.
+1. `workspace_read` any of the optional inputs that exist (skip missing paths).
+2. `workspace_write("emotion.json", ...)`
+3. `workspace_write("intention.json", ...)`
+4. `done`
 
-## Execution
+## Notes
 
-Use `workspace_read` to load each input file, reason internally, then `workspace_write` each output. Example sequence:
-
-1. `workspace_read("observation.txt")`
-2. `workspace_read("needs.json")`
-3. `workspace_read("current_need.txt")`
-4. `workspace_read("memory.jsonl")` (optional, for context)
-5. Reason about your cognitive state...
-6. `workspace_write("emotion.json", ...)`
-7. `workspace_write("thought.txt", ...)`
-8. `workspace_write("intention.json", ...)`
+- Intentions should be feasible given the latest observation; if the situation is unclear, prefer low-risk intentions (`wait`, `observe`, `move to safer area`) over fantasy.

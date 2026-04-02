@@ -44,6 +44,7 @@ from typing import (
     Type,
     TypeVar,
 )
+from pathlib import Path
 
 if TYPE_CHECKING:
     from agentsociety2.storage import ReplayWriter
@@ -72,8 +73,10 @@ T = TypeVar("T", bound=BaseModel)
 
 
 def _is_rate_limit_like_error(error: Exception) -> bool:
-    """
-    Return True for rate-limit related exceptions, including LiteLLM router cooldown errors.
+    """判断异常是否“类似速率限制”。
+
+    :param error: 捕获到的异常对象。
+    :returns: 若可判定为 429/Router cooldown/无可用 deployments 等限流相关错误则返回 ``True``。
     """
     if isinstance(error, RateLimitError):
         return True
@@ -155,11 +158,14 @@ ToolsInfoDict = Dict[str, ModuleToolsInfo]
 
 
 class RouterBase(ABC):
-    """
-    Abstract base class for environment routers.
+    """环境路由器抽象基类。
 
-    All router implementations must inherit from this class and implement
-    the abstract methods to provide different routing strategies.
+    Router 用于协调 agent 与环境模块（:class:`~agentsociety2.env.base.EnvBase`）的交互，职责包括：
+
+    - 聚合并过滤环境工具（函数调用 schema）
+    - 维护仿真时钟（``self.t``）
+    - 提供统一 LLM 调用封装（重试与 token 统计）
+    - 生成 world description（可选，用于 PersonAgent 的提示词）
     """
 
     def __init__(
@@ -169,14 +175,12 @@ class RouterBase(ABC):
         max_llm_call_retry: int = 10,
         replay_writer: Optional["ReplayWriter"] = None,
     ):
-        """
-        Initialize the router.
+        """创建路由器实例。
 
-        Args:
-            env_modules: The list of environment modules to use for the router.
-            max_steps: The maximum number of execution steps.
-            max_llm_call_retry: The maximum number of times to retry LLM calls.
-            replay_writer: Optional ReplayWriter for storing simulation state. Can also be set via set_replay_writer().
+        :param env_modules: 环境模块列表。
+        :param max_steps: 最大执行步数（由具体 router 实现解释）。
+        :param max_llm_call_retry: LLM 调用最大重试次数下限（至少为 1）。
+        :param replay_writer: 可选回放写入器；若提供会自动注入到各 env module。
         """
         # Get router and model names from environment-based configuration
         # ReAct/codegen uses coder model
@@ -190,6 +194,7 @@ class RouterBase(ABC):
         self.max_steps = max_steps
         self.max_llm_call_retry = max(max_llm_call_retry, 1)
         self._replay_writer = replay_writer
+        self.run_dir: Path | None = None  # 由 cli.py 设置
         if replay_writer is not None:
             for env_module in env_modules:
                 env_module.set_replay_writer(replay_writer)
@@ -208,13 +213,7 @@ class RouterBase(ABC):
         self._generate_world_description_lock = asyncio.Lock()
 
     def _add_current_time_to_ctx(self, ctx: dict) -> None:
-        """
-        Add current time information to the context dictionary.
-        This ensures all generated code and tool calls have access to the current time.
-
-        Args:
-            ctx: The context dictionary to update (modified in place).
-        """
+        """向 ctx 注入当前时间信息（原地修改）。"""
         ctx["current_time"] = {
             "datetime": self.t.isoformat(),
             "formatted": self.t.strftime("%Y-%m-%d %H:%M:%S"),
@@ -222,47 +221,43 @@ class RouterBase(ABC):
             "timestamp": self.t.timestamp(),
         }
 
+    def sync_simulation_clock(self, t: datetime) -> None:
+        """与编排器当前仿真时刻对齐。
+
+        ``ask``/codegen 的 InitStage 用 ``self.t`` 写入 ``ctx['current_time']``。
+        若仅在 ``env_router.step`` 末尾才更新 ``self.t``，而 agent 先执行，则整步内时钟落后一步。
+        任何复制 ``AgentSociety.step`` 顺序（先 agent 后 env.step）的代码都应在 agent 开始前调用本方法。
+        """
+        self.t = t
+
     @abstractmethod
     async def ask(
         self, ctx: dict, instruction: str, readonly: bool = False, template_mode: bool = False
     ) -> Tuple[dict, str]:
-        """
-        The unified interface for the interaction between the agent and the environment.
+        """与环境交互的统一入口（由子类实现具体路由策略）。
 
-        Args:
-            ctx: A dict-like object that contains the context, the environment can get some variables from it.
-                 In template mode, ctx should contain a 'variables' key with variable values.
-            instruction: The instruction to ask the environment. In template mode, this is treated as a
-                         template instruction where variables are substituted using {variable_name} syntax.
-            readonly: The readonly flag to pass to the environment modules.
-            template_mode: Whether to enable template mode. When True, the instruction is treated as a
-                          template instruction where variables from ctx['variables'] are substituted.
-
-        Returns:
-            A tuple of (ctx, answer)
-                - ctx: A dict-like object that contains the context, the environment can update some variables in it.
-                - answer: The answer from the environment.
+        :param ctx: 上下文字典。模板模式下可包含 ``variables``，用于 ``{var}`` 替换。
+        :param instruction: 指令文本。模板模式下会进行变量替换后再执行。
+        :param readonly: 是否只读（只读时应避免改变环境状态）。
+        :param template_mode: 是否启用模板模式。
+        :returns: ``(ctx, answer)``，其中 ctx 可能被环境更新。
         """
         raise NotImplementedError
 
     async def init(self, start_datetime: datetime):
-        """
-        Initialize the router with the start datetime.
+        """初始化路由器与环境模块。
 
-        Args:
-            start_datetime: The start datetime of the simulation.
+        :param start_datetime: 仿真起始时间。
         """
         self.t = start_datetime
         for env_module in self.env_modules:
             await env_module.init(start_datetime)
 
     async def step(self, tick: int, t: datetime):
-        """
-        Run forward one step for all simulation modules.
+        """推进环境模块一个仿真步。
 
-        Args:
-            tick: The number of ticks of this simulation step.
-            t: The current datetime of the simulation after this step with the ticks.
+        :param tick: 本步时间跨度（秒）。
+        :param t: 本步结束后的仿真时间。
         """
         self.t = t
         tasks = []
@@ -271,27 +266,14 @@ class RouterBase(ABC):
         await asyncio.gather(*tasks)
 
     async def close(self):
-        """
-        Close the router.
-        """
+        """关闭路由器（关闭所有环境模块）。"""
         for env_module in self.env_modules:
             await env_module.close()
 
     def get_tool_call_history(self) -> List[Dict[str, Any]]:
-        """
-        Get the tool call history from all environment modules, sorted by timestamp.
+        """汇总所有环境模块的工具调用历史（按时间排序）。
 
-        Returns:
-            A list of call history entries, sorted by timestamp (oldest first).
-            Each call history entry contains:
-            - module_name: str (name of the environment module)
-            - function_name: str
-            - args: list (serialized)
-            - kwargs: dict (serialized)
-            - return_value: Any (serialized, None if exception occurred)
-            - exception_occurred: bool
-            - exception_info: dict | None (type and message if exception occurred)
-            - timestamp: str (ISO format)
+        :returns: 调用记录列表（按 ``timestamp`` 升序）。
         """
         all_history: List[Dict[str, Any]] = []
         for env_module in self.env_modules:
@@ -308,36 +290,25 @@ class RouterBase(ABC):
         return all_history
 
     def reset_tool_call_history(self):
-        """
-        Reset the tool call history for all environment modules.
-        """
+        """清空所有环境模块的工具调用历史。"""
         for env_module in self.env_modules:
             env_module.reset_tool_call_history()
 
     # ==================== Replay Data Methods ====================
 
     def set_replay_writer(self, writer: "ReplayWriter") -> None:
-        """Set the replay data writer for all environment modules.
+        """为所有环境模块设置回放写入器。
 
-        Args:
-            writer: The ReplayWriter instance to use for storing replay data.
+        :param writer: :class:`~agentsociety2.storage.ReplayWriter` 实例。
         """
         for env_module in self.env_modules:
             env_module.set_replay_writer(writer)
 
     async def get_agent_position(self, agent_id: int) -> Tuple[Optional[float], Optional[float]]:
-        """Get the position of an agent from any environment module that supports it.
+        """从任意支持的位置模块获取 agent 坐标。
 
-        Iterates through all environment modules and returns the first
-        non-None position found. Only modules that implement get_agent_position
-        (e.g., MobilitySpace) will be queried.
-
-        Args:
-            agent_id: The ID of the agent.
-
-        Returns:
-            A tuple of (longitude, latitude), or (None, None) if not available
-            from any environment module.
+        :param agent_id: agent id。
+        :returns: ``(lng, lat)``；不可用时返回 ``(None, None)``。
         """
         for env_module in self.env_modules:
             # Only call if module implements get_agent_position
@@ -348,16 +319,9 @@ class RouterBase(ABC):
         return None, None
 
     def get_system_prompt(self) -> str:
-        """
-        构建系统提示词，参考CodeGenRouter的风格。
-        系统提示词只包含通用的指导原则，不包含具体的用户任务指令。
+        """构建 router 侧的通用 system prompt（不含具体任务指令）。
 
-        Args:
-            ctx: 上下文字典
-            readonly: 是否只读模式
-
-        Returns:
-            系统提示词字符串
+        :returns: system prompt 文本。
         """
 
         prompt = """You are an AI assistant that helps LLM agents accomplish tasks in a virtual world simulation environment.
@@ -398,25 +362,16 @@ class RouterBase(ABC):
         max_delay: float = 60.0,
         **kwargs: Any,
     ):
-        """
-        Wrapper for LLM router acompletion that records token usage statistics.
-        System prompt is always prepended to messages.
-        Includes retry logic for handling rate limit errors.
+        """封装 LiteLLM Router 的 acompletion（含重试与 token 统计）。
 
-        Args:
-            model: The model name to use for completion.
-            messages: The messages to send to the LLM.
-            stream: Whether to stream the response.
-            max_retries: Maximum number of retry attempts. If None, uses self.max_llm_call_retry.
-            base_delay: Base delay in seconds for exponential backoff when 429 error occurs (default: 1.0).
-            max_delay: Maximum delay in seconds for exponential backoff (default: 60.0).
-            **kwargs: Additional arguments to pass to the router acompletion.
-
-        Returns:
-            The response from the LLM router.
-        
-        Raises:
-            ValueError: If the response cannot be retrieved after all retries.
+        :param model: ``coder`` 或 ``summary``。
+        :param messages: 消息列表（不自动追加 system prompt；若需要请用 :meth:`acompletion_with_system_prompt`）。
+        :param stream: 是否流式返回。
+        :param max_retries: 可选。最大重试次数；为空则使用 ``self.max_llm_call_retry``。
+        :param base_delay: 429 类错误的指数退避基准延迟。
+        :param max_delay: 指数退避最大延迟。
+        :returns: LLM 响应对象（stream=False 时为 :class:`litellm.types.utils.ModelResponse`）。
+        :raises ValueError: 超过重试次数仍失败时抛出。
         """
         logger = get_logger()
         
@@ -504,16 +459,11 @@ class RouterBase(ABC):
         messages: list[AllMessageValues],
         **kwargs: Any,
     ):
-        """
-        Send a completion request to the router's LLM with the system prompt.
+        """发送补全请求并自动在最前追加 router system prompt。
 
-        Args:
-            model: The model name to use for completion.
-            messages: The messages to send to the LLM.
-            **kwargs: Additional arguments to pass to the router acompletion.
-
-        Returns:
-            The response from the LLM router.
+        :param model: ``coder`` 或 ``summary``。
+        :param messages: 消息列表。
+        :returns: LLM 响应对象。
         """
         system_prompt = self.get_system_prompt()
         request_messages: list[AllMessageValues] = [
@@ -538,56 +488,17 @@ class RouterBase(ABC):
         error_feedback_prompt: str | None = None,
         **kwargs: Any,
     ) -> T:
-        """
-        Send a completion request to the router's LLM and validate the response against a Pydantic model.
-        Supports multi-turn conversation to provide error feedback to LLM for correction.
+        """发送补全并校验为指定 Pydantic 模型（失败时自动反馈并重试）。
 
-        This function will:
-        1. Send the initial request to LLM with system prompt
-        2. Extract JSON from the response
-        3. Attempt to validate against the Pydantic model
-        4. If validation fails, provide error feedback to LLM and retry immediately
-        5. If a 429 (rate limit) error occurs, retry with binary exponential backoff
-        6. Return the validated Pydantic model instance
-
-        Args:
-            model: The model name to use for completion ("coder" or "summary").
-            model_type: The Pydantic model type to validate against.
-            messages: The messages to send to the LLM.
-            max_retries: Maximum number of retry attempts (default: 10).
-            base_delay: Base delay in seconds for exponential backoff when 429 error occurs (default: 1.0).
-                       Only used for 429 rate limit errors. Other errors retry immediately.
-            max_delay: Maximum delay in seconds for exponential backoff (default: 60.0).
-            error_feedback_prompt: Optional custom prompt template for error feedback.
-                                  If None, a default prompt will be used.
-                                  The template should contain {error_message} placeholder.
-            **kwargs: Additional arguments to pass to the router acompletion.
-
-        Returns:
-            The validated Pydantic model instance.
-
-        Raises:
-            ValueError: If the response cannot be parsed or validated after all retries.
-            AssertionError: If router is not initialized.
-
-        Note:
-            Binary exponential backoff is only applied when a 429 (rate limit) error is detected.
-            For validation errors and other non-rate-limit errors, the function retries immediately
-            without delay to provide faster feedback to the LLM.
-
-        Example:
-            ```python
-            class MyModel(BaseModel):
-                name: str
-                age: int
-
-            result = await router.acompletion_with_pydantic_validation(
-                model="coder",
-                model_type=MyModel,
-                messages=[{"role": "user", "content": "Generate a person"}],
-            )
-            print(result.name, result.age)
-            ```
+        :param model: ``coder`` 或 ``summary``。
+        :param model_type: 用于校验的 Pydantic 模型类型。
+        :param messages: 消息列表（会自动追加 system prompt）。
+        :param max_retries: 最大重试次数（不含首次尝试）。
+        :param base_delay: 429 类错误指数退避基准延迟。
+        :param max_delay: 指数退避最大延迟。
+        :param error_feedback_prompt: 可选。自定义错误反馈模板（需包含 ``{error_message}`` 与 ``{model_schema}`` 占位符）。
+        :returns: 校验通过的 Pydantic 实例。
+        :raises ValueError: 解析/校验在重试后仍失败时抛出。
         """
         logger = get_logger()
 

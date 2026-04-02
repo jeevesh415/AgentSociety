@@ -1,6 +1,4 @@
-"""
-Data models for module initialization and configuration.
-"""
+"""模块初始化与后端请求的数据模型（Pydantic）。"""
 
 from datetime import datetime
 from typing import Any, Dict, List
@@ -16,7 +14,7 @@ __all__ = [
 
 
 class EnvModuleInitConfig(BaseModel):
-    """Configuration for initializing an environment module."""
+    """环境模块初始化配置。"""
 
     module_type: str = Field(
         ...,
@@ -30,7 +28,7 @@ class EnvModuleInitConfig(BaseModel):
 
 
 class AgentInitConfig(BaseModel):
-    """Configuration for initializing an agent."""
+    """agent 初始化配置。"""
 
     agent_type: str = Field(
         ..., description="The type of agent (e.g., 'person_agent', 'custom_agent')"
@@ -45,7 +43,7 @@ class AgentInitConfig(BaseModel):
 
 
 class CreateInstanceRequest(BaseModel):
-    """Request to create a new AgentSociety instance."""
+    """创建 AgentSociety 实例的请求体。"""
 
     instance_id: str = Field(
         ..., description="Unique identifier for this society instance"
@@ -67,7 +65,7 @@ class CreateInstanceRequest(BaseModel):
 
 
 class AskRequest(BaseModel):
-    """Request to ask or intervene in a society instance."""
+    """对实例进行 ask 的请求体。"""
 
     instance_id: str = Field(..., description="The ID of the society instance")
 
@@ -75,7 +73,7 @@ class AskRequest(BaseModel):
 
 
 class InterventionRequest(BaseModel):
-    """Request to intervene in a society instance."""
+    """对实例进行 intervene 的请求体。"""
 
     instance_id: str = Field(..., description="The ID of the society instance")
 

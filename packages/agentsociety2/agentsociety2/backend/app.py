@@ -35,7 +35,10 @@ load_dotenv(_project_root / ".env")
 
 # 配置标准 logging
 def _setup_logging():
-    """配置应用日志"""
+    """配置后端服务日志。
+
+    读取环境变量 ``BACKEND_LOG_LEVEL``，并初始化 root logger 与相关模块 logger。
+    """
     log_level = os.getenv("BACKEND_LOG_LEVEL", "info")
     # 将 uvicorn 的 "trace" 映射到 Python logging 的 "DEBUG"
     python_log_level = "DEBUG" if log_level.lower() == "trace" else log_level.upper()
@@ -69,7 +72,7 @@ logger = get_logger()
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
-    """应用生命周期管理"""
+    """FastAPI 应用生命周期管理（启动/关闭钩子）。"""
     # 启动时执行
     logger.info("AI Social Scientist Backend Service 启动中...")
     logger.info(f"项目根目录: {_project_root}")
@@ -108,7 +111,7 @@ app.include_router(agent_skills.router)
 
 @app.get("/")
 async def root():
-    """根路径，返回API信息"""
+    """:returns: 后端服务基本信息与 endpoints 列表。"""
     return {
         "service": "AI Social Scientist Backend API",
         "version": "2.0.0",
@@ -126,13 +129,18 @@ async def root():
 
 @app.get("/health")
 async def health_check():
-    """健康检查端点"""
+    """:returns: 健康状态。"""
     return {"status": "healthy"}
 
 
 @app.exception_handler(Exception)
 async def global_exception_handler(request: Request, exc: Exception):
-    """全局异常处理器"""
+    """全局异常处理器。
+
+    :param request: FastAPI 请求对象（用于扩展日志上下文）。
+    :param exc: 未捕获异常。
+    :returns: 标准化的 500 JSON 响应。
+    """
     logger.error(f"未处理的异常: {exc}", exc_info=True)
     return JSONResponse(
         status_code=500,

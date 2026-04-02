@@ -1,4 +1,13 @@
-"""SQLModel definitions for replay data storage."""
+"""回放数据存储的框架表（SQLModel）。
+
+该模块定义三张框架表：
+
+- :class:`~agentsociety2.storage.models.AgentProfile`：agent 基本信息与 profile
+- :class:`~agentsociety2.storage.models.AgentStatus`：每步状态快照
+- :class:`~agentsociety2.storage.models.AgentDialog`：对话/反思记录
+
+它们由 :class:`~agentsociety2.storage.ReplayWriter` 在初始化时创建并写入。
+"""
 
 from datetime import datetime
 from typing import Any, Dict, Optional
@@ -8,7 +17,7 @@ from sqlmodel import Field, SQLModel
 
 
 class AgentProfile(SQLModel, table=True):
-    """Agent profile information."""
+    """agent 档案信息（框架表）。"""
 
     __tablename__ = "agent_profile"
 
@@ -19,7 +28,7 @@ class AgentProfile(SQLModel, table=True):
 
 
 class AgentStatus(SQLModel, table=True):
-    """Agent status snapshot at a specific step."""
+    """agent 在某一步的状态快照（框架表）。"""
 
     __tablename__ = "agent_status"
 
@@ -32,7 +41,7 @@ class AgentStatus(SQLModel, table=True):
 
 
 class AgentDialog(SQLModel, table=True):
-    """Agent dialog record."""
+    """agent 对话记录（框架表）。"""
 
     __tablename__ = "agent_dialog"
 
