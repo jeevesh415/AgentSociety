@@ -69,14 +69,59 @@ function getAgentColor(profile: Record<string, any> | undefined): [number, numbe
   return [22, 119, 255, 255];
 }
 
+const RANDOM_LAYOUT_ASPECT_RATIO = 1.6;
+const RANDOM_LAYOUT_WIDTH = 240;
+const RANDOM_LAYOUT_HEIGHT = RANDOM_LAYOUT_WIDTH / RANDOM_LAYOUT_ASPECT_RATIO;
+const RANDOM_LAYOUT_PADDING = 16;
+const RANDOM_LAYOUT_JITTER = 0.32;
+
+function hashInt(value: number): number {
+  let hashed = value | 0;
+  hashed = Math.imul(hashed ^ 0x9e3779b9, 0x85ebca6b);
+  hashed ^= hashed >>> 13;
+  hashed = Math.imul(hashed, 0xc2b2ae35);
+  hashed ^= hashed >>> 16;
+  return hashed >>> 0;
+}
+
+function hashToUnit(value: number): number {
+  return hashInt(value) / 0x100000000;
+}
+
 function getRandomLayout(ids: number[]): Map<number, [number, number]> {
   const positions = new Map<number, [number, number]>();
-  ids.forEach((id) => {
-    const seed = id * 9301 + 49297;
-    const x = ((seed % 1000) / 1000 - 0.5) * 220;
-    const y = (((seed * 123) % 1000) / 1000 - 0.5) * 220;
-    positions.set(id, [x, y]);
+  if (ids.length === 0) {
+    return positions;
+  }
+
+  // Use a deterministic jittered grid so agents are spread evenly without
+  // collapsing into visible clusters when no geo positions are available.
+  const shuffledIds = [...ids].sort((left, right) => {
+    const leftHash = hashInt(left);
+    const rightHash = hashInt(right);
+    if (leftHash === rightHash) {
+      return left - right;
+    }
+    return leftHash - rightHash;
   });
+
+  const columns = Math.max(1, Math.ceil(Math.sqrt(ids.length * RANDOM_LAYOUT_ASPECT_RATIO)));
+  const rows = Math.max(1, Math.ceil(ids.length / columns));
+  const usableWidth = RANDOM_LAYOUT_WIDTH - RANDOM_LAYOUT_PADDING * 2;
+  const usableHeight = RANDOM_LAYOUT_HEIGHT - RANDOM_LAYOUT_PADDING * 2;
+  const cellWidth = usableWidth / columns;
+  const cellHeight = usableHeight / rows;
+
+  shuffledIds.forEach((id, index) => {
+    const column = index % columns;
+    const row = Math.floor(index / columns);
+    const centerX = -usableWidth / 2 + cellWidth * (column + 0.5);
+    const centerY = usableHeight / 2 - cellHeight * (row + 0.5);
+    const jitterX = (hashToUnit(id * 31 + 7) - 0.5) * cellWidth * RANDOM_LAYOUT_JITTER;
+    const jitterY = (hashToUnit(id * 31 + 19) - 0.5) * cellHeight * RANDOM_LAYOUT_JITTER;
+    positions.set(id, [centerX + jitterX, centerY + jitterY]);
+  });
+
   return positions;
 }
 

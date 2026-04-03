@@ -3,15 +3,15 @@
  */
 
 import * as React from 'react';
-import { Button, Divider, Empty, Flex, Pagination, Select, Spin, Table, Tooltip, Typography } from 'antd';
-import { CloseOutlined } from '@ant-design/icons';
+import { Button, Divider, Empty, Flex, Modal, Pagination, Select, Spin, Table, Tooltip, Typography } from 'antd';
+import { CloseOutlined, DatabaseOutlined, ReloadOutlined } from '@ant-design/icons';
 import { useReplay } from '../store';
 import type { ReplayDatasetColumn, ReplayDatasetInfo } from '../types';
 import { PANEL_ICONS } from '../icons';
 
 const { Title } = Typography;
 const AGENT_HISTORY_REQUEST_KEY = 'agent-history-raw-table';
-const HISTORY_PAGE_SIZE = 10;
+const HISTORY_PAGE_SIZE = 20;
 
 function formatValue(value: any): React.ReactNode {
   if (value === null || value === undefined) {
@@ -96,6 +96,7 @@ export const AgentDetailPanel: React.FC = () => {
   const historyTableRows = replayDatasetRowsByRequestKey[AGENT_HISTORY_REQUEST_KEY] ?? null;
   const [historyPage, setHistoryPage] = React.useState(1);
   const [historyLoading, setHistoryLoading] = React.useState(false);
+  const [historyModalOpen, setHistoryModalOpen] = React.useState(false);
   const currentRows = selectedAgentId === null
     ? []
     : agentStateDatasets.map((dataset) => ({
@@ -105,27 +106,30 @@ export const AgentDetailPanel: React.FC = () => {
 
   React.useEffect(() => {
     setHistoryPage(1);
-  }, [selectedAgentId, historyDatasetId]);
+    setHistoryModalOpen(false);
+    setHistoryLoading(false);
+    actions.setReplayDatasetRows(AGENT_HISTORY_REQUEST_KEY, null);
+  }, [actions, selectedAgentId, historyDatasetId]);
 
-  React.useEffect(() => {
+  const openHistoryRawTable = React.useCallback((page: number = 1) => {
     if (selectedAgentId === null || !historyDataset) {
-      setHistoryLoading(false);
-      actions.setReplayDatasetRows(AGENT_HISTORY_REQUEST_KEY, null);
       return;
     }
-
+    setHistoryPage(page);
+    setHistoryModalOpen(true);
     setHistoryLoading(true);
     actions.setReplayDatasetRows(AGENT_HISTORY_REQUEST_KEY, null);
     sendMessage({
       command: 'fetchReplayDatasetRows',
       requestKey: AGENT_HISTORY_REQUEST_KEY,
       datasetId: historyDataset.dataset_id,
-      page: historyPage,
+      page,
       pageSize: HISTORY_PAGE_SIZE,
       entityId: selectedAgentId,
+      endStep: currentStepNumber ?? undefined,
       descOrder: true,
     });
-  }, [actions, historyDataset, historyPage, selectedAgentId, sendMessage]);
+  }, [actions, currentStepNumber, historyDataset, selectedAgentId, sendMessage]);
 
   React.useEffect(() => {
     if (!historyDataset || !historyTableRows || historyTableRows.dataset_id !== historyDataset.dataset_id) {
@@ -149,6 +153,10 @@ export const AgentDetailPanel: React.FC = () => {
   }, [historyDataset, historyTableRows]);
 
   const rootClass = profile ? 'left-inner' : 'left-inner collapsed';
+  const profileEntries = React.useMemo(
+    () => Object.entries(profile?.profile ?? {}).filter(([key]) => key !== 'name'),
+    [profile]
+  );
 
   return (
     <Flex vertical justify="flex-start" align="center" className={rootClass}>
@@ -173,7 +181,7 @@ export const AgentDetailPanel: React.FC = () => {
                 <span style={{ fontWeight: 600, color: '#007AFF' }}>{profile.name}</span>
               </Tooltip>
             </Flex>
-            {Object.entries(profile.profile ?? {}).map(([key, value]) => (
+            {profileEntries.map(([key, value]) => (
               <Flex
                 className={typeof value === 'object' ? 'left-info-block-status' : 'left-info-block'}
                 justify="space-between"
@@ -229,67 +237,107 @@ export const AgentDetailPanel: React.FC = () => {
             ) : (
               <div
                 className="left-info-history-card"
-                style={{ width: '100%', minHeight: '220px', display: 'flex', flexDirection: 'column', gap: '12px' }}
+                style={{ width: '100%', display: 'flex', flexDirection: 'column', gap: '12px' }}
               >
                 <div className="left-info-history-inner" style={{ width: '100%' }}>
-                  <div style={{ fontWeight: 600, color: '#1677ff', marginBottom: '6px' }}>
-                    {historyDataset.title || historyDataset.dataset_id}
-                  </div>
-                  <div style={{ fontSize: '11px', color: '#909399', marginBottom: '8px' }}>
-                    {historyDataset.module_name} / {historyDataset.dataset_id}
-                  </div>
-
-                  {historyLoading ? (
-                    <div style={{ padding: '24px 0', textAlign: 'center' }}>
-                      <Spin tip="Loading raw table..." />
+                  <Flex align="center" justify="space-between" style={{ marginBottom: '8px' }}>
+                    <div>
+                      <div style={{ fontWeight: 600, color: '#1677ff' }}>
+                        {historyDataset.title || historyDataset.dataset_id}
+                      </div>
+                      <div style={{ fontSize: '11px', color: '#909399', marginTop: '4px' }}>
+                        {historyDataset.module_name} / {historyDataset.dataset_id}
+                      </div>
                     </div>
-                  ) : !historyTableRows || historyTableRows.dataset_id !== historyDataset.dataset_id ? (
-                    <div className="left-info-empty">Waiting for raw rows...</div>
-                  ) : historyTableRows.rows.length === 0 ? (
-                    <Empty
-                      image={Empty.PRESENTED_IMAGE_SIMPLE}
-                      description="No rows for this agent in the selected dataset"
+                    <Button
+                      size="small"
+                      icon={<DatabaseOutlined />}
+                      onClick={() => openHistoryRawTable(1)}
+                    >
+                      Raw
+                    </Button>
+                  </Flex>
+
+                  {historyDataset.description ? (
+                    <div style={{ fontSize: '12px', color: '#606266', marginBottom: '8px' }}>
+                      {historyDataset.description}
+                    </div>
+                  ) : null}
+
+                  <div style={{ fontSize: '11px', color: '#909399' }}>
+                    Agent {selectedAgentId} · {currentStepNumber !== null ? `Rows up to step ${currentStepNumber}` : 'All rows'}
+                  </div>
+                </div>
+              </div>
+            )}
+          </Flex>
+
+          <Modal
+            title={historyDataset ? `State History · ${historyDataset.title || historyDataset.dataset_id}` : 'State History'}
+            open={historyModalOpen}
+            onCancel={() => setHistoryModalOpen(false)}
+            footer={null}
+            width={1000}
+            style={{ top: 20 }}
+          >
+            <div style={{ display: 'flex', flexDirection: 'column', gap: 16 }}>
+              {historyDataset && historyTableRows?.dataset_id === historyDataset.dataset_id ? (
+                historyTableRows.rows.length === 0 ? (
+                  <Empty
+                    image={Empty.PRESENTED_IMAGE_SIMPLE}
+                    description="No rows for this agent in the selected dataset"
+                  />
+                ) : (
+                  <>
+                    <Table
+                      dataSource={historyTableRows.rows}
+                      columns={historyColumns}
+                      size="small"
+                      pagination={false}
+                      bordered
+                      scroll={{ x: 'max-content', y: 560 }}
+                      rowKey={(_, index) => `${historyDataset.dataset_id}-${historyPage}-${index ?? 0}`}
+                      onRow={(record) => {
+                        const isCurrentStep = currentStepNumber !== null && Number(record.step) === currentStepNumber;
+                        return isCurrentStep
+                          ? {
+                            style: {
+                              background: 'rgba(0, 122, 255, 0.10)',
+                            },
+                          }
+                          : {};
+                      }}
                     />
-                  ) : (
-                    <Flex vertical gap={10}>
-                      <Table
-                        dataSource={historyTableRows.rows}
-                        columns={historyColumns}
-                        size="small"
-                        pagination={false}
-                        bordered
-                        scroll={{ x: 'max-content', y: 320 }}
-                        rowKey={(_, index) => `${historyDataset.dataset_id}-${historyPage}-${index ?? 0}`}
-                        onRow={(record) => {
-                          const isCurrentStep = currentStepNumber !== null && Number(record.step) === currentStepNumber;
-                          return isCurrentStep
-                            ? {
-                              style: {
-                                background: 'rgba(0, 122, 255, 0.10)',
-                              },
-                            }
-                            : {};
-                        }}
-                      />
-                      <Flex justify="space-between" align="center">
+                    <Flex justify="space-between" align="center">
+                      <Button
+                        icon={<ReloadOutlined />}
+                        onClick={() => openHistoryRawTable(historyPage)}
+                      >
+                        Refresh
+                      </Button>
+                      <Flex align="center" gap={12}>
                         <span style={{ fontSize: '11px', color: '#909399' }}>
-                          Showing raw rows filtered by `agent_id = {selectedAgentId}`
+                          Showing raw rows filtered by `agent_id = {selectedAgentId}`{currentStepNumber !== null ? ` and step <= ${currentStepNumber}` : ''}
                         </span>
                         <Pagination
                           simple
                           current={historyPage}
                           total={historyTableRows.total}
                           pageSize={HISTORY_PAGE_SIZE}
-                          onChange={setHistoryPage}
+                          onChange={(page) => openHistoryRawTable(page)}
                           size="small"
                         />
                       </Flex>
                     </Flex>
-                  )}
+                  </>
+                )
+              ) : (
+                <div style={{ textAlign: 'center', padding: 40 }}>
+                  {historyLoading ? <Spin tip="Loading raw rows..." /> : 'Waiting for dataset rows...'}
                 </div>
-              </div>
-            )}
-          </Flex>
+              )}
+            </div>
+          </Modal>
         </>
       ) : (
         <div className="left-info-empty" style={{ marginTop: '20px', color: '#909399' }}>
