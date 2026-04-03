@@ -3,7 +3,6 @@
 AI Social Scientist是LLM驱动的智能自主社会科学研究智能体，其具备以下可自主执行的专业能力：
 
 + 社会科学文献检索
-+ 社会科学研究想法提出
 + 基于AgentSociety2所提供的Agent和Environment Module，构建检验研究想法的社会科学模拟实验
     - 选定Agent和Environment Module
     - 处理数据、生成代码以初始化Agent Class
@@ -28,7 +27,7 @@ AI Social Scientist采用VSCode插件 + Claude Code Skills的架构：
    - 参数预填充功能
 
 2. **Claude Code Skills** - 提供完整的研究工作流能力
-   - 文献检索、创新 framing、假设管理、实验配置、实验执行、数据分析、论文生成
+   - 文献检索、假设管理、实验配置、实验执行、数据分析、论文生成
 
 ## 快速开始
 

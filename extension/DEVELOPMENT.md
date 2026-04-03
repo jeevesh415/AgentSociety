@@ -221,7 +221,6 @@ LITERATURE_SEARCH_API_URL=http://172.17.0.1:8002/api/v1/search
 研究工作流通过 Claude Code Skills 实现：
 
 - **agentsociety-literature-search** - 文献检索
-- **agentsociety-innovation-framing** - 基于文献结果进行创新 framing 并更新 TOPIC.md
 - **agentsociety-hypothesis** - 假设管理
 - **agentsociety-experiment-config** - 实验配置生成与验证
 - **agentsociety-run-experiment** - 实验执行
