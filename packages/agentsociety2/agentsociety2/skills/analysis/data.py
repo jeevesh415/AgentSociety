@@ -109,39 +109,35 @@ class DataReader:
         if not self.db_path.exists():
             return DatabaseSchema(tables=[], columns={}, row_counts={})
 
+        from .utils import extract_database_schema, format_database_schema_markdown
+
+        schema_dict = extract_database_schema(self.db_path)
+        if not schema_dict:
+            return DatabaseSchema(tables=[], columns={}, row_counts={})
+
         conn = sqlite3.connect(str(self.db_path))
         cursor = conn.cursor()
-
-        # 获取所有表
-        cursor.execute(
-            "SELECT name FROM sqlite_master WHERE type='table' AND name NOT LIKE 'sqlite_%'"
-        )
-        tables = [row[0] for row in cursor.fetchall()]
-
-        columns = {}
         row_counts = {}
+        tables = list(schema_dict.keys())
+        try:
+            for table in tables:
+                try:
+                    cursor.execute(f"SELECT COUNT(*) FROM {_quote_identifier(table)}")
+                    row_counts[table] = cursor.fetchone()[0]
+                except sqlite3.Error:
+                    row_counts[table] = 0
+        finally:
+            conn.close()
 
-        for table in tables:
-            # 获取列信息
-            cursor.execute(f"PRAGMA table_info({_quote_identifier(table)})")
-            cols = [
-                {"name": col[1], "type": col[2], "notnull": bool(col[3]), "pk": bool(col[5])}
-                for col in cursor.fetchall()
-            ]
-            columns[table] = cols
-
-            # 获取行数
-            cursor.execute(f"SELECT COUNT(*) FROM {_quote_identifier(table)}")
-            row_counts[table] = cursor.fetchone()[0]
-
-        conn.close()
-
-        # 生成 Markdown
-        markdown = self._format_schema_markdown(tables, columns, row_counts)
+        markdown = format_database_schema_markdown(
+            schema_dict,
+            include_row_counts=True,
+            db_path=self.db_path,
+        )
 
         return DatabaseSchema(
             tables=tables,
-            columns=columns,
+            columns=schema_dict,
             row_counts=row_counts,
             markdown=markdown,
         )
@@ -160,10 +156,7 @@ class DataReader:
 
         # 获取要读取的表
         if tables is None:
-            cursor.execute(
-                "SELECT name FROM sqlite_master WHERE type='table' AND name NOT LIKE 'sqlite_%'"
-            )
-            tables = [row[0] for row in cursor.fetchall()]
+            tables = self.read_schema().tables
 
         result = {}
         for table in tables:
@@ -308,25 +301,6 @@ class DataReader:
 
         return result
 
-    def _format_schema_markdown(
-        self,
-        tables: List[str],
-        columns: Dict[str, List[Dict]],
-        row_counts: Dict[str, int],
-    ) -> str:
-        """格式化 Schema 为 Markdown"""
-        lines = []
-        for table in tables:
-            lines.append(f"### Table: `{table}`")
-            cols = columns.get(table, [])
-            lines.append(f"Columns: {', '.join([col['name'] for col in cols])}")
-            for col in cols:
-                pk = " (PRIMARY KEY)" if col.get("pk") else ""
-                lines.append(f"  - {col['name']} ({col['type']}){pk}")
-            lines.append(f"  - Rows: {row_counts.get(table, 0)}")
-            lines.append("")
-        return "\n".join(lines)
-
     def _format_quick_stats(
         self,
         schema: DatabaseSchema,
@@ -344,7 +318,17 @@ class DataReader:
 
         for table in schema.tables:
             rows = schema.row_counts.get(table, 0)
-            lines.append(f"### Table: `{table}` ({rows} rows)")
+            cols = schema.columns.get(table, [])
+            dataset = cols[0].get("dataset") if cols else None
+            dataset_id = dataset.get("dataset_id") if isinstance(dataset, dict) else table
+            title = dataset.get("title") if isinstance(dataset, dict) else None
+            description = dataset.get("description") if isinstance(dataset, dict) else None
+            lines.append(f"### Dataset: `{dataset_id}` ({rows} rows)")
+            lines.append(f"- Table: `{table}`")
+            if title:
+                lines.append(f"- Title: {title}")
+            if description:
+                lines.append(f"- Description: {description}")
 
             if table in sample_data and sample_data[table]:
                 lines.append("Sample data (first rows):")
@@ -356,15 +340,29 @@ class DataReader:
 
             if table in numeric_stats:
                 lines.append("**Numeric Stats**:")
+                col_meta = {col["name"]: col for col in cols}
                 for col, stats in numeric_stats[table].items():
-                    lines.append(f"  - `{col}`: min={stats.get('min')}, max={stats.get('max')}, avg={stats.get('avg')}")
+                    label = col_meta.get(col, {}).get("title") or col
+                    detail = col_meta.get(col, {}).get("description")
+                    lines.append(
+                        f"  - `{label}` (`{col}`): min={stats.get('min')}, max={stats.get('max')}, avg={stats.get('avg')}"
+                    )
+                    if detail:
+                        lines.append(f"    meaning: {detail}")
 
             if table in categorical_stats:
                 lines.append("**Categorical Stats**:")
+                col_meta = {col["name"]: col for col in cols}
                 for col, stats in categorical_stats[table].items():
                     top = stats.get("top_values", [])[:3]
                     top_str = ", ".join([f"'{v[0]}'({v[1]})" for v in top if v[0] is not None])
-                    lines.append(f"  - `{col}`: {stats.get('unique_count')} unique, top: {top_str}")
+                    label = col_meta.get(col, {}).get("title") or col
+                    detail = col_meta.get(col, {}).get("description")
+                    lines.append(
+                        f"  - `{label}` (`{col}`): {stats.get('unique_count')} unique, top: {top_str}"
+                    )
+                    if detail:
+                        lines.append(f"    meaning: {detail}")
 
             lines.append("")
 
