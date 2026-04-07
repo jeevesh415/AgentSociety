@@ -153,6 +153,42 @@ const translations: Record<string, Record<string, string>> = {
     'projectStructure.skillImportLocal': '从本地目录导入 Skill',
     'projectStructure.skillImportPlaceholder': '选择 Skill 导入方式',
 
+    // mineruInitializer.ts
+    'mineruInitializer.promptDownload.message': 'MinerU CLI 已安装但模型未下载。PDF 解析需要模型支持。是否立即下载？',
+    'mineruInitializer.promptDownload.download': '下载模型',
+    'mineruInitializer.promptDownload.dismiss': '稍后',
+    'mineruInitializer.download.notFound': '未找到 mineru-models-download 命令，请确认 MinerU 已正确安装。',
+    'mineruInitializer.download.title': 'MinerU: 正在下载模型',
+    'mineruInitializer.download.timeout': 'MinerU 模型下载超时，请重试。',
+    'mineruInitializer.download.success': 'MinerU 模型下载成功。',
+    'mineruInitializer.download.failed': 'MinerU 模型下载失败（退出码: {0}），请查看输出日志。',
+    'mineruInitializer.download.error': 'MinerU 模型下载出错: {0}',
+
+    // mineruParser.ts
+    'mineruParser.notInstalled': 'MinerU CLI 未安装。PDF 解析需要 MinerU。',
+    'mineruParser.showInstallGuide': '查看安装指南',
+    'mineruParser.noModels': 'MinerU 模型未下载。PDF 解析需要模型支持。是否立即下载？',
+    'mineruParser.downloadModels': '下载模型',
+    'mineruParser.cancel': '取消',
+    'mineruParser.downloading': 'MinerU 模型正在下载中，请稍候...',
+    'mineruParser.checking': 'MinerU 环境正在检查中，请稍候...',
+    'mineruParser.initFailed': 'MinerU 初始化失败，PDF 解析可能无法正常工作。',
+    'mineruParser.retryCheck': '重新检查',
+    'mineruParser.showLogs': '查看日志',
+    'mineruParser.envNotReady': 'MinerU 环境未就绪，请先解决通知中提示的问题。',
+    'mineruParser.cliNotFound': '未找到 MinerU CLI，请安装 MinerU 并添加到 PATH。',
+
+    // extension.ts - MinerU commands
+    'extension.mineru.status': '状态: {0}',
+    'extension.mineru.installGuide': '查看 MinerU 安装指南',
+    'extension.mineru.downloadModels': '下载模型',
+    'extension.mineru.recheck': '重新检查环境',
+    'extension.mineru.showLogs': '查看 MinerU 日志',
+    'extension.mineru.notAvailable': 'MinerU 初始化器不可用',
+    'extension.mineru.envPlaceholder': 'MinerU 环境',
+    'extension.mineru.rechecking': '正在重新检查 MinerU 环境...',
+    'extension.mineru.recheckResult': 'MinerU 状态: {0}',
+
     // backendManager.ts
     'backendManager.openSettings': '打开设置',
     'backendManager.configInsufficient': '配置不足以支持启动后端服务',
@@ -358,6 +394,42 @@ const translations: Record<string, Record<string, string>> = {
     'projectStructure.skillRemoveConfirm': 'Are you sure you want to remove custom skill "{0}"? This action cannot be undone.',
     'projectStructure.skillImportLocal': 'Import Skill from local directory',
     'projectStructure.skillImportPlaceholder': 'Select Skill import method',
+
+    // mineruInitializer.ts
+    'mineruInitializer.promptDownload.message': 'MinerU CLI is installed but models are not downloaded. PDF parsing requires models. Download now?',
+    'mineruInitializer.promptDownload.download': 'Download Models',
+    'mineruInitializer.promptDownload.dismiss': 'Not Now',
+    'mineruInitializer.download.notFound': 'MinerU models-download command not found. Please ensure MinerU is properly installed.',
+    'mineruInitializer.download.title': 'MinerU: Downloading Models',
+    'mineruInitializer.download.timeout': 'MinerU model download timed out. Please try again.',
+    'mineruInitializer.download.success': 'MinerU models downloaded successfully.',
+    'mineruInitializer.download.failed': 'MinerU model download failed (exit code: {0}). Check output for details.',
+    'mineruInitializer.download.error': 'MinerU model download error: {0}',
+
+    // mineruParser.ts
+    'mineruParser.notInstalled': 'MinerU CLI is not installed. PDF parsing requires MinerU.',
+    'mineruParser.showInstallGuide': 'Show Install Guide',
+    'mineruParser.noModels': 'MinerU models are not downloaded. PDF parsing requires models. Download now?',
+    'mineruParser.downloadModels': 'Download Models',
+    'mineruParser.cancel': 'Cancel',
+    'mineruParser.downloading': 'MinerU models are still downloading. Please wait...',
+    'mineruParser.checking': 'MinerU environment is still being checked. Please wait...',
+    'mineruParser.initFailed': 'MinerU initialization failed. PDF parsing may not work correctly.',
+    'mineruParser.retryCheck': 'Retry Check',
+    'mineruParser.showLogs': 'Show Logs',
+    'mineruParser.envNotReady': 'MinerU environment is not ready. Please resolve the issues shown in the notification.',
+    'mineruParser.cliNotFound': 'MinerU CLI not found. Please install MinerU and add it to your PATH.',
+
+    // extension.ts - MinerU commands
+    'extension.mineru.status': 'Status: {0}',
+    'extension.mineru.installGuide': 'Open MinerU Install Guide',
+    'extension.mineru.downloadModels': 'Download Models',
+    'extension.mineru.recheck': 'Re-check Environment',
+    'extension.mineru.showLogs': 'Show MinerU Logs',
+    'extension.mineru.notAvailable': 'MinerU initializer not available',
+    'extension.mineru.envPlaceholder': 'MinerU Environment',
+    'extension.mineru.rechecking': 'Re-checking MinerU environment...',
+    'extension.mineru.recheckResult': 'MinerU status: {0}',
 
     // backendManager.ts
     'backendManager.openSettings': 'Open Settings',

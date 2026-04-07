@@ -332,7 +332,7 @@ export const ConfigPageApp: React.FC<ConfigPageAppProps> = ({ vscode }) => {
               <Input placeholder="qwen3-next-80b-a3b-instruct" />
             </Form.Item>
             {validationState.default.error && (
-              <Alert type="error" message={validationState.default.error} style={{ marginBottom: 12 }} />
+              <Alert type="error" message="验证失败" description={validationState.default.error} style={{ marginBottom: 12 }} />
             )}
             {validationState.default.valid && (
               <Alert type="success" message="验证成功" style={{ marginBottom: 12 }} />
@@ -361,7 +361,7 @@ export const ConfigPageApp: React.FC<ConfigPageAppProps> = ({ vscode }) => {
                 <Form.Item name="coderLlmModel" label="模型">
                   <Input placeholder="glm-4.7" />
                 </Form.Item>
-                {validationState.coder.error && <Alert type="error" message={validationState.coder.error} style={{ marginBottom: 8 }} />}
+                {validationState.coder.error && <Alert type="error" message="验证失败" description={validationState.coder.error} style={{ marginBottom: 8 }} />}
                 {validationState.coder.valid && <Alert type="success" message="验证成功" style={{ marginBottom: 8 }} />}
                 <Button size="small" icon={<CheckCircleOutlined />} onClick={() => handleValidate('coder')} loading={validationState.coder?.validating}>验证</Button>
               </Card>
@@ -377,7 +377,7 @@ export const ConfigPageApp: React.FC<ConfigPageAppProps> = ({ vscode }) => {
                 <Form.Item name="nanoLlmModel" label="模型">
                   <Input placeholder="qwen3-next-80b-a3b-instruct" />
                 </Form.Item>
-                {validationState.nano.error && <Alert type="error" message={validationState.nano.error} style={{ marginBottom: 8 }} />}
+                {validationState.nano.error && <Alert type="error" message="验证失败" description={validationState.nano.error} style={{ marginBottom: 8 }} />}
                 {validationState.nano.valid && <Alert type="success" message="验证成功" style={{ marginBottom: 8 }} />}
                 <Button size="small" icon={<CheckCircleOutlined />} onClick={() => handleValidate('nano')} loading={validationState.nano?.validating}>验证</Button>
               </Card>
@@ -412,7 +412,7 @@ export const ConfigPageApp: React.FC<ConfigPageAppProps> = ({ vscode }) => {
                 <Form.Item name="embeddingDims" label="向量维度">
                   <InputNumber min={64} max={4096} style={{ width: '100%' }} placeholder="1024" />
                 </Form.Item>
-                {validationState.embedding.error && <Alert type="error" message={validationState.embedding.error} style={{ marginBottom: 8 }} />}
+                {validationState.embedding.error && <Alert type="error" message="验证失败" description={validationState.embedding.error} style={{ marginBottom: 8 }} />}
                 {validationState.embedding.valid && <Alert type="success" message="验证成功" style={{ marginBottom: 8 }} />}
                 <Button size="small" icon={<CheckCircleOutlined />} onClick={() => handleValidate('embedding')} loading={validationState.embedding?.validating}>验证</Button>
               </Card>
@@ -422,7 +422,7 @@ export const ConfigPageApp: React.FC<ConfigPageAppProps> = ({ vscode }) => {
                 <Form.Item name="pythonPath" label="Python 路径">
                   <Input placeholder="python3 或留空自动检测" />
                 </Form.Item>
-                {validationState.python.error && <Alert type="error" message={validationState.python.error} style={{ marginBottom: 8 }} />}
+                {validationState.python.error && <Alert type="error" message="验证失败" description={validationState.python.error} style={{ marginBottom: 8 }} />}
                 {validationState.python.valid && <Alert type="success" message="验证成功" style={{ marginBottom: 8 }} />}
                 <Button size="small" icon={<CheckCircleOutlined />} onClick={() => handleValidate('python')} loading={validationState.python?.validating}>验证</Button>
               </Card>

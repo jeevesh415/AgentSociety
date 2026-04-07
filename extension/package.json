@@ -183,6 +183,26 @@
         "command": "aiSocialScientist.removeAgentSkill",
         "title": "AI Social Scientist: Remove Custom Skill",
         "icon": "$(trash)"
+      },
+      {
+        "command": "aiSocialScientist.mineruStatusMenu",
+        "title": "AI Social Scientist: MinerU Environment Status",
+        "icon": "$(file-code)"
+      },
+      {
+        "command": "aiSocialScientist.mineruRecheck",
+        "title": "AI Social Scientist: Re-check MinerU Environment",
+        "icon": "$(refresh)"
+      },
+      {
+        "command": "aiSocialScientist.mineruDownloadModels",
+        "title": "AI Social Scientist: Download MinerU Models",
+        "icon": "$(cloud-download)"
+      },
+      {
+        "command": "aiSocialScientist.showMinerULogs",
+        "title": "AI Social Scientist: Show MinerU Logs",
+        "icon": "$(output)"
       }
     ],
     "menus": {
@@ -373,6 +393,7 @@
     "@deck.gl/layers": "^9.0.38",
     "@deck.gl/react": "^9.0.38",
     "@deck.gl/widgets": "^9.2.11",
+    "ajv": "^8.18.0",
     "antd": "^6.0.0",
     "dayjs": "^1.11.19",
     "i18next": "^23.7.0",
