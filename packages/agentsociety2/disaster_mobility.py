@@ -175,6 +175,7 @@ async def main_disaster_mobility(
 
         # 手动执行一步（复制 AgentSociety.step 的逻辑）
         society._t += timedelta(seconds=time_step_seconds)
+        society._env_router.sync_simulation_clock(society._t)
         tasks = [agent.step(time_step_seconds, society._t) for agent in society._agents]
         await asyncio.gather(*tasks)
 

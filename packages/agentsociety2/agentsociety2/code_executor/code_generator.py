@@ -1,7 +1,8 @@
 """
-代码生成器
+代码生成器（LLM -> Python 脚本）。
 
-使用大模型生成Python代码。
+该模块提供 :class:`~agentsociety2.code_executor.code_generator.CodeGenerator`，用于把“任务描述 + 可选参考文件/上下文”
+转成一段 **可执行** 的 Python 代码字符串。
 """
 
 import os
@@ -16,22 +17,16 @@ logger = get_logger()
 
 
 class CodeGenerator:
-    """
-    代码生成器
+    """基于大模型的 Python 代码生成器。
 
-    使用大模型根据描述和要求生成Python代码。
+    该类内部通过 :func:`agentsociety2.config.get_llm_router_and_model` 读取 ``coder`` 路由配置，
+    并使用 LiteLLM Router 发起异步补全请求。
     """
 
     def __init__(
         self,
     ):
-        """
-        初始化代码生成器
-
-        Args:
-            router: LiteLLM Router实例，用于调用大模型
-            model_name: 使用的模型名称
-        """
+        """初始化代码生成器。"""
         self._router, self._model_name = get_llm_router_and_model("coder")
 
     async def generate(
@@ -40,16 +35,13 @@ class CodeGenerator:
         input_files: Optional[list[str]] = None,
         additional_context: Optional[str] = None,
     ) -> str:
-        """
-        生成Python代码
+        """生成 Python 代码。
 
-        Args:
-            description: 代码生成的要求描述
-            input_files: 输入文件路径列表（可选）
-            additional_context: 额外的上下文信息（可选）
-
-        Returns:
-            生成的Python代码
+        :param description: 任务描述/约束条件。
+        :param input_files: 可选。参考文件路径列表；存在的文件会被读入提示词。
+        :param additional_context: 可选。追加上下文（例如运行环境、输入输出约定等）。
+        :returns: 生成的 Python 代码（尽量为纯代码文本；若模型返回 Markdown，会自动提取代码块）。
+        :raises Exception: 当底层 LLM 调用失败或返回空内容时抛出。
         """
         # 构建提示词
         prompt = self._build_prompt(description, input_files, additional_context)
@@ -87,17 +79,7 @@ class CodeGenerator:
         input_files: Optional[list[str]] = None,
         additional_context: Optional[str] = None,
     ) -> str:
-        """
-        构建生成代码的提示词
-
-        Args:
-            description: 代码生成的要求描述
-            input_files: 输入文件路径列表
-            additional_context: 额外的上下文信息
-
-        Returns:
-            构建好的提示词
-        """
+        """构建生成代码所用提示词。"""
         prompt_parts = []
 
         # Base prompt
@@ -151,15 +133,7 @@ Generated code:
         return "".join(prompt_parts)
 
     def _extract_code(self, generated_text: str) -> str:
-        """
-        从生成的文本中提取代码
-
-        Args:
-            generated_text: 模型生成的文本（可能包含markdown格式）
-
-        Returns:
-            提取出的纯代码
-        """
+        """从模型输出中提取“可直接执行”的代码文本。"""
         import re
 
         # 尝试提取markdown代码块
@@ -184,19 +158,15 @@ Generated code:
         error_feedback: Optional[List[str]] = None,
         previous_code: Optional[str] = None,
     ) -> tuple[str, bool]:
-        """
-        使用多轮对话生成代码，支持错误反馈和修复
+        """带反馈的多轮生成（失败后可携带错误信息重试）。
 
-        Args:
-            initial_description: 初始代码生成要求描述
-            input_files: 输入文件路径列表（可选）
-            additional_context: 额外的上下文信息（可选）
-            max_retries: 最大重试次数
-            error_feedback: 错误反馈列表（用于多轮对话）
-            previous_code: 之前的代码（用于多轮对话）
-
-        Returns:
-            (生成的代码, 是否成功)
+        :param initial_description: 初始任务描述。
+        :param input_files: 可选。参考文件路径列表。
+        :param additional_context: 可选。追加上下文。
+        :param max_retries: 最大重试次数（不含首次尝试）。
+        :param error_feedback: 可选。上一轮执行/校验得到的错误信息列表。
+        :param previous_code: 可选。上一轮生成的代码文本。
+        :returns: ``(code, ok)``，其中 ``ok`` 表示是否成功得到非空代码。
         """
         # 构建初始提示词
         initial_prompt = self._build_prompt(
@@ -253,15 +223,7 @@ Generated code:
         return "", False
 
     def _build_error_feedback_message(self, errors: List[str]) -> str:
-        """
-        构建错误反馈消息
-
-        Args:
-            errors: 错误信息列表
-
-        Returns:
-            错误反馈消息
-        """
+        """把错误列表整理成可用于下一轮生成的提示词片段。"""
         error_parts = [
             "The previous code execution failed with the following error(s):",
             "",
@@ -269,9 +231,9 @@ Generated code:
 
         for i, error in enumerate(errors, 1):
             error_parts.append(f"Error {i}:")
-            error_parts.append(f"```")
+            error_parts.append("```")
             error_parts.append(error)
-            error_parts.append(f"```")
+            error_parts.append("```")
             error_parts.append("")
 
         error_parts.extend(

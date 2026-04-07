@@ -7,7 +7,7 @@
 import os
 import json
 import requests
-from typing import List, Optional, Dict, Any
+from typing import List, Optional, Dict
 
 __all__ = ["get_available_models"]
 
@@ -19,7 +19,7 @@ def get_available_models(
     获取当前可用的模型列表，输出 JSON 结构，仅包含关键的 'id' 字段。
 
     Args:
-        api_base: API 基础 URL，若未提供则使用默认值 https://cloud.infini-ai.com
+        api_base: OpenAI 兼容 API 基础 URL，通常以 /v1 结尾
         api_key: API 密钥，若未提供则从环境变量读取（需要调用者提前加载 .env 文件）
         timeout: 请求超时时间（秒）
 
@@ -31,16 +31,36 @@ def get_available_models(
         ]
 
     Raises:
-        ValueError: 当缺少必要的 API_KEY 时
+        ValueError: 当缺少必要的 API key 时
         RuntimeError: 当网络请求失败或响应格式异常时
     """
-    base = api_base or "https://cloud.infini-ai.com"
-    key = api_key or os.getenv("API_KEY", "").strip()
+    base = (
+        api_base
+        or os.getenv("AGENTSOCIETY_LLM_API_BASE", "").strip()
+        or os.getenv("API_BASE", "").strip()
+        or "https://cloud.infini-ai.com/maas/v1"
+    )
+    key = (
+        api_key
+        or os.getenv("AGENTSOCIETY_LLM_API_KEY", "").strip()
+        or os.getenv("API_KEY", "").strip()
+    )
 
     if not key:
-        raise ValueError("缺少 API_KEY，请通过入参或 .env 提供")
+        raise ValueError(
+            "缺少 API key，请通过入参或环境变量 "
+            "AGENTSOCIETY_LLM_API_KEY / API_KEY 提供"
+        )
 
-    url = f"{base}/maas/v1/models"
+    base = base.rstrip("/")
+    if base.endswith("/models"):
+        url = base
+    elif base.endswith("/v1") or base.endswith("/maas/v1"):
+        url = f"{base}/models"
+    elif base == "https://cloud.infini-ai.com":
+        url = f"{base}/maas/v1/models"
+    else:
+        url = f"{base}/models"
     headers = {
         "Accept": "application/json",
         "Authorization": f"Bearer {key}",

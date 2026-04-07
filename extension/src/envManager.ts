@@ -35,6 +35,11 @@ export interface EnvConfig {
   nanoLlmApiBase?: string;
   nanoLlmModel?: string;
 
+  // Analysis LLM (for data analysis, insight generation, and report writing)
+  analysisLlmApiKey?: string;
+  analysisLlmApiBase?: string;
+  analysisLlmModel?: string;
+
   // Embedding
   embeddingApiKey?: string;
   embeddingApiBase?: string;
@@ -80,6 +85,9 @@ const ENV_KEY_MAP: Record<keyof EnvConfig, string> = {
   nanoLlmApiKey: 'AGENTSOCIETY_NANO_LLM_API_KEY',
   nanoLlmApiBase: 'AGENTSOCIETY_NANO_LLM_API_BASE',
   nanoLlmModel: 'AGENTSOCIETY_NANO_LLM_MODEL',
+  analysisLlmApiKey: 'AGENTSOCIETY_ANALYSIS_LLM_API_KEY',
+  analysisLlmApiBase: 'AGENTSOCIETY_ANALYSIS_LLM_API_BASE',
+  analysisLlmModel: 'AGENTSOCIETY_ANALYSIS_LLM_MODEL',
   embeddingApiKey: 'AGENTSOCIETY_EMBEDDING_API_KEY',
   embeddingApiBase: 'AGENTSOCIETY_EMBEDDING_API_BASE',
   embeddingModel: 'AGENTSOCIETY_EMBEDDING_MODEL',
@@ -104,7 +112,7 @@ const ENV_KEY_MAP: Record<keyof EnvConfig, string> = {
 /**
  * Default values for configuration
  */
-const DEFAULT_VALUES: Partial<EnvConfig> = {
+export const DEFAULT_ENV_CONFIG: Partial<EnvConfig> = {
   llmApiBase: 'https://cloud.infini-ai.com/maas/v1',
   llmModel: 'qwen3-next-80b-a3b-instruct',
   backendHost: '127.0.0.1',
@@ -112,6 +120,7 @@ const DEFAULT_VALUES: Partial<EnvConfig> = {
   backendLogLevel: 'info',
   coderLlmModel: 'glm-4.7',
   nanoLlmModel: 'qwen3-next-80b-a3b-instruct',
+  analysisLlmModel: 'glm-5',
   embeddingModel: 'bge-m3',
   embeddingDims: 1024,
   miroflowDefaultLlm: 'qwen-3',
@@ -162,10 +171,10 @@ export class EnvManager {
   readEnv(): EnvConfig {
     const envPath = this.getEnvPath();
     if (!envPath || !fs.existsSync(envPath)) {
-      return { ...DEFAULT_VALUES };
+      return { ...DEFAULT_ENV_CONFIG };
     }
 
-    const config: EnvConfig = { ...DEFAULT_VALUES };
+    const config: EnvConfig = { ...DEFAULT_ENV_CONFIG };
     const content = fs.readFileSync(envPath, 'utf-8');
     const lines = content.split('\n');
 
@@ -327,6 +336,13 @@ AGENTSOCIETY_CODER_LLM_MODEL=glm-4.7
 AGENTSOCIETY_NANO_LLM_API_KEY=
 AGENTSOCIETY_NANO_LLM_API_BASE=
 AGENTSOCIETY_NANO_LLM_MODEL=qwen3-next-80b-a3b-instruct
+
+# ========== Analysis LLM / Analysis LLM (数据分析) ==========
+# Analysis LLM for data analysis, insight generation, and report writing
+# 用于数据分析、洞察生成和报告撰写的 LLM，建议使用较强的模型
+AGENTSOCIETY_ANALYSIS_LLM_API_KEY=
+AGENTSOCIETY_ANALYSIS_LLM_API_BASE=
+AGENTSOCIETY_ANALYSIS_LLM_MODEL=glm-5
 
 # ========== Embedding Model / 嵌入模型 ==========
 # Embedding model for vector search / 用于向量搜索的嵌入模型

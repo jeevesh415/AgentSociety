@@ -11,7 +11,6 @@
 
 from agentsociety2.agent.base import AgentBase
 from datetime import datetime
-from typing import Any
 
 
 class SimpleAgent(AgentBase):
@@ -85,7 +84,7 @@ class SimpleAgent(AgentBase):
         """
         # 查询环境状态
         try:
-            ctx, observation = await self.ask_env(
+            _, observation = await self.ask_env(
                 {"variables": {}},
                 "当前环境状态是什么？",
                 readonly=True
@@ -95,14 +94,6 @@ class SimpleAgent(AgentBase):
 
         # 记录状态
         action = f"Agent {self.name} 观察到：{observation}，继续活动"
-
-        await self._write_status_snapshot(
-            step=tick,
-            t=t,
-            action=action,
-            status={"observation": observation}
-        )
-
         return action
 
     async def dump(self) -> dict:

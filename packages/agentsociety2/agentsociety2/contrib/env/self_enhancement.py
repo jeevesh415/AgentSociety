@@ -4,11 +4,12 @@ Environment for Self-Enhancement (SE) experiment based on V2 framework
 """
 import asyncio
 from datetime import datetime
-from typing import Dict, List, Optional
+from typing import ClassVar, Dict, List
 
 from pydantic import BaseModel, Field
 
 from agentsociety2.env import EnvBase, tool
+from agentsociety2.storage import ColumnDef
 
 
 # Response models for tool functions
@@ -46,6 +47,11 @@ VALID_DIMENSIONS = [
 class SelfEnhancementEnv(EnvBase):
     """Environment for Self-Enhancement (SE) experiment based on V2 framework"""
 
+    _agent_state_columns: ClassVar[list[ColumnDef]] = [
+        ColumnDef("rankings", "JSON", nullable=False),
+        ColumnDef("completed_dimensions", "INTEGER", nullable=False),
+    ]
+
     def __init__(
         self,
         agent_ids: List[int],
@@ -67,6 +73,7 @@ class SelfEnhancementEnv(EnvBase):
         }
         
         self._lock = asyncio.Lock()
+        self._step_counter: int = 0
 
     @classmethod
     def mcp_description(cls) -> str:
@@ -247,6 +254,9 @@ You need to evaluate your percentile ranking (0-100) in 8 dimensions relative to
         Initialize the environment module.
         """
         await super().init(start_datetime)
+        async with self._lock:
+            self._rankings = {agent_id: {} for agent_id in self.agent_ids}
+            self._step_counter = 0
 
     async def step(self, tick: int, t: datetime):
         """
@@ -258,6 +268,21 @@ You need to evaluate your percentile ranking (0-100) in 8 dimensions relative to
         """
         async with self._lock:
             self.current_datetime = t
+            records = [
+                {
+                    "agent_id": agent_id,
+                    "rankings": self._rankings[agent_id].copy(),
+                    "completed_dimensions": len(self._rankings[agent_id]),
+                }
+                for agent_id in self.agent_ids
+            ]
+
+        await self._write_agent_state_batch(
+            step=self._step_counter,
+            t=t,
+            records=records,
+        )
+        self._step_counter += 1
 
     def get_results(self) -> Dict[int, Dict[str, int]]:
         """
@@ -277,6 +302,7 @@ You need to evaluate your percentile ranking (0-100) in 8 dimensions relative to
             "agent_ids": self.agent_ids,
             "num_agents": self.num_agents,
             "rankings": self._rankings,
+            "step_counter": self._step_counter,
         }
 
     def _load_state(self, state: dict):
@@ -284,7 +310,7 @@ You need to evaluate your percentile ranking (0-100) in 8 dimensions relative to
         self.agent_ids = state.get("agent_ids", [])
         self.num_agents = state.get("num_agents", 0)
         self._rankings = state.get("rankings", {})
+        self._step_counter = state.get("step_counter", 0)
 
 
 __all__ = ["SelfEnhancementEnv", "VALID_DIMENSIONS"]
-

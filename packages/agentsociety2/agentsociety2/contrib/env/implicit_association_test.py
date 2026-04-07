@@ -3,14 +3,13 @@ Implicit Association Test (IAT) Experiment Environment
 Environment for Implicit Association Test experiment based on V2 framework
 """
 import asyncio
-import csv
-import os
 from datetime import datetime
-from typing import Dict, List, Optional
+from typing import ClassVar, Dict, List, Optional
 
 from pydantic import BaseModel, Field
 
 from agentsociety2.env import EnvBase, tool
+from agentsociety2.storage import ColumnDef
 
 
 # Response models for tool functions
@@ -41,6 +40,15 @@ class SubmitTrialResponse(BaseModel):
 
 class ImplicitAssociationTestEnv(EnvBase):
     """Environment for Implicit Association Test (IAT) experiment based on V2 framework"""
+
+    _agent_state_columns: ClassVar[list[ColumnDef]] = [
+        ColumnDef("completed_trials", "INTEGER", nullable=False),
+        ColumnDef("total_trials", "INTEGER", nullable=False),
+        ColumnDef("progress_percent", "REAL", nullable=False),
+        ColumnDef("accuracy", "REAL", nullable=False),
+        ColumnDef("average_rt", "REAL", nullable=False),
+        ColumnDef("responses", "JSON", nullable=False),
+    ]
 
     # Standard IAT trial sequence
     # This is a simplified version - in practice, trials should be loaded from data files
@@ -218,6 +226,7 @@ class ImplicitAssociationTestEnv(EnvBase):
         }
 
         self._lock = asyncio.Lock()
+        self._step_counter: int = 0
 
     @classmethod
     def mcp_description(cls) -> str:
@@ -426,14 +435,6 @@ The IAT consists of 5 blocks with a total of {self.total_trials} trials:
             all_completed = self._trial_progress[agent_id] >= self.total_trials
             status = "completed" if all_completed else "submitted"
 
-            # Debug log
-            import sys
-            print(
-                f"[ENV DEBUG] Agent {agent_id} trial {trial_id}: key={key_press}, rt={rt:.3f}s, corr={corr} "
-                f"({self._trial_progress[agent_id]}/{self.total_trials} completed)",
-                file=sys.stderr
-            )
-
             return SubmitTrialResponse(
                 agent_id=agent_id,
                 trial_id=trial_id,
@@ -518,6 +519,10 @@ The IAT consists of 5 blocks with a total of {self.total_trials} trials:
         Initialize the environment module.
         """
         await super().init(start_datetime)
+        async with self._lock:
+            self._trial_progress = {agent_id: 0 for agent_id in self.agent_ids}
+            self._responses = {agent_id: [] for agent_id in self.agent_ids}
+            self._step_counter = 0
 
     async def step(self, tick: int, t: datetime):
         """
@@ -529,6 +534,42 @@ The IAT consists of 5 blocks with a total of {self.total_trials} trials:
         """
         async with self._lock:
             self.current_datetime = t
+            records = []
+            for agent_id in self.agent_ids:
+                responses = self._responses[agent_id]
+                completed_trials = self._trial_progress[agent_id]
+                if responses:
+                    correct_count = sum(1 for response in responses if response["corr"] == 1)
+                    accuracy = correct_count / len(responses)
+                    average_rt = sum(response["rt"] for response in responses) / len(
+                        responses
+                    )
+                else:
+                    accuracy = 0.0
+                    average_rt = 0.0
+
+                records.append(
+                    {
+                        "agent_id": agent_id,
+                        "completed_trials": completed_trials,
+                        "total_trials": self.total_trials,
+                        "progress_percent": (
+                            completed_trials / self.total_trials * 100
+                            if self.total_trials > 0
+                            else 0.0
+                        ),
+                        "accuracy": accuracy,
+                        "average_rt": average_rt,
+                        "responses": [response.copy() for response in responses],
+                    }
+                )
+
+        await self._write_agent_state_batch(
+            step=self._step_counter,
+            t=t,
+            records=records,
+        )
+        self._step_counter += 1
 
     def get_results(self) -> Dict[int, List[Dict]]:
         """
@@ -550,6 +591,7 @@ The IAT consists of 5 blocks with a total of {self.total_trials} trials:
             "total_trials": self.total_trials,
             "trial_progress": self._trial_progress,
             "responses": self._responses,
+            "step_counter": self._step_counter,
         }
 
     def _load_state(self, state: dict):
@@ -559,7 +601,7 @@ The IAT consists of 5 blocks with a total of {self.total_trials} trials:
         self.total_trials = state.get("total_trials", 0)
         self._trial_progress = state.get("trial_progress", {})
         self._responses = state.get("responses", {})
+        self._step_counter = state.get("step_counter", 0)
 
 
 __all__ = ["ImplicitAssociationTestEnv", "TrialInfo", "SubmitTrialResponse"]
-

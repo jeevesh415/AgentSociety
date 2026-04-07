@@ -133,6 +133,56 @@
         "command": "aiSocialScientist.listCustomModules",
         "title": "AI Social Scientist: List Custom Modules",
         "icon": "$(list-tree)"
+      },
+      {
+        "command": "aiSocialScientist.scanAgentSkills",
+        "title": "AI Social Scientist: Scan Agent Skills",
+        "icon": "$(refresh)"
+      },
+      {
+        "command": "aiSocialScientist.importAgentSkill",
+        "title": "AI Social Scientist: Import Agent Skill",
+        "icon": "$(cloud-download)"
+      },
+      {
+        "command": "aiSocialScientist.toggleAgentSkill",
+        "title": "AI Social Scientist: Toggle Agent Skill",
+        "icon": "$(check)"
+      },
+      {
+        "command": "aiSocialScientist.reloadAgentSkill",
+        "title": "AI Social Scientist: Reload Agent Skill",
+        "icon": "$(refresh)"
+      },
+      {
+        "command": "aiSocialScientist.openSkillFolder",
+        "title": "AI Social Scientist: Open Skill Folder in File Manager",
+        "icon": "$(folder)"
+      },
+      {
+        "command": "aiSocialScientist.formatJsonFile",
+        "title": "AI Social Scientist: Format and View JSON",
+        "icon": "$(json)"
+      },
+      {
+        "command": "aiSocialScientist.viewLiteratureIndex",
+        "title": "AI Social Scientist: View Literature Index",
+        "icon": "$(book)"
+      },
+      {
+        "command": "aiSocialScientist.viewStepsYaml",
+        "title": "AI Social Scientist: View Steps Timeline",
+        "icon": "$(list-ordered)"
+      },
+      {
+        "command": "aiSocialScientist.viewExperimentResults",
+        "title": "AI Social Scientist: View Experiment Results",
+        "icon": "$(graph)"
+      },
+      {
+        "command": "aiSocialScientist.removeAgentSkill",
+        "title": "AI Social Scientist: Remove Custom Skill",
+        "icon": "$(trash)"
       }
     ],
     "menus": {
@@ -162,6 +212,56 @@
           "command": "aiSocialScientist.openMarkdownInEditor",
           "when": "view == projectStructureView && viewItem =~ /markdown/",
           "group": "2_actions"
+        },
+        {
+          "command": "aiSocialScientist.toggleAgentSkill",
+          "when": "view == projectStructureView && viewItem =~ /agentSkillItem.*enabled/",
+          "group": "1_actions@1"
+        },
+        {
+          "command": "aiSocialScientist.toggleAgentSkill",
+          "when": "view == projectStructureView && viewItem =~ /agentSkillItem.*disabled/",
+          "group": "1_actions@1"
+        },
+        {
+          "command": "aiSocialScientist.removeAgentSkill",
+          "when": "view == projectStructureView && viewItem =~ /agentSkillItem.*custom/",
+          "group": "1_actions@2"
+        },
+        {
+          "command": "aiSocialScientist.reloadAgentSkill",
+          "when": "view == projectStructureView && viewItem =~ /agentSkillItem/",
+          "group": "1_actions@2"
+        },
+        {
+          "command": "aiSocialScientist.openSkillFolder",
+          "when": "view == projectStructureView && viewItem =~ /agentSkillItem/",
+          "group": "2_actions"
+        },
+        {
+          "command": "aiSocialScientist.openSkillFolder",
+          "when": "view == projectStructureView && viewItem == extensionSkillItem",
+          "group": "2_actions"
+        },
+        {
+          "command": "aiSocialScientist.formatJsonFile",
+          "when": "view == projectStructureView && viewItem =~ /json/",
+          "group": "2_actions"
+        },
+        {
+          "command": "aiSocialScientist.viewLiteratureIndex",
+          "when": "view == projectStructureView && viewItem =~ /literatureIndex/",
+          "group": "1_actions"
+        },
+        {
+          "command": "aiSocialScientist.viewStepsYaml",
+          "when": "view == projectStructureView && viewItem =~ /stepsYaml/",
+          "group": "1_actions"
+        },
+        {
+          "command": "aiSocialScientist.viewExperimentResults",
+          "when": "view == projectStructureView && viewItem =~ /experimentResults/",
+          "group": "1_actions"
         }
       ]
     },
@@ -182,189 +282,26 @@
           }
         ],
         "priority": "default"
+      },
+      {
+        "viewType": "aiSocialScientist.initConfig",
+        "displayName": "Init Config Editor",
+        "selector": [
+          {
+            "filenamePattern": "**/init/init_config.json"
+          }
+        ],
+        "priority": "default"
       }
     ],
     "configuration": {
       "title": "AI Social Scientist",
       "properties": {
-        "aiSocialScientist.backendUrl": {
-          "type": "string",
-          "default": "http://localhost:8001",
-          "description": "FastAPI后端服务的URL地址",
-          "markdownDescription": "FastAPI后端服务的URL地址。默认为 `http://localhost:8001`"
-        },
         "aiSocialScientist.backend.autoStart": {
           "type": "boolean",
           "default": true,
           "description": "是否在插件启动时自动启动后端服务",
           "markdownDescription": "如果启用，插件启动时会自动启动后端服务。如果禁用，需要手动启动后端服务。"
-        },
-        "aiSocialScientist.backend.pythonPath": {
-          "type": "string",
-          "default": "",
-          "description": "Python可执行文件的路径",
-          "markdownDescription": "Python可执行文件的路径。如果为空，将自动检测 `python3` 或 `python`。例如：`/usr/bin/python3` 或 `python3`"
-        },
-        "aiSocialScientist.env.backendHost": {
-          "type": "string",
-          "default": "127.0.0.1",
-          "description": "后端服务监听的主机地址",
-          "markdownDescription": "后端服务监听的主机地址。默认为 `0.0.0.0`（监听所有网络接口）。"
-        },
-        "aiSocialScientist.env.backendPort": {
-          "type": "number",
-          "default": 8001,
-          "description": "后端服务监听的端口号",
-          "markdownDescription": "后端服务监听的端口号。默认为 `8001`。"
-        },
-        "aiSocialScientist.env.backendLogLevel": {
-          "type": "string",
-          "default": "info",
-          "enum": [
-            "critical",
-            "error",
-            "warning",
-            "info",
-            "debug",
-            "trace"
-          ],
-          "description": "后端服务的日志级别",
-          "markdownDescription": "后端服务的日志级别。可选值：`critical`, `error`, `warning`, `info`, `debug`, `trace`。默认为 `info`。"
-        },
-        "aiSocialScientist.env.llmApiKey": {
-          "type": "string",
-          "default": "",
-          "description": "默认LLM服务的API密钥（必需）",
-          "markdownDescription": "默认LLM服务的API密钥。这是必需的配置项，用于大多数LLM操作。对应环境变量 `AGENTSOCIETY_LLM_API_KEY`。"
-        },
-        "aiSocialScientist.env.llmApiBase": {
-          "type": "string",
-          "default": "https://cloud.infini-ai.com/maas/v1",
-          "description": "默认LLM服务的API基础URL",
-          "markdownDescription": "默认LLM服务的API基础URL。应该指向支持OpenAI兼容API的端点。默认为 `https://cloud.infini-ai.com/maas/v1`。"
-        },
-        "aiSocialScientist.env.llmModel": {
-          "type": "string",
-          "default": "qwen3-next-80b-a3b-instruct",
-          "description": "默认LLM模型名称",
-          "markdownDescription": "默认LLM模型名称，用于大多数语言理解和生成任务。默认为 `qwen3-next-80b-a3b-instruct`。"
-        },
-        "aiSocialScientist.env.coderLlmApiKey": {
-          "type": "string",
-          "default": "",
-          "description": "代码生成LLM的API密钥（可选）",
-          "markdownDescription": "代码生成LLM的API密钥。如果未设置，将回退到默认LLM API密钥。对应环境变量 `AGENTSOCIETY_CODER_LLM_API_KEY`。"
-        },
-        "aiSocialScientist.env.coderLlmApiBase": {
-          "type": "string",
-          "default": "",
-          "description": "代码生成LLM的API基础URL（可选）",
-          "markdownDescription": "代码生成LLM的API基础URL。如果未设置，将回退到默认LLM API基础URL。对应环境变量 `AGENTSOCIETY_CODER_LLM_API_BASE`。"
-        },
-        "aiSocialScientist.env.coderLlmModel": {
-          "type": "string",
-          "default": "glm-4.7",
-          "description": "代码生成LLM模型名称",
-          "markdownDescription": "代码生成LLM模型名称，专门用于代码生成、代码分析等编程相关操作。默认为 `glm-4.7`。"
-        },
-        "aiSocialScientist.env.nanoLlmApiKey": {
-          "type": "string",
-          "default": "",
-          "description": "高频操作LLM的API密钥（可选）",
-          "markdownDescription": "高频操作LLM的API密钥，用于需要频繁、快速响应的操作。如果未设置，将回退到默认LLM API密钥。对应环境变量 `AGENTSOCIETY_NANO_LLM_API_KEY`。"
-        },
-        "aiSocialScientist.env.nanoLlmApiBase": {
-          "type": "string",
-          "default": "",
-          "description": "高频操作LLM的API基础URL（可选）",
-          "markdownDescription": "高频操作LLM的API基础URL。如果未设置，将回退到默认LLM API基础URL。对应环境变量 `AGENTSOCIETY_NANO_LLM_API_BASE`。"
-        },
-        "aiSocialScientist.env.nanoLlmModel": {
-          "type": "string",
-          "default": "qwen3-next-80b-a3b-instruct",
-          "description": "高频操作LLM模型名称",
-          "markdownDescription": "高频操作LLM模型名称，用于需要快速响应的操作，如内存检索、快速推理等。默认为 `qwen3-next-80b-a3b-instruct`。"
-        },
-        "aiSocialScientist.env.embeddingApiKey": {
-          "type": "string",
-          "default": "",
-          "description": "Embedding模型的API密钥（可选）",
-          "markdownDescription": "Embedding模型的API密钥，用于文本嵌入操作。如果未设置，将回退到默认LLM API密钥。对应环境变量 `AGENTSOCIETY_EMBEDDING_API_KEY`。"
-        },
-        "aiSocialScientist.env.embeddingApiBase": {
-          "type": "string",
-          "default": "",
-          "description": "Embedding模型的API基础URL（可选）",
-          "markdownDescription": "Embedding模型的API基础URL。如果未设置，将回退到默认LLM API基础URL。对应环境变量 `AGENTSOCIETY_EMBEDDING_API_BASE`。"
-        },
-        "aiSocialScientist.env.embeddingModel": {
-          "type": "string",
-          "default": "bge-m3",
-          "description": "Embedding模型名称",
-          "markdownDescription": "Embedding模型名称，用于将文本转换为向量表示。默认为 `bge-m3`。"
-        },
-        "aiSocialScientist.env.embeddingDims": {
-          "type": "number",
-          "default": 1024,
-          "description": "Embedding向量的维度",
-          "markdownDescription": "Embedding向量的维度。更高的维度可以捕获更细微的语义信息，但需要更多存储和计算。默认为 `1024`。"
-        },
-        "aiSocialScientist.env.webSearchApiUrl": {
-          "type": "string",
-          "default": "",
-          "description": "Web 搜索 / MiroFlow MCP 服务 URL（可选）",
-          "markdownDescription": "Web 搜索 API / MiroFlow MCP HTTP 端点的基础 URL。例如：`http://localhost:8003/mcp`。对应环境变量 `WEB_SEARCH_API_URL`。"
-        },
-        "aiSocialScientist.env.webSearchApiToken": {
-          "type": "string",
-          "default": "",
-          "description": "Web 搜索 / MiroFlow MCP 认证令牌（可选）",
-          "markdownDescription": "Web 搜索 API / MiroFlow MCP 的认证令牌，将作为 Bearer token 在 Authorization 头中发送。对应环境变量 `WEB_SEARCH_API_TOKEN`。"
-        },
-        "aiSocialScientist.env.miroflowDefaultLlm": {
-          "type": "string",
-          "default": "qwen-3",
-          "description": "MiroFlow MCP任务使用的默认LLM模型名称",
-          "markdownDescription": "MiroFlow MCP任务使用的默认LLM模型名称。默认为 `qwen-3`。对应环境变量 `MIROFLOW_DEFAULT_LLM`。"
-        },
-        "aiSocialScientist.env.miroflowDefaultAgent": {
-          "type": "string",
-          "default": "mirothinker_v1.5_keep5_max200",
-          "description": "MiroFlow MCP任务使用的默认Agent配置名称",
-          "markdownDescription": "MiroFlow MCP任务使用的默认Agent配置名称。默认为 `mirothinker_v1.5_keep5_max200`。对应环境变量 `MIROFLOW_DEFAULT_AGENT`。"
-        },
-        "aiSocialScientist.env.easypaperApiUrl": {
-          "type": "string",
-          "default": "",
-          "description": "EasyPaper 服务 API URL（可选）",
-          "markdownDescription": "EasyPaper 论文排版服务的 API 地址（需单独部署，见 https://github.com/tsinghua-fib-lab/EasyPaper）。留空时默认 `http://localhost:8004`。对应环境变量 `EASYPAPER_API_URL`。"
-        },
-        "aiSocialScientist.env.easypaperLlmApiKey": {
-          "type": "string",
-          "default": "",
-          "description": "EasyPaper 通用 LLM API Key（可选）",
-          "markdownDescription": "与默认 LLM 一致时可留空。保存后写入工作区 easypaper_agentsociety.yaml，供 EasyPaper 启动时 AGENT_CONFIG_PATH 使用。"
-        },
-        "aiSocialScientist.env.easypaperLlmModel": {
-          "type": "string",
-          "default": "qwen3-next-80b-a3b-instruct",
-          "description": "EasyPaper 通用 LLM 模型"
-        },
-        "aiSocialScientist.env.easypaperVlmModel": {
-          "type": "string",
-          "default": "qwen3-vl-235b-a22b-thinking",
-          "description": "EasyPaper VLM 模型（版面检查）"
-        },
-        "aiSocialScientist.env.easypaperVlmApiKey": {
-          "type": "string",
-          "default": "",
-          "description": "EasyPaper VLM API Key（可选，与 LLM 一致可留空）"
-        },
-        "aiSocialScientist.env.literatureSearchApiUrl": {
-          "type": "string",
-          "default": "http://localhost:8002/api/v1/search",
-          "description": "文献检索后端服务 URL（可选）",
-          "markdownDescription": "文献检索后端服务的 API 地址（需单独部署）。留空时默认 `http://localhost:8002/api/v1/search`。对应环境变量 `LITERATURE_SEARCH_API_URL`。"
         },
         "aiSocialScientist.chat.viewColumn": {
           "type": "string",
@@ -406,24 +343,25 @@
     "build-webview": "webpack --mode production",
     "watch-webview": "webpack --mode development --watch",
     "pretest": "npm run compile && npm run lint",
-    "lint": "eslint src --ext ts",
+    "lint": "eslint src",
     "test": "node ./out/test/runTest.js"
   },
   "devDependencies": {
+    "@eslint/js": "^10.0.1",
+    "@types/js-yaml": "^4.0.9",
     "@types/node": "^20.0.0",
     "@types/react": "^18.2.0",
     "@types/react-dom": "^18.2.0",
     "@types/vscode": "^1.80.0",
-    "@typescript-eslint/eslint-plugin": "^6.0.0",
-    "@typescript-eslint/parser": "^6.0.0",
     "css-loader": "^6.8.1",
-    "eslint": "^8.0.0",
+    "eslint": "^10.1.0",
+    "globals": "^17.4.0",
     "less": "^4.2.0",
     "less-loader": "^12.2.0",
     "style-loader": "^3.3.3",
     "ts-loader": "^9.4.4",
     "typescript": "^5.0.0",
-    "vscode": "^1.1.37",
+    "typescript-eslint": "^8.57.2",
     "webpack": "^5.104.1",
     "webpack-cli": "^5.1.4"
   },
@@ -434,9 +372,11 @@
     "@deck.gl/core": "^9.0.38",
     "@deck.gl/layers": "^9.0.38",
     "@deck.gl/react": "^9.0.38",
+    "@deck.gl/widgets": "^9.2.11",
     "antd": "^6.0.0",
     "dayjs": "^1.11.19",
     "i18next": "^23.7.0",
+    "js-yaml": "^4.1.0",
     "mapbox-gl": "^3.9.0",
     "react": "^18.2.0",
     "react-dom": "^18.2.0",

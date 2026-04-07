@@ -4,8 +4,7 @@
 使用Pydantic进行数据验证和序列化。
 """
 
-from pathlib import Path
-from typing import Any, Optional
+from typing import Optional
 
 from pydantic import BaseModel, Field, ConfigDict
 
@@ -81,6 +80,10 @@ class ExecutionResult(BaseModel):
     execution_time: float = Field(default=0.0, description="执行耗时（秒）")
     artifacts_path: Optional[str] = Field(
         default=None, description="执行产物保存目录（如有）"
+    )
+    artifacts: list[str] = Field(
+        default_factory=list,
+        description="执行产物列表（相对 artifacts_path 的相对路径，如无则为空）",
     )
     """
     代码执行耗时，单位为秒。

@@ -1,7 +1,7 @@
 AgentSociety 2
 ==============
 
-**AgentSociety 2** 是一个现代化的、LLM 原生的智能体模拟平台，专为社会科学研究和实验设计。它提供了一个灵活的框架，用于在模拟环境中创建和管理智能智能体。
+**AgentSociety 2** 是一个现代化的、LLM 原生的智能体模拟平台，专为社会科学研究和实验设计。它提供了一个灵活的框架，用于在模拟环境中创建和管理智能体。
 
 .. image:: https://img.shields.io/pypi/v/agentsociety2.svg
    :target: https://pypi.org/project/agentsociety2/
@@ -18,7 +18,7 @@ AgentSociety 2
 核心特性
 ------------
 
-* **LLM 驱动的智能体**: 创建具有个性、记忆和推理能力的智能智能体，由大语言模型驱动。
+* **LLM 驱动的智能体**: 创建具有个性、记忆和推理能力的智能体，由大语言模型驱动。
 
 * **灵活的环境模块**: 使用可组合的工具和状态管理构建自定义模拟环境。
 
@@ -48,7 +48,8 @@ AgentSociety 2
 
 .. code-block:: python
 
-   from agentsociety2 import PersonAgent, AgentSociety
+   from agentsociety2 import PersonAgent
+   from agentsociety2.society import AgentSociety
 
    # Create an agent
    agent = PersonAgent(
@@ -85,6 +86,7 @@ AgentSociety 2
    :caption: 用户指南:
 
    agents
+   agent_skills
    env_modules
    storage
    custom_modules
@@ -95,12 +97,14 @@ AgentSociety 2
    :caption: 开发者指南:
 
    development
+   module_and_parameter_management
    contributing
 
 .. toctree::
    :maxdepth: 2
    :caption: 参考:
 
+   api/index
    examples
 
 链接

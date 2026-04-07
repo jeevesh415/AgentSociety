@@ -25,16 +25,7 @@ from fastapi import APIRouter, HTTPException, Query
 from pydantic import BaseModel, Field
 from typing import Optional, List, Dict, Any
 import os
-import sys
 import json
-import importlib.util
-
-# 添加工作区路径以确保可以导入自定义模块
-workspace_path = os.getenv("WORKSPACE_PATH", "")
-if workspace_path:
-    workspace_abs_path = os.path.abspath(workspace_path)
-    if workspace_abs_path not in sys.path:
-        sys.path.insert(0, workspace_abs_path)
 
 # agentsociety2 是一个 Python 包，通过 import 使用
 from agentsociety2.backend.services.custom.scanner import CustomModuleScanner
@@ -44,6 +35,7 @@ from agentsociety2.registry import (
     get_registered_env_modules,
     get_registered_agent_modules,
     get_registry,
+    register_scanned_custom_modules,
     scan_and_register_custom_modules,
 )
 from agentsociety2.logger import get_logger
@@ -72,7 +64,9 @@ class ScanResponse(BaseModel):
     envs_found: int
     agents_generated: int
     envs_generated: int
-    errors: List[str]
+    errors: List[str] = Field(default_factory=list)
+    agent_diagnostics: List[Dict[str, Any]] = Field(default_factory=list)
+    env_diagnostics: List[Dict[str, Any]] = Field(default_factory=list)
     message: Optional[str] = None
 
 
@@ -100,10 +94,14 @@ class TestRequest(BaseModel):
 
 class ModuleTestResult(BaseModel):
     """单个模块测试结果"""
+
     name: str
+    module_kind: str = "env_module"
     success: bool
     output: str
     error: Optional[str] = None
+    checks: List[Dict[str, Any]] = Field(default_factory=list)
+    metadata: Dict[str, Any] = Field(default_factory=dict)
 
 
 class TestResponse(BaseModel):
@@ -113,8 +111,7 @@ class TestResponse(BaseModel):
     test_output: str
     error: Optional[str] = None
     returncode: Optional[int] = None
-    # 结构化测试结果
-    results: List[ModuleTestResult] = []
+    results: List[ModuleTestResult] = Field(default_factory=list)
     total_tests: Optional[int] = None
     passed_tests: Optional[int] = None
     failed_tests: Optional[int] = None
@@ -138,11 +135,30 @@ async def scan_custom_modules(request: ScanRequest):
     """
     扫描自定义模块并注册到内存
 
-    此接口会：
-    1. 扫描 custom/agents/ 和 custom/envs/ 目录（跳过 examples/）
-    2. 验证发现的模块
-    3. 将模块直接注册到内存中的 registry（不生成 JSON 文件）
-    4. 返回扫描结果
+    扫描工作区的 custom/agents/ 和 custom/envs/ 目录（跳过 examples/ 子目录），
+    验证发现的模块并将其直接注册到内存中的 registry。
+
+    Args:
+        request: 扫描请求，包含：
+            - workspace_path: 工作区路径（可选，不提供则使用环境变量）
+
+    Returns:
+        ScanResponse: 扫描结果，包含：
+            - success: 是否成功
+            - agents_found: 发现的Agent数量
+            - envs_found: 发现的环境模块数量
+            - agents_generated: 成功注册的Agent数量
+            - envs_generated: 成功注册的环境模块数量
+            - errors: 错误信息列表
+            - message: 结果消息
+
+    Raises:
+        HTTPException: 400 - 未提供工作区路径
+        HTTPException: 500 - 扫描失败
+
+    Note:
+        此接口不会生成JSON配置文件，模块仅注册到内存中。
+        如需持久化配置，请使用 /api/v1/custom/classes 端点。
     """
     workspace_path = request.workspace_path or os.getenv("WORKSPACE_PATH")
     if not workspace_path:
@@ -154,63 +170,22 @@ async def scan_custom_modules(request: ScanRequest):
     try:
         logger.info(f"[Custom Modules] Starting scan of workspace: {workspace_path}")
 
-        # 扫描自定义模块
         scanner = CustomModuleScanner(workspace_path)
         scan_result = scanner.scan_all()
 
-        logger.info(f"[Custom Modules] Scan complete: {len(scan_result['agents'])} agents, {len(scan_result['envs'])} envs found")
+        logger.info(
+            f"[Custom Modules] Scan complete: {len(scan_result['agents'])} agents, "
+            f"{len(scan_result['envs'])} envs found"
+        )
 
-        # 直接注册到内存，不生成 JSON 文件
         registry = get_registry()
-
-        # 清除旧的自定义模块
         registry.clear_custom_modules()
-
-        # 注册环境模块
-        for env_info in scan_result.get("envs", []):
-            try:
-                spec = importlib.util.spec_from_file_location(
-                    f"custom_env_{env_info['type']}", env_info["file_path"]
-                )
-                if spec and spec.loader:
-                    module = importlib.util.module_from_spec(spec)
-                    sys.modules[f"custom_env_{env_info['type']}"] = module
-                    spec.loader.exec_module(module)
-
-                    env_class = getattr(module, env_info["class_name"])
-                    env_class._is_custom = True
-
-                    module_type = env_info["class_name"]
-                    registry.register_env_module(module_type, env_class, is_custom=True)
-                    logger.info(f"[Custom Modules] Registered env module: {module_type} from {env_info['file_path']}")
-            except Exception as e:
-                logger.error(f"[Custom Modules] Failed to register env module {env_info.get('type')}: {e}")
-                scan_result["errors"].append(f"Env module {env_info.get('type')}: {str(e)}")
-
-        # 注册 Agent
-        for agent_info in scan_result.get("agents", []):
-            try:
-                spec = importlib.util.spec_from_file_location(
-                    f"custom_agent_{agent_info['type']}", agent_info["file_path"]
-                )
-                if spec and spec.loader:
-                    module = importlib.util.module_from_spec(spec)
-                    sys.modules[f"custom_agent_{agent_info['type']}"] = module
-                    spec.loader.exec_module(module)
-
-                    agent_class = getattr(module, agent_info["class_name"])
-                    agent_class._is_custom = True
-
-                    module_type = agent_info["class_name"]
-                    registry.register_agent_module(module_type, agent_class, is_custom=True)
-                    logger.info(f"[Custom Modules] Registered agent: {module_type} from {agent_info['file_path']}")
-            except Exception as e:
-                logger.error(f"[Custom Modules] Failed to register agent {agent_info.get('type')}: {e}")
-                scan_result["errors"].append(f"Agent {agent_info.get('type')}: {str(e)}")
+        scan_result = register_scanned_custom_modules(scan_result, registry)
+        scan_result["errors"].extend(scan_result.get("registration_errors", []))
 
         message_parts = []
-        agents_count = len([a for a in scan_result.get("agents", []) if "Failed" not in str(scan_result.get("errors", []))])
-        envs_count = len([e for e in scan_result.get("envs", []) if "Failed" not in str(scan_result.get("errors", []))])
+        agents_count = len(scan_result.get("agents", []))
+        envs_count = len(scan_result.get("envs", []))
 
         if agents_count > 0:
             message_parts.append(f"发现 {agents_count} 个 Agent")
@@ -231,6 +206,8 @@ async def scan_custom_modules(request: ScanRequest):
             agents_generated=agents_count,
             envs_generated=envs_count,
             errors=scan_result.get("errors", []),
+            agent_diagnostics=scan_result.get("agent_diagnostics", []),
+            env_diagnostics=scan_result.get("env_diagnostics", []),
             message=message,
         )
 
@@ -242,9 +219,23 @@ async def scan_custom_modules(request: ScanRequest):
 @router.post("/clean", response_model=CleanResponse)
 async def clean_custom_modules(request: ScanRequest):
     """
-    清理自定义模块的 JSON 配置
+    清理自定义模块的JSON配置
 
-    删除所有标记为 is_custom=true 的 JSON 配置文件。
+    删除所有标记为 is_custom=true 的JSON配置文件。
+
+    Args:
+        request: 清理请求，包含：
+            - workspace_path: 工作区路径（可选）
+
+    Returns:
+        CleanResponse: 清理结果，包含：
+            - success: 是否成功
+            - removed_count: 删除的配置数量
+            - message: 结果消息
+
+    Raises:
+        HTTPException: 400 - 未提供工作区路径
+        HTTPException: 500 - 清理失败
     """
     workspace_path = request.workspace_path or os.getenv("WORKSPACE_PATH")
     if not workspace_path:
@@ -272,15 +263,31 @@ async def test_custom_modules(request: TestRequest):
     """
     测试自定义模块
 
-    此接口会：
-    1. 扫描 custom/ 目录（如果指定了模块类型和类名，则只测试指定模块）
-    2. 运行测试
-    3. 返回测试结果
+    扫描并测试自定义模块，验证其能否正常工作。可以测试所有模块或指定特定模块。
 
-    参数：
-    - module_kind: 模块类型 ('agent' 或 'env_module')
-    - module_class_name: 要测试的类名
-    - 如果不提供这两个参数，则测试所有模块
+    Args:
+        request: 测试请求，包含：
+            - workspace_path: 工作区路径（可选）
+            - module_kind: 模块类型 ('agent' 或 'env_module'，可选）
+            - module_class_name: 要测试的类名（与module_kind配合使用，可选）
+
+    Returns:
+        TestResponse: 测试结果，包含：
+            - success: 是否全部通过
+            - test_output: 测试输出内容
+            - error: 错误信息（如有）
+            - returncode: 测试进程返回码
+            - results: 各模块测试结果列表
+            - total_tests: 总测试数
+            - passed_tests: 通过数
+            - failed_tests: 失败数
+
+    Raises:
+        HTTPException: 400 - 未提供工作区路径
+        HTTPException: 500 - 测试失败
+
+    Note:
+        如果不指定 module_kind 和 module_class_name，则测试所有发现的模块。
     """
     workspace_path = request.workspace_path or os.getenv("WORKSPACE_PATH")
     if not workspace_path:
@@ -299,33 +306,42 @@ async def test_custom_modules(request: TestRequest):
         else:
             logger.info(f"[Custom Modules] Starting test of workspace: {workspace_path}")
 
-        # 先扫描模块
-        scanner = CustomModuleScanner(workspace_path)
-        scan_result = scanner.scan_all()
+        builder = ScriptGenerator(workspace_path)
 
-        # 根据参数过滤要测试的模块
         if module_kind and module_class_name:
-            filtered_agents = []
-            filtered_envs = []
-
-            if module_kind == "agent":
-                for agent_info in scan_result.get("agents", []):
-                    if agent_info.get("class_name") == module_class_name:
-                        filtered_agents.append(agent_info)
-                        logger.info(f"[Custom Modules] Found agent to test: {module_class_name}")
-            elif module_kind == "env_module":
-                for env_info in scan_result.get("envs", []):
-                    if env_info.get("class_name") == module_class_name:
-                        filtered_envs.append(env_info)
-                        logger.info(f"[Custom Modules] Found env to test: {module_class_name}")
-
-            # 更新 scan_result 只包含要测试的模块
-            scan_result["agents"] = filtered_agents
-            scan_result["envs"] = filtered_envs
-
-            # 如果没找到指定模块
-            if not filtered_agents and not filtered_envs:
-                logger.warning(f"[Custom Modules] Module not found: {module_kind}.{module_class_name}")
+            scanner = CustomModuleScanner(workspace_path)
+            scan_result = scanner.scan_all()
+            target_modules = (
+                scan_result.get("agents", [])
+                if module_kind == "agent"
+                else scan_result.get("envs", [])
+            )
+            module_info = next(
+                (
+                    item
+                    for item in target_modules
+                    if item.get("class_name") == module_class_name
+                ),
+                None,
+            )
+            if module_info is None:
+                diagnostics = (
+                    scan_result.get("agent_diagnostics", [])
+                    if module_kind == "agent"
+                    else scan_result.get("env_diagnostics", [])
+                )
+                module_info = next(
+                    (
+                        item
+                        for item in diagnostics
+                        if item.get("class_name") == module_class_name
+                    ),
+                    None,
+                )
+            if module_info is None:
+                logger.warning(
+                    f"[Custom Modules] Module not found: {module_kind}.{module_class_name}"
+                )
                 return TestResponse(
                     success=False,
                     test_output="",
@@ -335,27 +351,35 @@ async def test_custom_modules(request: TestRequest):
                     passed_tests=0,
                     failed_tests=0,
                 )
+            result = await builder.run_target_test(
+                module_kind=module_kind,
+                module_path=module_info.get("module_path", ""),
+                class_name=module_class_name,
+            )
+        else:
+            scanner = CustomModuleScanner(workspace_path)
+            scan_result = scanner.scan_all()
 
-        agents = scan_result.get("agents", [])
-        envs = scan_result.get("envs", [])
+            agents = scan_result.get("agents", [])
+            envs = scan_result.get("envs", [])
 
-        logger.info(f"[Custom Modules] Test scan found: {len(agents)} agents, {len(envs)} envs")
-
-        if not agents and not envs:
-            logger.warning("[Custom Modules] No custom modules found for testing")
-            return TestResponse(
-                success=False,
-                test_output="",
-                error="未发现任何自定义模块，请先在 custom/ 目录下创建模块",
-                results=[],
-                total_tests=0,
-                passed_tests=0,
-                failed_tests=0,
+            logger.info(
+                f"[Custom Modules] Test scan found: {len(agents)} agents, {len(envs)} envs"
             )
 
-        # 生成并运行测试
-        builder = ScriptGenerator(workspace_path)
-        result = await builder.run_test(scan_result)
+            if not agents and not envs:
+                logger.warning("[Custom Modules] No custom modules found for testing")
+                return TestResponse(
+                    success=False,
+                    test_output="",
+                    error="未发现任何自定义模块，请先在 custom/ 目录下创建模块",
+                    results=[],
+                    total_tests=0,
+                    passed_tests=0,
+                    failed_tests=0,
+                )
+
+            result = await builder.run_test(scan_result)
 
         # 记录每个模块的测试结果
         for module_result in result.get("results", []):
@@ -396,10 +420,28 @@ async def list_custom_modules():
     """
     列出当前已注册的自定义模块
 
-    返回所有 is_custom=true 的模块信息（从内存注册表中读取）。
+    从内存注册表中读取所有标记为 is_custom=true 的模块信息。
+
+    Returns:
+        ListResponse: 模块列表，包含：
+            - success: 是否成功
+            - agents: 自定义Agent列表
+            - envs: 自定义环境模块列表
+            - total_agents: Agent总数
+            - total_envs: 环境模块总数
+
+    Raises:
+        HTTPException: 500 - 获取列表失败
     """
     try:
         registry = get_registry()
+        workspace_path = os.getenv("WORKSPACE_PATH")
+        if workspace_path and not registry._custom_loaded:
+            try:
+                scan_and_register_custom_modules(Path(workspace_path), registry)
+            except Exception as exc:
+                logger.warning(f"[Custom Modules] Auto-load before list failed: {exc}")
+
         result = {"agents": [], "envs": []}
 
         # 从注册表获取自定义 Agent
@@ -448,6 +490,21 @@ async def list_custom_modules():
 async def get_custom_modules_status():
     """
     获取自定义模块状态概览
+
+    返回工作区自定义模块目录的状态信息。
+
+    Returns:
+        Dict[str, Any]: 状态信息，包含：
+            - custom_dir_exists: custom目录是否存在
+            - agents_dir_exists: agents子目录是否存在
+            - envs_dir_exists: envs子目录是否存在
+            - agent_files_count: Agent文件数量
+            - env_files_count: 环境模块文件数量
+            - registered_agents: 已注册的Agent数量
+            - registered_envs: 已注册的环境模块数量
+
+    Raises:
+        HTTPException: 400 - 未设置工作区路径
     """
     workspace_path = os.getenv("WORKSPACE_PATH")
     if not workspace_path:
@@ -456,9 +513,6 @@ async def get_custom_modules_status():
     from pathlib import Path
 
     custom_dir = Path(workspace_path) / "custom"
-    agent_classes_dir = Path(workspace_path) / ".agentsociety/agent_classes"
-    env_modules_dir = Path(workspace_path) / ".agentsociety/env_modules"
-
     status = {
         "custom_dir_exists": custom_dir.exists(),
         "agents_dir_exists": (custom_dir / "agents").exists(),
@@ -490,7 +544,6 @@ async def get_custom_modules_status():
 
     # 统计已注册的模块（从内存注册表中读取）
     try:
-        registry = get_registry()
         for agent_type, agent_class in get_registered_agent_modules():
             if getattr(agent_class, "_is_custom", False):
                 status["registered_agents"] += 1
@@ -510,10 +563,26 @@ async def list_available_classes(
     include_custom: bool = Query(True, description="是否包含自定义模块"),
 ) -> Dict[str, Any]:
     """
-    列出所有可用的Agent类和Env Module类
+    列出所有可用的Agent类和环境模块类
+
+    返回所有可用的类，并标记哪些已配置预填充参数。
+
+    Args:
+        workspace_path: 工作区路径（必填）
+        include_custom: 是否包含自定义模块，默认True
 
     Returns:
-        包含可用类列表的字典
+        Dict[str, Any]: 可用类列表，包含：
+            - success: 是否成功
+            - env_modules: 环境模块字典，每个模块包含：
+                - type, class_name, description, is_custom, has_prefill
+            - agents: Agent字典，每个Agent包含：
+                - type, class_name, description, is_custom, has_prefill
+            - env_module_count: 环境模块数量
+            - agent_count: Agent数量
+
+    Raises:
+        HTTPException: 500 - 获取类列表失败
     """
     try:
         registry = get_registry()
@@ -603,8 +672,19 @@ async def rescan_custom_modules(
     """
     重新扫描自定义模块
 
+    清除内存中的旧模块并重新扫描工作区的自定义模块。
+
+    Args:
+        workspace_path: 工作区路径（必填）
+
     Returns:
-        扫描结果
+        Dict[str, Any]: 扫描结果，包含：
+            - success: 是否成功
+            - scan_result: 扫描详情
+            - message: 结果消息
+
+    Raises:
+        HTTPException: 500 - 重新扫描失败
     """
     try:
         registry = get_registry()

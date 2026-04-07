@@ -1,3 +1,34 @@
+"""仿真社会辅助模块。
+
+本模块提供 :class:`AgentSocietyHelper` 类，实现 Plan-and-Execute 模式的外部请求处理。
+
+主要功能：
+
+- **问答处理**: 通过 :meth:`ask` 方法回答关于仿真的问题
+- **干预执行**: 通过 :meth:`intervene` 方法执行对仿真的干预
+- **动态重规划**: 当执行失败时自动调整计划
+- **工具调度**: 调度内置工具与环境路由器和智能体交互
+
+内置工具：
+
+- ``get_current_time`` — 获取当前仿真时间
+- ``filter_agents_by_profile`` — 按属性筛选智能体
+- ``ask_environment`` — 向环境路由器提问
+- ``ask_agents`` — 向特定智能体提问
+
+Example::
+
+    from agentsociety2.society.helper import AgentSocietyHelper
+
+    helper = AgentSocietyHelper(env_router=router, agents=[agent1, agent2])
+
+    # 问答模式
+    answer = await helper.ask("当前有多少智能体在线？")
+
+    # 干预模式
+    result = await helper.intervene("让所有智能体移动到城市中心")
+"""
+
 from __future__ import annotations
 
 import asyncio
@@ -5,11 +36,12 @@ import json
 from dataclasses import dataclass
 from typing import Any, Callable, Dict, List, Sequence
 
+import json_repair
 from litellm import AllMessageValues
 from pydantic import BaseModel
 
 from agentsociety2.agent import AgentBase
-from agentsociety2.config import get_llm_router_and_model
+from agentsociety2.config import extract_json, get_llm_router_and_model
 from agentsociety2.env import RouterBase
 from agentsociety2.logger import get_logger
 
@@ -21,6 +53,12 @@ def _to_json_string(value: Any) -> str:
         return json.dumps(value, ensure_ascii=False)
     except Exception:
         return json.dumps({"value": str(value)}, ensure_ascii=False)
+
+
+def _truncate_text(text: str, max_len: int = 4000) -> str:
+    if len(text) <= max_len:
+        return text
+    return text[:max_len] + "\n...[truncated]..."
 
 
 class PlanStep(BaseModel):
@@ -65,6 +103,26 @@ class AgentSocietyHelper:
         self._tools: Dict[str, _ToolDef] = {}
         self._current_readonly: bool = True
         self._register_tools()
+
+    def _log_llm_raw_response(self, stage: str, response: str) -> None:
+        logger = get_logger()
+        logger.debug(
+            "AgentSocietyHelper %s raw LLM response:\n%s",
+            stage,
+            _truncate_text(response),
+        )
+
+    def _parse_json_response(self, response: str) -> Dict[str, Any]:
+        json_str = extract_json(response)
+        if json_str is None:
+            raise ValueError("Failed to extract JSON from LLM response")
+
+        parsed = json_repair.loads(json_str)
+        if not isinstance(parsed, dict):
+            raise ValueError(
+                f"Expected JSON object from LLM response, got {type(parsed).__name__}"
+            )
+        return parsed
 
     # ---- public API ----
     async def ask(self, question: str) -> str:
@@ -204,8 +262,10 @@ class AgentSocietyHelper:
                         continue
                     return "Planning failed: Empty model response"
 
-                # Parse the plan
-                plan_data = json.loads(response)
+                self._log_llm_raw_response(
+                    f"planning attempt {retry + 1}", response
+                )
+                plan_data = self._parse_json_response(response)
 
                 # Check if this is a direct answer (no planning needed)
                 if plan_data.get("direct_answer"):
@@ -239,19 +299,6 @@ class AgentSocietyHelper:
                         continue
                     return f"Plan validation failed: {str(validation_error)}"
 
-            except json.JSONDecodeError as e:
-                get_logger().error(
-                    f"Planning attempt {retry + 1} - JSON decode error: {e}"
-                )
-                if retry < self._max_llm_call_retry - 1:
-                    error_history.append(
-                        {
-                            "response": resp.choices[0].message.content if "resp" in locals() else "No response",  # type: ignore
-                            "error": f"Invalid JSON format: {str(e)}",
-                        }
-                    )
-                    continue
-                return "Planning failed: Invalid JSON response"
             except Exception as e:
                 get_logger().error(f"Planning attempt {retry + 1} failed: {e}")
                 if retry < self._max_llm_call_retry - 1:
@@ -330,7 +377,10 @@ class AgentSocietyHelper:
                         continue
                     return None
 
-                plan_data = json.loads(response)
+                self._log_llm_raw_response(
+                    f"replanning attempt {retry + 1}", response
+                )
+                plan_data = self._parse_json_response(response)
                 raw_steps = plan_data.get("steps", [])
 
                 if not raw_steps:
@@ -359,21 +409,6 @@ class AgentSocietyHelper:
                         continue
                     return None
 
-            except json.JSONDecodeError as e:
-                get_logger().error(
-                    f"Replanning attempt {retry + 1} - JSON decode error: {e}"
-                )
-                if retry < self._max_llm_call_retry - 1:
-                    error_history.append(
-                        {
-                            "response": (
-                                response if response is not None else "No response"
-                            ),
-                            "error": f"Invalid JSON format: {str(e)}",
-                        }
-                    )
-                    continue
-                return None
             except Exception as e:
                 get_logger().error(f"Replanning attempt {retry + 1} failed: {e}")
                 if retry < self._max_llm_call_retry - 1:
@@ -441,9 +476,12 @@ class AgentSocietyHelper:
                         continue
                     return "Unable to generate final answer based on execution results."
 
+                self._log_llm_raw_response(
+                    f"final answer attempt {retry + 1}", final_answer
+                )
                 # Parse final answer
                 try:
-                    answer_data = json.loads(final_answer)
+                    answer_data = self._parse_json_response(final_answer)
                     if "answer" not in answer_data:
                         if retry < self._max_llm_call_retry - 1:
                             error_history.append(
@@ -455,7 +493,7 @@ class AgentSocietyHelper:
                             continue
                         return "Unable to generate final answer based on execution results."
                     return str(answer_data.get("answer"))
-                except json.JSONDecodeError:
+                except Exception:
                     # If not JSON, use response as-is
                     return str(final_answer)
 

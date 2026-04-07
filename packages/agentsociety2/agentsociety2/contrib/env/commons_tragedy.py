@@ -4,11 +4,12 @@ Environment for Tragedy of the Commons game based on V2 framework
 """
 import asyncio
 from datetime import datetime
-from typing import Dict, List, Optional
+from typing import ClassVar, Dict, List, Optional
 
 from pydantic import BaseModel, Field
 
 from agentsociety2.env import EnvBase, tool
+from agentsociety2.storage import ColumnDef
 
 
 # Response models
@@ -39,6 +40,16 @@ class GetRoundHistoryResponse(BaseModel):
 
 class CommonsTragedyEnv(EnvBase):
     """Environment for Tragedy of the Commons game based on V2 framework"""
+
+    _env_state_columns: ClassVar[list[ColumnDef]] = [
+        ColumnDef("round_number", "INTEGER", nullable=False),
+        ColumnDef("current_pool_resources", "INTEGER", nullable=False),
+        ColumnDef("last_round", "JSON"),
+        ColumnDef("pending_extractions", "JSON", nullable=False),
+        ColumnDef("submitted_agents", "JSON", nullable=False),
+        ColumnDef("initial_pool_resources", "INTEGER", nullable=False),
+        ColumnDef("max_extraction_per_agent", "INTEGER", nullable=False),
+    ]
 
     def __init__(
         self,
@@ -73,6 +84,7 @@ class CommonsTragedyEnv(EnvBase):
         self._last_round_executed: int = -1
         
         self._lock = asyncio.Lock()
+        self._step_counter: int = 0
 
     @classmethod
     def mcp_description(cls) -> str:
@@ -277,6 +289,7 @@ If you don't submit, other agents' submissions will be delayed.
         self._pending_extractions.clear()
         self._agents_submitted_in_current_round.clear()
         self._last_round_executed = -1
+        self._step_counter = 0
 
     async def step(self, tick: int, t: datetime):
         """
@@ -292,6 +305,7 @@ If you don't submit, other agents' submissions will be delayed.
         """
         async with self._lock:
             self.t = t
+            last_round = self.round_history[-1] if self.round_history else None
             
             # Execute the round if at least some agents have submitted
             # (Agents that haven't submitted will be treated as extracting 0 units)
@@ -320,10 +334,29 @@ If you don't submit, other agents' submissions will be delayed.
                 }
 
                 self.round_history.append(round_summary)
+                last_round = round_summary
 
                 # Clear pending extractions for next round
                 self._pending_extractions.clear()
                 self._agents_submitted_in_current_round.clear()
+
+            round_number = self.round_number
+            current_pool_resources = self.current_pool_resources
+            pending_extractions = self._pending_extractions.copy()
+            submitted_agents = sorted(self._agents_submitted_in_current_round)
+
+        await self._write_env_state(
+            step=self._step_counter,
+            t=t,
+            round_number=round_number,
+            current_pool_resources=current_pool_resources,
+            last_round=last_round,
+            pending_extractions=pending_extractions,
+            submitted_agents=submitted_agents,
+            initial_pool_resources=self.initial_pool_resources,
+            max_extraction_per_agent=self.max_extraction_per_agent,
+        )
+        self._step_counter += 1
 
     def _dump_state(self) -> dict:
         """Serialize state"""
@@ -337,6 +370,7 @@ If you don't submit, other agents' submissions will be delayed.
             "pending_extractions": self._pending_extractions,
             "agents_submitted_in_current_round": list(self._agents_submitted_in_current_round),
             "last_round_executed": self._last_round_executed,
+            "step_counter": self._step_counter,
         }
 
     def _load_state(self, state: dict):
@@ -350,6 +384,7 @@ If you don't submit, other agents' submissions will be delayed.
         self._pending_extractions = state.get("pending_extractions", {})
         self._agents_submitted_in_current_round = set(state.get("agents_submitted_in_current_round", []))
         self._last_round_executed = state.get("last_round_executed", -1)
+        self._step_counter = state.get("step_counter", 0)
 
 
 __all__ = ["CommonsTragedyEnv"]

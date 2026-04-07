@@ -6,12 +6,13 @@ This environment provides social communication functionalities for agents.
 import asyncio
 from collections import defaultdict
 from datetime import datetime
-from typing import Dict, List, Optional, Tuple
+from typing import ClassVar, Dict, List, Optional, Tuple
 
 from agentsociety2.env import (
     EnvBase,
     tool,
 )
+from agentsociety2.storage import ColumnDef
 from pydantic import BaseModel, Field
 
 
@@ -75,6 +76,13 @@ class SendGroupMessageResponse(BaseModel):
 
 
 class SimpleSocialSpace(EnvBase):
+    # 声明式状态持久化
+    _env_state_columns: ClassVar[list[ColumnDef]] = [
+        ColumnDef("total_messages_sent", "INTEGER"),
+        ColumnDef("active_groups", "INTEGER"),
+        ColumnDef("total_agents", "INTEGER"),
+    ]
+
     def __init__(
         self,
         agent_id_name_pairs: List[Tuple[int, str]] | List[List[int | str]],
@@ -111,6 +119,8 @@ class SimpleSocialSpace(EnvBase):
 
         # Lock for thread safety
         self._lock = asyncio.Lock()
+        self._step_counter: int = 0
+        self._total_messages_sent: int = 0
 
     @classmethod
     def mcp_description(cls) -> str:
@@ -178,6 +188,7 @@ Your task is to use the available social functions to manage individual mailboxe
 
             # Add to receiver's mailbox
             self._mailboxes[receiver_id].append(message)
+            self._total_messages_sent += 1
 
             return SendMessageResponse(
                 sender_id=sender_id,
@@ -377,6 +388,7 @@ Your task is to use the available social functions to manage individual mailboxe
             for member_id in group.members:
                 self._mailboxes[member_id].append(message)
                 recipient_count += 1
+            self._total_messages_sent += 1
 
             return SendGroupMessageResponse(
                 sender_id=sender_id,
@@ -406,3 +418,50 @@ Your task is to use the available social functions to manage individual mailboxe
             # Remove empty groups
             for group_id in groups_to_remove:
                 del self._groups[group_id]
+
+        # 持久化环境全局状态
+        await self._write_env_state(
+            step=self._step_counter, t=t,
+            total_messages_sent=self._total_messages_sent,
+            active_groups=len(self._groups),
+            total_agents=len(self._agent_names),
+        )
+        self._step_counter += 1
+
+    def _dump_state(self) -> dict:
+        return {
+            "mailboxes": {
+                str(k): [m.model_dump() for m in v]
+                for k, v in self._mailboxes.items()
+            },
+            "groups": {
+                str(k): v.model_dump() for k, v in self._groups.items()
+            },
+            "next_group_id": self._next_group_id,
+            "next_message_id": self._next_message_id,
+            "agent_names": {str(k): v for k, v in self._agent_names.items()},
+            "total_messages_sent": self._total_messages_sent,
+            "step_counter": self._step_counter,
+        }
+
+    def _load_state(self, state: dict):
+        if "mailboxes" in state:
+            self._mailboxes = defaultdict(list, {
+                int(k): [Message.model_validate(m) for m in v]
+                for k, v in state["mailboxes"].items()
+            })
+        if "groups" in state:
+            self._groups = {
+                int(k): Group.model_validate(v)
+                for k, v in state["groups"].items()
+            }
+        if "next_group_id" in state:
+            self._next_group_id = state["next_group_id"]
+        if "next_message_id" in state:
+            self._next_message_id = state["next_message_id"]
+        if "agent_names" in state:
+            self._agent_names = {int(k): v for k, v in state["agent_names"].items()}
+        if "total_messages_sent" in state:
+            self._total_messages_sent = state["total_messages_sent"]
+        if "step_counter" in state:
+            self._step_counter = state["step_counter"]

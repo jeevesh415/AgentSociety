@@ -4,12 +4,13 @@ Environment for Self-Reference Effect experiment based on V2 framework
 """
 import asyncio
 from datetime import datetime
-from typing import Dict, List, Optional, Any
 from enum import Enum
+from typing import Any, ClassVar, Dict, List, Optional
 
 from pydantic import BaseModel, Field
 
 from agentsociety2.env import EnvBase, tool
+from agentsociety2.storage import ColumnDef
 
 
 # Identity types
@@ -61,6 +62,13 @@ class GetRecognitionStatusResponse(BaseModel):
 class SelfReferenceEffectEnv(EnvBase):
     """Environment for Self-Reference Effect (SRE) experiment based on V2 framework"""
 
+    _agent_state_columns: ClassVar[list[ColumnDef]] = [
+        ColumnDef("encoding_ratings", "JSON", nullable=False),
+        ColumnDef("recognition_judgments", "JSON", nullable=False),
+        ColumnDef("encoding_completed_count", "INTEGER", nullable=False),
+        ColumnDef("recognition_completed_count", "INTEGER", nullable=False),
+    ]
+
     def __init__(
         self,
         agent_ids: List[int],
@@ -111,6 +119,7 @@ class SelfReferenceEffectEnv(EnvBase):
         self._encoding_trait_set = {t["trait"] for t in self.encoding_traits}
         
         self._lock = asyncio.Lock()
+        self._step_counter: int = 0
 
     def _generate_default_encoding_traits(self) -> List[Dict[str, Any]]:
         """Generate default trait list for encoding phase"""
@@ -515,6 +524,15 @@ You MUST complete judgments for ALL {len(self.recognition_traits)} recognition t
         Initialize the environment module.
         """
         await super().init(start_datetime)
+        async with self._lock:
+            self._encoding_ratings = {
+                agent_id: [] for agent_id in self.agent_ids
+            }
+            self._recognition_judgments = {
+                agent_id: [] for agent_id in self.agent_ids
+            }
+            self._encoding_trait_set = {t["trait"] for t in self.encoding_traits}
+            self._step_counter = 0
 
     async def step(self, tick: int, t: datetime):
         """
@@ -526,6 +544,28 @@ You MUST complete judgments for ALL {len(self.recognition_traits)} recognition t
         """
         async with self._lock:
             self.current_datetime = t
+            records = [
+                {
+                    "agent_id": agent_id,
+                    "encoding_ratings": [rating.copy() for rating in self._encoding_ratings[agent_id]],
+                    "recognition_judgments": [
+                        judgment.copy()
+                        for judgment in self._recognition_judgments[agent_id]
+                    ],
+                    "encoding_completed_count": len(self._encoding_ratings[agent_id]),
+                    "recognition_completed_count": len(
+                        self._recognition_judgments[agent_id]
+                    ),
+                }
+                for agent_id in self.agent_ids
+            ]
+
+        await self._write_agent_state_batch(
+            step=self._step_counter,
+            t=t,
+            records=records,
+        )
+        self._step_counter += 1
 
     def get_results(self) -> Dict[str, Any]:
         """
@@ -554,6 +594,7 @@ You MUST complete judgments for ALL {len(self.recognition_traits)} recognition t
             "recognition_traits": self.recognition_traits,
             "encoding_ratings": self._encoding_ratings,
             "recognition_judgments": self._recognition_judgments,
+            "step_counter": self._step_counter,
         }
 
     def _load_state(self, state: dict):
@@ -564,7 +605,8 @@ You MUST complete judgments for ALL {len(self.recognition_traits)} recognition t
         self.recognition_traits = state.get("recognition_traits", [])
         self._encoding_ratings = state.get("encoding_ratings", {})
         self._recognition_judgments = state.get("recognition_judgments", {})
+        self._encoding_trait_set = {t["trait"] for t in self.encoding_traits}
+        self._step_counter = state.get("step_counter", 0)
 
 
 __all__ = ["SelfReferenceEffectEnv", "IdentityType"]
-

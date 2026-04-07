@@ -22,11 +22,18 @@ class MyModule(EnvBase):
         super().__init__()
         # Your initialization
         self._state = {}
-
-    def observe(self) -> str:
-        """Return the current state of the module."""
-        return f"Current state: {self._state}"
 ```
+
+## Repository Compatibility Contract
+
+Custom env modules in this repository are discovered from `custom/envs/*.py`. Keep these constraints in mind:
+
+- The class must be defined in the target file directly.
+- The registry key remains the class name.
+- `step()` is required.
+- The class should support `cls()` without required constructor args.
+- If the module needs observation capability, provide it through readonly `kind="observe"` tools.
+- `mcp_description()` should be callable and describe purpose, config, defaults, and tools.
 
 ## The @tool Decorator
 
@@ -34,7 +41,7 @@ The `@tool` decorator registers methods as discoverable tools:
 
 ```python
 @tool(readonly=False, name="custom_action", description="A custom tool action")
-def my_tool(self, param1: str, param2: int) -> str:
+async def my_tool(self, param1: str, param2: int) -> str:
     """Tool description for agents."""
     return f"Action completed with {param1} and {param2}"
 ```
@@ -54,7 +61,7 @@ For agent-specific observations. Must be `readonly=True` and take only `agent_id
 
 ```python
 @tool(readonly=True, kind="observe")
-def get_agent_status(self, agent_id: int) -> str:
+async def get_agent_status(self, agent_id: int) -> str:
     """Get the current status of an agent."""
     status = self._agent_statuses.get(agent_id, "unknown")
     return f"Agent {agent_id} status: {status}"
@@ -66,7 +73,7 @@ For aggregate information. Must be `readonly=True` and take no parameters:
 
 ```python
 @tool(readonly=True, kind="statistics")
-def get_average_happiness(self) -> str:
+async def get_average_happiness(self) -> str:
     """Get the average happiness across all agents."""
     if not self._happiness:
         return "No happiness data available"
@@ -80,7 +87,7 @@ Can be read-only or read-write, with any parameters:
 
 ```python
 @tool(readonly=False)
-def set_agent_happiness(self, agent_id: int, happiness: float) -> str:
+async def set_agent_happiness(self, agent_id: int, happiness: float) -> str:
     """Set the happiness level for an agent."""
     self._happiness[agent_id] = max(0, min(1, happiness))
     return f"Set agent {agent_id} happiness to {self._happiness[agent_id]}"
@@ -103,8 +110,12 @@ class WeatherModule(EnvBase):
         self._conditions = "sunny"
         self._agent_locations: Dict[int, str] = {}
 
+    @classmethod
+    def mcp_description(cls) -> str:
+        return "WeatherModule: weather env with config and tool descriptions."
+
     @tool(readonly=True, kind="observe")
-    def get_weather(self, agent_id: int) -> str:
+    async def get_weather(self, agent_id: int) -> str:
         """Get the current weather for an agent's location."""
         location = self._agent_locations.get(agent_id, "unknown")
         return (
@@ -113,13 +124,13 @@ class WeatherModule(EnvBase):
         )
 
     @tool(readonly=False)
-    def set_temperature(self, temperature: float) -> str:
+    async def set_temperature(self, temperature: float) -> str:
         """Change the global temperature."""
         self._temperature = temperature
         return f"Temperature set to {self._temperature}°C"
 
     @tool(readonly=False)
-    def set_conditions(self, conditions: str) -> str:
+    async def set_conditions(self, conditions: str) -> str:
         """Change the weather conditions."""
         valid = ["sunny", "cloudy", "rainy", "snowy"]
         if conditions.lower() not in valid:
@@ -128,24 +139,18 @@ class WeatherModule(EnvBase):
         return f"Weather set to {self._conditions}"
 
     @tool(readonly=True, kind="statistics")
-    def get_global_temperature(self) -> str:
+    async def get_global_temperature(self) -> str:
         """Get the current global temperature."""
         return f"Global temperature: {self._temperature}°C"
 
     @tool(readonly=False)
-    def set_agent_location(self, agent_id: int, location: str) -> str:
+    async def set_agent_location(self, agent_id: int, location: str) -> str:
         """Set an agent's location."""
         self._agent_locations[agent_id] = location
         return f"Agent {agent_id} moved to {location}"
 
-    def observe(self) -> str:
-        """Return the overall module state."""
-        return (
-            f"Weather Module:\n"
-            f"  Temperature: {self._temperature}°C\n"
-            f"  Conditions: {self._conditions}\n"
-            f"  Agent locations: {list(self._agent_locations.items())}"
-        )
+    async def step(self, tick: int, t: datetime):
+        self.t = t
 ```
 
 ## State Management
@@ -313,9 +318,6 @@ async def test_module():
     response = await agent.ask("What can you tell me about this environment?")
     print(response)
 
-    # Check module state
-    print(module.observe())
-
 asyncio.run(test_module())
 ```
 
@@ -323,7 +325,7 @@ asyncio.run(test_module())
 
 - [ ] Module inherits from EnvBase
 - [ ] Tools use @tool decorator
-- [ ] observe() method implemented
+- [ ] Observation capability exposed through readonly `kind="observe"` tool(s)
 - [ ] Error handling in place
 - [ ] Docstrings for all tools
 - [ ] File follows naming convention

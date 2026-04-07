@@ -1,5 +1,33 @@
-"""
-Create logger named agentsociety as singleton for ray.
+"""日志模块 - 提供统一的日志配置和管理。
+
+本模块提供 agentsociety 项目的日志功能：
+
+主要函数
+--------
+
+- **get_logger**: 获取 agentsociety logger 单例
+- **set_logger_level**: 设置日志级别
+- **setup_logging**: 完整的日志配置（控制台 + 文件）
+- **setup_litellm_logging**: 配置 LiteLLM 日志集成
+
+特性
+----
+
+- 彩色控制台输出（按日志级别着色）
+- INFO 级别超长日志自动截断
+- 支持文件日志输出
+- LiteLLM API 调用日志集成
+
+使用示例::
+
+    from agentsociety2.logger import get_logger, setup_logging
+
+    # 简单使用
+    logger = get_logger()
+    logger.info("Hello, world!")
+
+    # 完整配置
+    setup_logging(log_file="app.log", log_level=logging.DEBUG)
 """
 
 import json
@@ -73,7 +101,10 @@ class ColoredFormatter(logging.Formatter):
 
 
 def get_logger():
-    """Return the agentsociety logger singleton."""
+    """获取 agentsociety logger 单例。
+
+    :returns: :class:`logging.Logger`（name 固定为 ``agentsociety``）。
+    """
     logger = logging.getLogger("agentsociety")
     # check if there is already a handler, avoid duplicate output
     if not logger.hasHandlers():
@@ -89,11 +120,10 @@ def get_logger():
 
 
 def add_file_handler(log_file: str, level: int = logging.INFO) -> None:
-    """添加文件日志处理器
+    """为 agentsociety logger 添加文件处理器（幂等）。
 
-    Args:
-        log_file: 日志文件路径
-        level: 日志级别，默认为 INFO
+    :param log_file: 日志文件路径。
+    :param level: 日志级别。
     """
     logger = logging.getLogger("agentsociety")
 
@@ -119,7 +149,10 @@ def add_file_handler(log_file: str, level: int = logging.INFO) -> None:
 
 
 def set_logger_level(level: str):
-    """Set the logger level"""
+    """设置 agentsociety logger 的日志级别。
+
+    :param level: 传给 :meth:`logging.Logger.setLevel` 的级别。
+    """
     get_logger().setLevel(level)
 
 
@@ -143,14 +176,7 @@ class LiteLLMLogger:
         messages: List[Dict[str, Any]],
         kwargs: Dict[str, Any],
     ):
-        """
-        Log before API call - records the prompt at DEBUG level.
-
-        Args:
-            model: Model name
-            messages: List of messages (prompt)
-            kwargs: Additional arguments
-        """
+        """在 API 调用前记录 prompt（DEBUG）。"""
         # Generate a unique call ID for tracking
         call_id = f"{model}_{int(time.time() * 1000000)}"
         self._call_start_times[call_id] = time.time()
@@ -169,15 +195,7 @@ class LiteLLMLogger:
         start_time: float,
         end_time: float,
     ):
-        """
-        Log after API call - records response, tokens, and timing at INFO level.
-
-        Args:
-            kwargs: Arguments passed to the API call
-            response_obj: Response object from LiteLLM
-            start_time: Start time of the call
-            end_time: End time of the call
-        """
+        """在 API 调用后记录 response / tokens / timing（INFO）。"""
         duration = end_time - start_time
         model = kwargs.get("model", "unknown")
 
@@ -210,15 +228,7 @@ class LiteLLMLogger:
         )
 
     def _format_messages(self, messages: List[Dict[str, Any]]) -> str:
-        """
-        Format messages list into a readable string.
-
-        Args:
-            messages: List of message dictionaries
-
-        Returns:
-            Formatted string representation of messages
-        """
+        """将 messages 格式化为可读字符串。"""
         formatted_parts = []
         for i, msg in enumerate(messages):
             role = msg.get("role", "unknown")
@@ -245,15 +255,7 @@ class LiteLLMLogger:
         return "\n".join(formatted_parts)
 
     def _extract_response_content(self, response_obj: Any) -> str:
-        """
-        Extract response content from LiteLLM response object.
-
-        Args:
-            response_obj: Response object from LiteLLM
-
-        Returns:
-            Response content as string
-        """
+        """从 LiteLLM 响应对象中提取主要内容文本。"""
         try:
             if hasattr(response_obj, "choices") and response_obj.choices:
                 choice = response_obj.choices[0]
@@ -284,9 +286,10 @@ class LiteLLMLogger:
 
 
 def setup_litellm_logging():
-    """
-    Setup LiteLLM logging by registering the custom logger callback.
-    This should be called once during application initialization.
+    """配置 LiteLLM 日志集成。
+
+    默认不启用 callbacks（避免部分版本的序列化告警）；可通过环境变量
+    ``AGENTSOCIETY_ENABLE_LITELLM_CALLBACKS=1`` 启用。
     """
     try:
         import litellm
@@ -324,24 +327,13 @@ def setup_logging(
     log_format: Optional[str] = None,
     console_output: bool = True,
 ) -> logging.Logger:
-    """
-    Setup comprehensive logging configuration for the application.
+    """初始化应用日志（root + agentsociety + LiteLLM）。
 
-    This function configures:
-    - Root logger
-    - Agentsociety logger
-    - LiteLLM logger integration
-
-    Args:
-        log_file: Optional path to log file. If provided, logs will be written to file.
-                 If None, logs will only go to console.
-        log_level: Logging level (default: logging.DEBUG)
-        log_format: Custom log format string. If None, uses default format.
-                   Default: "%(message)s" for file, full format for console
-        console_output: Whether to output logs to console (default: True)
-
-    Returns:
-        Configured agentsociety logger instance
+    :param log_file: 可选。日志文件路径；为空则只输出到控制台。
+    :param log_level: 日志级别。
+    :param log_format: 可选。自定义格式化串；为空则使用默认格式。
+    :param console_output: 是否输出到控制台。
+    :returns: 配置后的 agentsociety logger 实例。
     """
     # Default format
     if log_format is None:

@@ -29,6 +29,8 @@ import enProfile from './locales/en/profile';
 import zhProfile from './locales/zh/profile';
 import enExperiment from './locales/en/experiment';
 import zhExperiment from './locales/zh/experiment';
+import enSkill from './locales/en/skill';
+import zhSkill from './locales/zh/skill';
 
 // Combine translations
 const resources = {
@@ -47,6 +49,7 @@ const resources = {
             template: enTemplate,
             profile: enProfile,
             experiment: enExperiment,
+            skill: enSkill,
         }
     },
     zh: {
@@ -64,6 +67,7 @@ const resources = {
             template: zhTemplate,
             profile: zhProfile,
             experiment: zhExperiment,
+            skill: zhSkill,
         }
     }
 };

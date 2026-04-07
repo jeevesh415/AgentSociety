@@ -21,6 +21,7 @@ import { spawn, ChildProcess, execSync } from 'child_process';
 import { localize } from '../i18n';
 import { EnvManager } from '../envManager';
 import { findAvailablePort, isPortAvailable } from '../portUtils';
+import { getBackendAccessUrl, getBackendBindHost, getBackendPort } from '../runtimeConfig';
 
 export interface BackendStatus {
   isRunning: boolean;
@@ -81,6 +82,11 @@ export class BackendManager {
     this.checkAndCleanupOrphanedProcess();
   }
 
+  private reloadConfig(reason: string): void {
+    this.config = this.loadConfig();
+    this.log(`Configuration reloaded: ${reason}`);
+  }
+
   /**
    * 检查并清理孤立的后端进程
    * 如果.env中记录的PID对应的进程不存在，则清理记录
@@ -111,9 +117,8 @@ export class BackendManager {
             // 进程存在，尝试进行健康检查
             const envManager = new EnvManager();
             const envConfig = envManager.readEnv();
-            const host = envConfig.backendHost || '127.0.0.1';
-            const port = envConfig.backendPort || 8001;
-            const backendUrl = `http://${host}:${port}`;
+            const port = getBackendPort(envConfig);
+            const backendUrl = getBackendAccessUrl(envConfig);
 
             try {
               const response = await fetch(`${backendUrl}/health`, {
@@ -199,8 +204,8 @@ export class BackendManager {
     const env: Record<string, string> = {};
 
     // 后端服务配置
-    env.BACKEND_HOST = envConfig.backendHost || '127.0.0.1';
-    env.BACKEND_PORT = String(envConfig.backendPort ?? 8001);
+    env.BACKEND_HOST = getBackendBindHost(envConfig);
+    env.BACKEND_PORT = String(getBackendPort(envConfig));
     env.BACKEND_LOG_LEVEL = envConfig.backendLogLevel || 'info';
     env.PYTHON_PATH = envConfig.pythonPath || '';
 
@@ -211,35 +216,35 @@ export class BackendManager {
     env.WORKSPACE_PATH = workspaceFolder.uri.fsPath;
 
     // LLM 配置
-    if (envConfig.llmApiKey) env.AGENTSOCIETY_LLM_API_KEY = envConfig.llmApiKey;
-    if (envConfig.llmApiBase) env.AGENTSOCIETY_LLM_API_BASE = envConfig.llmApiBase;
-    if (envConfig.llmModel) env.AGENTSOCIETY_LLM_MODEL = envConfig.llmModel;
+    if (envConfig.llmApiKey) {env.AGENTSOCIETY_LLM_API_KEY = envConfig.llmApiKey;}
+    if (envConfig.llmApiBase) {env.AGENTSOCIETY_LLM_API_BASE = envConfig.llmApiBase;}
+    if (envConfig.llmModel) {env.AGENTSOCIETY_LLM_MODEL = envConfig.llmModel;}
 
     // Coder LLM 配置
-    if (envConfig.coderLlmApiKey) env.AGENTSOCIETY_CODER_LLM_API_KEY = envConfig.coderLlmApiKey;
-    if (envConfig.coderLlmApiBase) env.AGENTSOCIETY_CODER_LLM_API_BASE = envConfig.coderLlmApiBase;
-    if (envConfig.coderLlmModel) env.AGENTSOCIETY_CODER_LLM_MODEL = envConfig.coderLlmModel;
+    if (envConfig.coderLlmApiKey) {env.AGENTSOCIETY_CODER_LLM_API_KEY = envConfig.coderLlmApiKey;}
+    if (envConfig.coderLlmApiBase) {env.AGENTSOCIETY_CODER_LLM_API_BASE = envConfig.coderLlmApiBase;}
+    if (envConfig.coderLlmModel) {env.AGENTSOCIETY_CODER_LLM_MODEL = envConfig.coderLlmModel;}
 
     // Nano LLM 配置
-    if (envConfig.nanoLlmApiKey) env.AGENTSOCIETY_NANO_LLM_API_KEY = envConfig.nanoLlmApiKey;
-    if (envConfig.nanoLlmApiBase) env.AGENTSOCIETY_NANO_LLM_API_BASE = envConfig.nanoLlmApiBase;
-    if (envConfig.nanoLlmModel) env.AGENTSOCIETY_NANO_LLM_MODEL = envConfig.nanoLlmModel;
+    if (envConfig.nanoLlmApiKey) {env.AGENTSOCIETY_NANO_LLM_API_KEY = envConfig.nanoLlmApiKey;}
+    if (envConfig.nanoLlmApiBase) {env.AGENTSOCIETY_NANO_LLM_API_BASE = envConfig.nanoLlmApiBase;}
+    if (envConfig.nanoLlmModel) {env.AGENTSOCIETY_NANO_LLM_MODEL = envConfig.nanoLlmModel;}
 
     // Embedding 配置
-    if (envConfig.embeddingApiKey) env.AGENTSOCIETY_EMBEDDING_API_KEY = envConfig.embeddingApiKey;
-    if (envConfig.embeddingApiBase) env.AGENTSOCIETY_EMBEDDING_API_BASE = envConfig.embeddingApiBase;
-    if (envConfig.embeddingModel) env.AGENTSOCIETY_EMBEDDING_MODEL = envConfig.embeddingModel;
-    if (envConfig.embeddingDims) env.AGENTSOCIETY_EMBEDDING_DIMS = String(envConfig.embeddingDims);
+    if (envConfig.embeddingApiKey) {env.AGENTSOCIETY_EMBEDDING_API_KEY = envConfig.embeddingApiKey;}
+    if (envConfig.embeddingApiBase) {env.AGENTSOCIETY_EMBEDDING_API_BASE = envConfig.embeddingApiBase;}
+    if (envConfig.embeddingModel) {env.AGENTSOCIETY_EMBEDDING_MODEL = envConfig.embeddingModel;}
+    if (envConfig.embeddingDims) {env.AGENTSOCIETY_EMBEDDING_DIMS = String(envConfig.embeddingDims);}
 
     // Web Search 配置
-    if (envConfig.webSearchApiUrl) env.WEB_SEARCH_API_URL = envConfig.webSearchApiUrl;
-    if (envConfig.webSearchApiToken) env.WEB_SEARCH_API_TOKEN = envConfig.webSearchApiToken;
-    if (envConfig.miroflowDefaultLlm) env.MIROFLOW_DEFAULT_LLM = envConfig.miroflowDefaultLlm;
-    if (envConfig.miroflowDefaultAgent) env.MIROFLOW_DEFAULT_AGENT = envConfig.miroflowDefaultAgent;
+    if (envConfig.webSearchApiUrl) {env.WEB_SEARCH_API_URL = envConfig.webSearchApiUrl;}
+    if (envConfig.webSearchApiToken) {env.WEB_SEARCH_API_TOKEN = envConfig.webSearchApiToken;}
+    if (envConfig.miroflowDefaultLlm) {env.MIROFLOW_DEFAULT_LLM = envConfig.miroflowDefaultLlm;}
+    if (envConfig.miroflowDefaultAgent) {env.MIROFLOW_DEFAULT_AGENT = envConfig.miroflowDefaultAgent;}
 
     // EasyPaper (for generate_paper tool)
-    if (envConfig.easypaperApiUrl) env.EASYPAPER_API_URL = envConfig.easypaperApiUrl;
-    if (envConfig.literatureSearchApiUrl) env.LITERATURE_SEARCH_API_URL = envConfig.literatureSearchApiUrl;
+    if (envConfig.easypaperApiUrl) {env.EASYPAPER_API_URL = envConfig.easypaperApiUrl;}
+    if (envConfig.literatureSearchApiUrl) {env.LITERATURE_SEARCH_API_URL = envConfig.literatureSearchApiUrl;}
 
     return {
       pythonPath,
@@ -325,9 +330,7 @@ export class BackendManager {
   async healthCheck(): Promise<boolean> {
     const envManager = new EnvManager();
     const envConfig = envManager.readEnv();
-    const host = envConfig.backendHost || '127.0.0.1';
-    const port = envConfig.backendPort || 8001;
-    const backendUrl = `http://${host}:${port}`;
+    const backendUrl = getBackendAccessUrl(envConfig);
 
     try {
       const response = await fetch(`${backendUrl}/health`, {
@@ -348,6 +351,8 @@ export class BackendManager {
       this.log('Backend is already starting...', 'warn');
       return false;
     }
+
+    this.reloadConfig('before start');
 
     if (await this.isRunning()) {
       this.log('Backend is already running', 'warn');
@@ -643,7 +648,7 @@ export class BackendManager {
   private async allocatePort(): Promise<number> {
     const envManager = new EnvManager();
     const envConfig = envManager.readEnv();
-    const configuredPort = envConfig.backendPort || 8001;
+    const configuredPort = getBackendPort(envConfig);
 
     // 首先检查配置的端口是否可用
     if (await isPortAvailable(configuredPort)) {
@@ -805,7 +810,7 @@ export class BackendManager {
   private async getPortFromEnv(): Promise<number> {
     const envManager = new EnvManager();
     const envConfig = envManager.readEnv();
-    return envConfig.backendPort || 8001;
+    return getBackendPort(envConfig);
   }
 
   /**

@@ -2,10 +2,9 @@
 Trust Game Agent
 Agent for Trust Game based on V2 framework
 """
-import json
 import re
 from datetime import datetime
-from typing import Literal
+from typing import Any, Literal
 
 from agentsociety2.agent.base import AgentBase
 
@@ -148,16 +147,16 @@ Both roles aim to maximize cumulative coins while considering trust and reciproc
         
         try:
             # Step 1: Get round history from environment
-            ctx = {}
-            ctx, history_response = await self.ask_env(
-                ctx,
+            history_result, history_response = await self.ask_env(
+                {},
                 "Please call get_round_history() to get the round history.",
-                readonly=True
+                readonly=True,
+                template_mode=True,
             )
             self._logger.debug(f"[{self.name}] History response: {history_response}")
             
             # Parse and update local history
-            round_history = self._parse_round_history(history_response)
+            round_history = self._parse_round_history(history_result, history_response)
             self._sync_history(round_history)
             
             # Determine current round number (next round = len(history) + 1)
@@ -173,11 +172,18 @@ Both roles aim to maximize cumulative coins while considering trust and reciproc
                 )
                 
                 # Submit investment to environment
-                ctx, submit_response = await self.ask_env(
-                    ctx,
-                    f"Please call submit_investment(trustor_name='{self.name}', investment={investment}) to submit my investment decision.",
-                    readonly=False
+                submit_result, submit_response = await self.ask_env(
+                    {
+                        "variables": {
+                            "trustor_name": self.name,
+                            "investment": investment,
+                        }
+                    },
+                    "Please call submit_investment() using trustor_name and investment from ctx['variables'] to submit my investment decision.",
+                    readonly=False,
+                    template_mode=True,
                 )
+                _ = submit_result, submit_response
                 self._logger.info(
                     f"[{self.name}] Round {current_round}: Submitted investment={investment}, "
                     f"explanation={explanation[:50]}..."
@@ -190,10 +196,15 @@ Both roles aim to maximize cumulative coins while considering trust and reciproc
                 
                 if trustor_name:
                     # Query pending investment
-                    ctx, pending_response = await self.ask_env(
-                        ctx,
-                        f"Please call get_pending_investment(trustor_name='{trustor_name}') to get the pending investment amount.",
-                        readonly=True
+                    pending_result, pending_response = await self.ask_env(
+                        {
+                            "variables": {
+                                "trustor_name": trustor_name,
+                            }
+                        },
+                        "Please call get_pending_investment() using trustor_name from ctx['variables'] to get the pending investment amount.",
+                        readonly=True,
+                        template_mode=True,
                     )
                     
                     # Parse pending investment
@@ -210,11 +221,18 @@ Both roles aim to maximize cumulative coins while considering trust and reciproc
                         )
                         
                         # Submit return to environment
-                        ctx, submit_response = await self.ask_env(
-                            ctx,
-                            f"Please call submit_return(trustee_name='{self.name}', return_amount={return_amount}) to submit my return decision.",
-                            readonly=False
+                        submit_result, submit_response = await self.ask_env(
+                            {
+                                "variables": {
+                                    "trustee_name": self.name,
+                                    "return_amount": return_amount,
+                                }
+                            },
+                            "Please call submit_return() using trustee_name and return_amount from ctx['variables'] to submit my return decision.",
+                            readonly=False,
+                            template_mode=True,
                         )
+                        _ = pending_result, submit_result, submit_response
                         self._logger.info(
                             f"[{self.name}] Round {current_round}: Submitted return={return_amount}, "
                             f"explanation={explanation[:50]}..."
@@ -222,19 +240,33 @@ Both roles aim to maximize cumulative coins while considering trust and reciproc
                         return f"[{self.name}] Round {current_round}: Submitted return {return_amount}"
                     else:
                         # No pending investment yet, submit 0
-                        ctx, submit_response = await self.ask_env(
-                            ctx,
-                            f"Please call submit_return(trustee_name='{self.name}', return_amount=0) to submit my return decision.",
-                            readonly=False
+                        submit_result, submit_response = await self.ask_env(
+                            {
+                                "variables": {
+                                    "trustee_name": self.name,
+                                    "return_amount": 0,
+                                }
+                            },
+                            "Please call submit_return() using trustee_name and return_amount from ctx['variables'] to submit my return decision.",
+                            readonly=False,
+                            template_mode=True,
                         )
+                        _ = pending_result, submit_result, submit_response
                         return f"[{self.name}] Round {current_round}: No pending investment, submitted return 0"
                 else:
                     # Cannot determine partner, submit 0
-                    ctx, submit_response = await self.ask_env(
-                        ctx,
-                        f"Please call submit_return(trustee_name='{self.name}', return_amount=0) to submit my return decision.",
-                        readonly=False
+                    submit_result, submit_response = await self.ask_env(
+                        {
+                            "variables": {
+                                "trustee_name": self.name,
+                                "return_amount": 0,
+                            }
+                        },
+                        "Please call submit_return() using trustee_name and return_amount from ctx['variables'] to submit my return decision.",
+                        readonly=False,
+                        template_mode=True,
                     )
+                    _ = submit_result, submit_response
                     return f"[{self.name}] Round {current_round}: Cannot determine partner, submitted return 0"
             
         except Exception as e:
@@ -248,7 +280,6 @@ Both roles aim to maximize cumulative coins while considering trust and reciproc
         history_str = self._build_history_string(partner_name)
 
         # Build prompt
-        profile_str = self._build_profile_string()
         prompt = self._build_trustor_prompt(
             round_num,
             self.initial_funds,
@@ -305,7 +336,6 @@ Both roles aim to maximize cumulative coins while considering trust and reciproc
         history_str = self._build_history_string(partner_name)
 
         # Build prompt
-        profile_str = self._build_profile_string()
         prompt = self._build_trustee_prompt(
             round_num,
             self.initial_funds,
@@ -383,18 +413,10 @@ Both roles aim to maximize cumulative coins while considering trust and reciproc
                 "Consider past Trustor behavior."
             )
 
-    def _parse_round_history(self, response: str) -> list:
+    def _parse_round_history(self, env_result: Any, response: str) -> list:
         """Parse round history from environment response"""
-        try:
-            # Try to extract JSON array from response
-            json_match = re.search(r'\[.*\]', response, re.DOTALL)
-            if json_match:
-                rounds = json.loads(json_match.group(0))
-                if isinstance(rounds, list):
-                    return rounds
-        except Exception as e:
-            self._logger.warning(f"[{self.name}] Failed to parse round history: {e}")
-        return []
+        rounds = self._extract_env_list_result(env_result, response, "round_history")
+        return [round_data for round_data in rounds if isinstance(round_data, dict)]
 
     def _sync_history(self, round_history: list):
         """Sync local history with environment round history"""
@@ -574,4 +596,3 @@ Both roles aim to maximize cumulative coins while considering trust and reciproc
 
         # If no amount found, return entire content as explanation
         return content.strip() if content.strip() else "No explanation provided"
-

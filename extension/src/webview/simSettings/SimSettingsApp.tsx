@@ -1,5 +1,5 @@
 import * as React from 'react';
-import { ConfigProvider, theme, Transfer, Button, Space, Typography, Card, Alert, Spin, Modal } from 'antd';
+import { ConfigProvider, theme, Transfer, Button, Space, Typography, Card, Alert, Spin, Modal, Tag } from 'antd';
 import { SaveOutlined, ReloadOutlined, InfoCircleOutlined } from '@ant-design/icons';
 import { useTranslation } from 'react-i18next';
 import type { VSCodeAPI, SimSettings, AgentInfo, EnvModuleInfo } from './types';
@@ -158,6 +158,7 @@ export const SimSettingsApp: React.FC<SimSettingsAppProps> = ({
     title: type,
     class_name: agentClasses[type].class_name,
     description: agentClasses[type].description || '',
+    is_custom: agentClasses[type].is_custom || false,
   }));
 
   const envModuleDataSource = Object.keys(envModules).map(type => ({
@@ -165,6 +166,7 @@ export const SimSettingsApp: React.FC<SimSettingsAppProps> = ({
     title: type,
     class_name: envModules[type].class_name,
     description: envModules[type].description || '',
+    is_custom: envModules[type].is_custom || false,
   }));
 
   // 自定义渲染函数 - Agent Classes
@@ -177,6 +179,7 @@ export const SimSettingsApp: React.FC<SimSettingsAppProps> = ({
         style={{
           marginBottom: '8px',
           cursor: item.description ? 'pointer' : 'default',
+          backgroundColor: item.is_custom ? '#fafafa' : '#fff',
         }}
         bodyStyle={{
           padding: '12px',
@@ -192,18 +195,25 @@ export const SimSettingsApp: React.FC<SimSettingsAppProps> = ({
             <Text strong style={{ fontSize: '13px' }}>
               {item.title}
             </Text>
-            {item.description && (
-              <InfoCircleOutlined
-                style={{
-                  fontSize: '14px',
-                  flexShrink: 0,
-                }}
-                onClick={(e) => {
-                  e.stopPropagation();
-                  handleViewDescription(item.key, true);
-                }}
-              />
-            )}
+            <Space size="small">
+              {item.is_custom && (
+                <Tag color="blue" style={{ fontSize: '11px', margin: 0 }}>
+                  {t('simSettings.custom') || 'Custom'}
+                </Tag>
+              )}
+              {item.description && (
+                <InfoCircleOutlined
+                  style={{
+                    fontSize: '14px',
+                    flexShrink: 0,
+                  }}
+                  onClick={(e) => {
+                    e.stopPropagation();
+                    handleViewDescription(item.key, true);
+                  }}
+                />
+              )}
+            </Space>
           </div>
           <Text type="secondary" style={{ fontSize: '11px', display: 'block' }}>
             {item.class_name}
@@ -235,6 +245,7 @@ export const SimSettingsApp: React.FC<SimSettingsAppProps> = ({
         style={{
           marginBottom: '8px',
           cursor: item.description ? 'pointer' : 'default',
+          backgroundColor: item.is_custom ? '#fafafa' : '#fff',
         }}
         bodyStyle={{
           padding: '12px',
@@ -250,18 +261,25 @@ export const SimSettingsApp: React.FC<SimSettingsAppProps> = ({
             <Text strong style={{ fontSize: '13px' }}>
               {item.title}
             </Text>
-            {item.description && (
-              <InfoCircleOutlined
-                style={{
-                  fontSize: '14px',
-                  flexShrink: 0,
-                }}
-                onClick={(e) => {
-                  e.stopPropagation();
-                  handleViewDescription(item.key, false);
-                }}
-              />
-            )}
+            <Space size="small">
+              {item.is_custom && (
+                <Tag color="blue" style={{ fontSize: '11px', margin: 0 }}>
+                  {t('simSettings.custom') || 'Custom'}
+                </Tag>
+              )}
+              {item.description && (
+                <InfoCircleOutlined
+                  style={{
+                    fontSize: '14px',
+                    flexShrink: 0,
+                  }}
+                  onClick={(e) => {
+                    e.stopPropagation();
+                    handleViewDescription(item.key, false);
+                  }}
+                />
+              )}
+            </Space>
           </div>
           <Text type="secondary" style={{ fontSize: '11px', display: 'block' }}>
             {item.class_name}

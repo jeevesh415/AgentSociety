@@ -1,7 +1,6 @@
 """Literature search core module
 
 Core functions for searching academic literature using an external API.
-Refactored from designer/literature_search.py to remove environment variable dependencies.
 """
 
 from __future__ import annotations
@@ -14,7 +13,7 @@ from pathlib import Path
 from typing import Any, Dict, List, Optional
 
 import aiohttp
-from agentsociety2.config import get_llm_router
+from agentsociety2.config import Config, get_llm_router
 from agentsociety2.logger import get_logger
 from litellm import AllMessageValues
 from litellm.router import Router
@@ -377,7 +376,7 @@ async def search_literature(
     relevant_content_limit: int = 2000,
     abstract_limit: int = 2000,
     enable_multi_query: bool = True,
-    api_url: str = "http://localhost:8002/api/v1/search",
+    api_url: Optional[str] = None,
     timeout: int = 120,
     output_dir: Path | None = None,
 ) -> Optional[Dict[str, Any]]:
@@ -403,6 +402,8 @@ async def search_literature(
     # 如果router为None，使用默认router（从llm_config获取）
     if router is None:
         router = get_llm_router("default")
+    if not api_url:
+        api_url = Config.get_literature_search_api_url()
 
     # 检测是否为中文，如果是则翻译成英文
     search_query = query
@@ -544,7 +545,6 @@ async def filter_relevant_literature(
     literature_data: Optional[Dict[str, Any]],
     topic: str,
     router: Optional[Router] = None,
-    similarity_threshold: float = 0.2,
     output_dir: Path | None = None,
 ) -> Optional[Dict[str, Any]]:
     """
@@ -554,7 +554,6 @@ async def filter_relevant_literature(
         literature_data: 文献搜索结果字典
         topic: 实验话题
         router: LLM router实例（如果为None则使用默认router）
-        similarity_threshold: 相似度阈值（已废弃，保留以兼容接口）
         output_dir: 输出目录，如果为None则不保存
 
     Returns:

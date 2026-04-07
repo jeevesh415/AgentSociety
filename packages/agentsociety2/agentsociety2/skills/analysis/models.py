@@ -2,10 +2,12 @@
 标准化实验分析数据模型与统一配置。
 """
 
+from dataclasses import dataclass, field
 from datetime import datetime
 from enum import Enum
 from pathlib import Path
 from typing import Any, Dict, List, Optional
+
 from pydantic import BaseModel, ConfigDict, Field, field_validator
 
 
@@ -16,7 +18,7 @@ DIR_ARTIFACTS = "artifacts"  # run/artifacts: 实验执行产物
 DIR_PRESENTATION = "presentation"
 DIR_SYNTHESIS = "synthesis"
 DIR_DATA = "data"  # presentation 下 data: 分析子智能体写入的分析数据
-DIR_CHARTS = "charts"  # presentation 下 charts: DataExplorer 写图目录
+DIR_CHARTS = "charts"  # presentation 下 charts: AnalysisAgent 写图目录
 DIR_REPORT_ASSETS = "assets"  # presentation 下 assets: 报告嵌入资源（复制自 charts + run/artifacts），包括图表、报告、分析数据等
 FILE_SQLITE = "sqlite.db"
 FILE_PID = "pid.json"
@@ -65,7 +67,7 @@ class PresentationPaths(BaseModel):
     - output_dir/
       - report.md, report.html, README.md
       - data/analysis_summary.json
-      - charts/  （DataExplorer 写图目录，再被复制到 assets）
+    - charts/  （AnalysisAgent 写图目录，再被复制到 assets）
       - assets/  （报告引用的图片，DIR_REPORT_ASSETS）
     """
 
@@ -73,7 +75,7 @@ class PresentationPaths(BaseModel):
         ..., description="presentation/hypothesis_<id>/experiment_<id>"
     )
     charts_dir: Path = Field(
-        ..., description="Charts output directory (DataExplorer writes here)"
+        ..., description="Charts output directory (AnalysisAgent writes here)"
     )
     report_assets_dir: Path = Field(
         ..., description="Report assets directory (assets/, referenced by report)"
@@ -159,19 +161,36 @@ class AnalysisResult(BaseModel):
 
 
 class ReportContent(BaseModel):
-    """报告内容"""
+    """报告内容（支持中英双语）"""
 
     title: str = Field(..., description="Report title")
     subtitle: str = Field(default="", description="Report subtitle")
     format_preference: str = Field(
         default="markdown", description="Preferred format: markdown, html, or both"
     )
-    full_content_markdown: Optional[str] = Field(
-        default=None, description="Complete markdown report content"
+    # 双语字段
+    full_content_markdown_zh: Optional[str] = Field(
+        default=None, description="Chinese markdown report content"
     )
-    full_content_html: Optional[str] = Field(
-        default=None, description="Complete HTML report content"
+    full_content_html_zh: Optional[str] = Field(
+        default=None, description="Chinese HTML report content"
     )
+    full_content_markdown_en: Optional[str] = Field(
+        default=None, description="English markdown report content"
+    )
+    full_content_html_en: Optional[str] = Field(
+        default=None, description="English HTML report content"
+    )
+
+    @property
+    def full_content_markdown(self) -> Optional[str]:
+        """中文优先，否则英文。"""
+        return self.full_content_markdown_zh or self.full_content_markdown_en
+
+    @property
+    def full_content_html(self) -> Optional[str]:
+        """中文优先，否则英文。"""
+        return self.full_content_html_zh or self.full_content_html_en
 
     model_config = ConfigDict(arbitrary_types_allowed=True)
 
@@ -194,6 +213,44 @@ class ReportAsset(BaseModel):
     dimensions: Optional[Dict[str, int]] = Field(None, description="Dimensions")
 
     model_config = ConfigDict(arbitrary_types_allowed=True)
+
+
+@dataclass
+class ContextSummary:
+    """工具迭代时压缩后的上下文（供策略调整 prompt）。"""
+
+    key_findings: List[str] = field(default_factory=list)
+    failed_attempts: List[str] = field(default_factory=list)
+    successful_tools: List[str] = field(default_factory=list)
+    recommendations: str = ""
+    iteration_count: int = 0
+
+
+class AnalysisJudgment(BaseModel):
+    """洞察阶段 LLM 裁判输出。"""
+
+    success: bool
+    reason: str
+    should_retry: bool = False
+    retry_instruction: str = ""
+
+
+class StrategyJudgment(BaseModel):
+    """分析策略阶段裁判输出。"""
+
+    success: bool
+    reason: str
+    should_retry: bool = False
+    retry_instruction: str = ""
+
+
+class VisualizationJudgment(BaseModel):
+    """可视化计划阶段裁判输出。"""
+
+    success: bool
+    reason: str
+    should_retry: bool = False
+    retry_instruction: str = ""
 
 
 class AnalysisConfig(BaseModel):
@@ -260,11 +317,34 @@ class AnalysisConfig(BaseModel):
     )
     llm_profile_default: str = Field(
         default="default",
-        description="LLM profile for insight, report, strategy (non-code)",
+        description="LLM profile for simple tasks (fallback)",
+    )
+    llm_profile_analysis: str = Field(
+        default="analysis",
+        description="LLM profile for analysis, insight generation, and report writing. Use a capable model.",
     )
     llm_profile_coder: str = Field(
         default="coder",
         description="LLM profile for code generation",
+    )
+    analysis_skill_names: List[str] = Field(
+        default_factory=lambda: [
+            "tool_catalog",
+            "subagent_workflow",
+            "visualization_reliability",
+            "core_skills",
+            "advanced_analysis",
+        ],
+        description=(
+            "instruction_md 条目的 name（不含 frontmatter 注入正文）。"
+            "标记 required 的片段（如 xml_contract）始终注入，无需出现在此列表。"
+        ),
+    )
+    analysis_skill_strict_selection: bool = Field(
+        default=True,
+        description=(
+            "True：只注入 required + 本列表中的条目。False：未指定列表时注入全部 instruction_md。"
+        ),
     )
 
     @field_validator("workspace_path")
@@ -274,6 +354,11 @@ class AnalysisConfig(BaseModel):
         if not path.exists():
             raise ValueError(f"Workspace path does not exist: {v}")
         return str(path.absolute())
+
+    model_config = ConfigDict(
+        arbitrary_types_allowed=True,
+        validate_assignment=True,
+    )
 
 
 class HypothesisSummary(BaseModel):

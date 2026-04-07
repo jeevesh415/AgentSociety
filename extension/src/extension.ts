@@ -23,6 +23,7 @@ import * as path from 'path';
 import * as fs from 'fs';
 import { ProjectStructureProvider } from './projectStructureProvider';
 import { SimSettingsEditorProvider } from './simSettingsEditorProvider';
+import { InitConfigEditorProvider } from './initConfigEditorProvider';
 import { PrefillParamsViewProvider } from './prefillParamsViewProvider';
 import { ReplayWebviewProvider } from './replayWebviewProvider';
 import { ConfigPageViewProvider } from './configPageViewProvider';
@@ -34,6 +35,10 @@ import { localize } from './i18n';
 import { BackendManager } from './services/backendManager';
 import { MinerUParser } from './mineruParser';
 import { AIChatInvoker } from './aiChatInvoker';
+import { LiteratureIndexViewer } from './literatureIndexViewer';
+import { StepsViewer } from './stepsViewer';
+import { ExperimentResultsViewer } from './experimentResultsViewer';
+import { hasConfiguredLlmApiKey, migrateLegacySettingsToEnv } from './runtimeConfig';
 
 // Global backend manager instance
 let backendManager: BackendManager | null = null;
@@ -42,6 +47,11 @@ let mineruParser: MinerUParser | null = null;
 
 export function activate(context: vscode.ExtensionContext) {
   console.log(localize('extension.activate'));
+
+  const migratedLegacyKeys = migrateLegacySettingsToEnv();
+  if (migratedLegacyKeys.length > 0) {
+    console.log(`Migrated legacy AI Social Scientist settings to .env: ${migratedLegacyKeys.join(', ')}`);
+  }
 
   // Initialize backend manager
   backendManager = new BackendManager(context);
@@ -58,7 +68,7 @@ export function activate(context: vscode.ExtensionContext) {
   const config = vscode.workspace.getConfiguration('aiSocialScientist');
   const autoStart = config.get<boolean>('backend.autoStart', true);
   const hasCompletedInitialSetup = context.globalState.get<boolean>('configPage.hasCompletedInitialSetup');
-  const hasLlmApiKey = !!(config.get<string>('env.llmApiKey', '')?.trim());
+  const hasLlmApiKey = hasConfiguredLlmApiKey();
 
   if (!hasCompletedInitialSetup || !hasLlmApiKey) {
     // 首次启动或缺少必填配置时，打开配置页
@@ -135,14 +145,6 @@ export function activate(context: vscode.ExtensionContext) {
     }
   );
 
-  // Update skills command - copy latest skills to workspace
-  const updateSkillsCommand = vscode.commands.registerCommand(
-    'aiSocialScientist.updateSkills',
-    async () => {
-      await projectStructureProvider.updateSkills();
-    }
-  );
-
   // Configure environment command - open config page for .env setup
   const configureEnvCommand = vscode.commands.registerCommand(
     'aiSocialScientist.configureEnv',
@@ -168,7 +170,20 @@ export function activate(context: vscode.ExtensionContext) {
         return;
       }
 
-      const fileName = item.label || item.filePath.split(/[/\\]/).pop();
+      const filePath = item.filePath;
+      const fileName = item.label || filePath.split(/[/\\]/).pop();
+
+      // 检查是否是目录
+      const isDirectory = fs.existsSync(filePath) && fs.statSync(filePath).isDirectory();
+
+      // 对于目录，不应该使用此命令删除（目录删除需要特殊处理）
+      if (isDirectory) {
+        vscode.window.showWarningMessage(
+          `"${fileName}" 是一个目录，请使用专门的删除命令或手动删除。`
+        );
+        return;
+      }
+
       const confirm = await vscode.window.showWarningMessage(
         localize('extension.deleteLiterature.confirm', fileName),
         { modal: true },
@@ -182,7 +197,7 @@ export function activate(context: vscode.ExtensionContext) {
 
       try {
         // Delete the file
-        fs.unlinkSync(item.filePath);
+        fs.unlinkSync(filePath);
         vscode.window.showInformationMessage(`Deleted: ${fileName}`);
 
         // Update literature_index.json if it exists
@@ -192,7 +207,7 @@ export function activate(context: vscode.ExtensionContext) {
           if (fs.existsSync(indexPath)) {
             try {
               const indexData = JSON.parse(fs.readFileSync(indexPath, 'utf-8'));
-              const relativePath = path.relative(workspaceFolder.uri.fsPath, item.filePath).replace(/\\/g, '/');
+              const relativePath = path.relative(workspaceFolder.uri.fsPath, filePath).replace(/\\/g, '/');
               indexData.entries = (indexData.entries || []).filter((e: any) => e.file_path !== relativePath);
               indexData.updated_at = new Date().toISOString();
               fs.writeFileSync(indexPath, JSON.stringify(indexData, null, 2), 'utf-8');
@@ -381,6 +396,20 @@ export function activate(context: vscode.ExtensionContext) {
     )
   );
 
+  // Register custom editor for init_config.json
+  context.subscriptions.push(
+    vscode.window.registerCustomEditorProvider(
+      'aiSocialScientist.initConfig',
+      new InitConfigEditorProvider(context),
+      {
+        webviewOptions: {
+          retainContextWhenHidden: true
+        },
+        supportsMultipleEditorsPerDocument: false
+      }
+    )
+  );
+
   // Register prefill parameters command
   const viewPrefillParamsCommand = vscode.commands.registerCommand(
     'agentsociety.viewPrefillParams',
@@ -459,7 +488,9 @@ export function activate(context: vscode.ExtensionContext) {
         } else {
           vscode.window.showErrorMessage('Failed to start backend service. Check the output panel for details.');
         }
+        return started;
       }
+      return false;
     }
   );
 
@@ -483,7 +514,9 @@ export function activate(context: vscode.ExtensionContext) {
         } else {
           vscode.window.showErrorMessage('Failed to restart backend service. Check the output panel for details.');
         }
+        return restarted;
       }
+      return false;
     }
   );
 
@@ -598,10 +631,273 @@ export function activate(context: vscode.ExtensionContext) {
     }
   );
 
+  // ========== Agent Skills Commands ==========
+
+  const scanAgentSkillsCommand = vscode.commands.registerCommand(
+    'aiSocialScientist.scanAgentSkills',
+    async () => {
+      await projectStructureProvider.scanAgentSkills();
+    }
+  );
+
+  const importAgentSkillCommand = vscode.commands.registerCommand(
+    'aiSocialScientist.importAgentSkill',
+    async () => {
+      await projectStructureProvider.importAgentSkill();
+    }
+  );
+
+  const toggleAgentSkillCommand = vscode.commands.registerCommand(
+    'aiSocialScientist.toggleAgentSkill',
+    async (item: any) => {
+      await projectStructureProvider.toggleAgentSkill(item);
+    }
+  );
+
+  const reloadAgentSkillCommand = vscode.commands.registerCommand(
+    'aiSocialScientist.reloadAgentSkill',
+    async (item: any) => {
+      await projectStructureProvider.reloadAgentSkill(item);
+    }
+  );
+
+  // 打开 Skill 文档命令
+  const openAgentSkillDocCommand = vscode.commands.registerCommand(
+    'aiSocialScientist.openAgentSkillDoc',
+    async (skillName: string, skillPath: string, isBuiltin: boolean) => {
+      await projectStructureProvider.openAgentSkillDoc(skillName, skillPath, isBuiltin);
+    }
+  );
+
+  // 删除自定义 Skill 命令
+  const removeAgentSkillCommand = vscode.commands.registerCommand(
+    'aiSocialScientist.removeAgentSkill',
+    async (item: any) => {
+      if (!item) { return; }
+
+      // 获取 skill 名称
+      const skillName = item.skillName;
+      if (!skillName) {
+        vscode.window.showErrorMessage('无法获取 Skill 名称');
+        return;
+      }
+
+      // 确认删除
+      const confirm = await vscode.window.showWarningMessage(
+        localize('projectStructure.skillRemoveConfirm', skillName),
+        { modal: true },
+        localize('extension.deleteLiterature.confirmButton'),
+        localize('extension.deleteLiterature.cancelButton')
+      );
+
+      if (confirm !== localize('extension.deleteLiterature.confirmButton')) {
+        return;
+      }
+
+      try {
+        const response = await apiClient.removeAgentSkill(skillName);
+        if (response.success) {
+          vscode.window.showInformationMessage(response.message);
+          await projectStructureProvider.refreshAgentSkillsCache();
+          projectStructureProvider.refresh();
+        }
+      } catch (error: any) {
+        vscode.window.showErrorMessage(`删除 Skill 失败: ${error.message || error}`);
+      }
+    }
+  );
+
+  // 打开 Skill 目录命令
+  const openSkillFolderCommand = vscode.commands.registerCommand(
+    'aiSocialScientist.openSkillFolder',
+    async (item: any) => {
+      if (!item) { return; }
+
+      // 获取 skill 目录路径
+      const skillDirPath = item.skillDirPath || item.filePath;
+      if (!skillDirPath) {
+        vscode.window.showErrorMessage('无法获取 Skill 目录路径');
+        return;
+      }
+
+      // 在 VSCode 中打开文件夹
+      const folderUri = vscode.Uri.file(skillDirPath);
+      try {
+        // 在新窗口中打开文件夹
+        vscode.commands.executeCommand('revealFileInOS', folderUri);
+      } catch (error: any) {
+        vscode.window.showErrorMessage(`打开 Skill 目录失败: ${error.message || error}`);
+      }
+    }
+  );
+
+  // 格式化查看 JSON 文件命令
+  const formatJsonCommand = vscode.commands.registerCommand(
+    'aiSocialScientist.formatJsonFile',
+    async (item: any) => {
+      if (!item || !item.filePath) {
+        vscode.window.showErrorMessage('无法获取文件路径');
+        return;
+      }
+
+      const filePath = item.filePath;
+
+      // 检查是否为 JSON 文件
+      if (!filePath.toLowerCase().endsWith('.json')) {
+        vscode.window.showWarningMessage('此命令仅适用于 JSON 文件');
+        return;
+      }
+
+      try {
+        // 打开文件
+        const document = await vscode.workspace.openTextDocument(vscode.Uri.file(filePath));
+        const editor = await vscode.window.showTextDocument(document);
+
+        // 格式化文档
+        await vscode.commands.executeCommand('editor.action.formatDocument');
+
+        // 可选：切换到更友好的视图（如果安装了 JSON tools 等扩展）
+        vscode.window.showInformationMessage(`JSON 文件已格式化显示`);
+      } catch (error: any) {
+        vscode.window.showErrorMessage(`打开 JSON 文件失败: ${error.message || error}`);
+      }
+    }
+  );
+
+  // 文献索引预览命令
+  const viewLiteratureIndexCommand = vscode.commands.registerCommand(
+    'aiSocialScientist.viewLiteratureIndex',
+    async (item: any) => {
+      if (!item || !item.filePath) {
+        vscode.window.showErrorMessage('无法获取文献索引文件路径');
+        return;
+      }
+
+      const filePath = item.filePath;
+
+      // 检查文件是否存在
+      if (!fs.existsSync(filePath)) {
+        vscode.window.showErrorMessage('文献索引文件不存在');
+        return;
+      }
+
+      try {
+        await LiteratureIndexViewer.show(context, filePath);
+      } catch (error: any) {
+        vscode.window.showErrorMessage(`打开文献索引预览失败: ${error.message || error}`);
+      }
+    }
+  );
+
+  // Steps YAML 预览命令
+  const viewStepsYamlCommand = vscode.commands.registerCommand(
+    'aiSocialScientist.viewStepsYaml',
+    async (item: any) => {
+      let filePath: string | undefined;
+
+      if (item && item.filePath) {
+        filePath = item.filePath;
+      } else {
+        // 如果没有传入文件路径，让用户选择
+        const workspaceFolder = vscode.workspace.workspaceFolders?.[0];
+        if (!workspaceFolder) {
+          vscode.window.showErrorMessage('请先打开工作区');
+          return;
+        }
+
+        const files = await vscode.workspace.findFiles('**/init/steps.yaml');
+        if (files.length === 0) {
+          vscode.window.showErrorMessage('未找到 steps.yaml 文件');
+          return;
+        }
+
+        if (files.length === 1) {
+          filePath = files[0].fsPath;
+        } else {
+          const picks = files.map(f => ({
+            label: vscode.workspace.asRelativePath(f),
+            path: f.fsPath
+          }));
+          const selected = await vscode.window.showQuickPick(picks, {
+            placeHolder: '选择要预览的 steps.yaml 文件'
+          });
+          if (!selected) {
+            return;
+          }
+          filePath = selected.path;
+        }
+      }
+
+      // 检查文件是否存在
+      if (!filePath || !fs.existsSync(filePath)) {
+        vscode.window.showErrorMessage('steps.yaml 文件不存在');
+        return;
+      }
+
+      try {
+        await StepsViewer.show(context, filePath);
+      } catch (error: any) {
+        vscode.window.showErrorMessage(`打开步骤预览失败: ${error.message || error}`);
+      }
+    }
+  );
+
+  // 实验结果可视化命令
+  const viewExperimentResultsCommand = vscode.commands.registerCommand(
+    'aiSocialScientist.viewExperimentResults',
+    async (item: any) => {
+      let filePath: string | undefined;
+
+      if (item && item.filePath) {
+        filePath = item.filePath;
+      } else {
+        // 如果没有传入文件路径，让用户选择
+        const workspaceFolder = vscode.workspace.workspaceFolders?.[0];
+        if (!workspaceFolder) {
+          vscode.window.showErrorMessage('请先打开工作区');
+          return;
+        }
+
+        const files = await vscode.workspace.findFiles('**/run/experiment_results.json');
+        if (files.length === 0) {
+          vscode.window.showErrorMessage('未找到 experiment_results.json 文件');
+          return;
+        }
+
+        if (files.length === 1) {
+          filePath = files[0].fsPath;
+        } else {
+          const picks = files.map(f => ({
+            label: vscode.workspace.asRelativePath(f),
+            path: f.fsPath
+          }));
+          const selected = await vscode.window.showQuickPick(picks, {
+            placeHolder: '选择要查看的实验结果文件'
+          });
+          if (!selected) {
+            return;
+          }
+          filePath = selected.path;
+        }
+      }
+
+      // 检查文件是否存在
+      if (!filePath || !fs.existsSync(filePath)) {
+        vscode.window.showErrorMessage('experiment_results.json 文件不存在');
+        return;
+      }
+
+      try {
+        await ExperimentResultsViewer.show(context, filePath);
+      } catch (error: any) {
+        vscode.window.showErrorMessage(`打开实验结果可视化失败: ${error.message || error}`);
+      }
+    }
+  );
+
   // Register all commands
   context.subscriptions.push(
     initProjectCommand,
-    updateSkillsCommand,
     configureEnvCommand,
     fixWorkspaceCommand,
     deleteLiteratureCommand,
@@ -618,7 +914,18 @@ export function activate(context: vscode.ExtensionContext) {
     openConfigPageCommand,
     scanCustomModulesCommand,
     testCustomModulesCommand,
-    listCustomModulesCommand
+    listCustomModulesCommand,
+    scanAgentSkillsCommand,
+    importAgentSkillCommand,
+    toggleAgentSkillCommand,
+    reloadAgentSkillCommand,
+    openAgentSkillDocCommand,
+    removeAgentSkillCommand,
+    openSkillFolderCommand,
+    formatJsonCommand,
+    viewLiteratureIndexCommand,
+    viewStepsYamlCommand,
+    viewExperimentResultsCommand
   );
 }
 

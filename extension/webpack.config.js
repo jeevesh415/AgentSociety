@@ -7,6 +7,7 @@ module.exports = {
     prefillParams: './src/webview/prefillParams/index.tsx',
     replay: './src/webview/replay/index.tsx',
     configPage: './src/webview/configPage/index.tsx',
+    initConfig: './src/webview/initConfig/index.tsx',
   },
   output: {
     path: path.resolve(__dirname, 'out', 'webview'),

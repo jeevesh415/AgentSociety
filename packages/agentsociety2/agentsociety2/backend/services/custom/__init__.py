@@ -1,9 +1,21 @@
-"""
-自定义模块服务包
+"""Custom-module backend services."""
 
-此包包含系统服务代码，用于扫描、验证和生成自定义模块配置。
+from agentsociety2.backend.services.custom.compatibility import ENV_COMPATIBILITY_RULES
+from agentsociety2.backend.services.custom.generator import CustomModuleJsonGenerator
+from agentsociety2.backend.services.custom.models import (
+    CompatibilityIssue,
+    ScanDiagnostic,
+    ValidationCheck,
+)
+from agentsociety2.backend.services.custom.scanner import CustomModuleScanner
+from agentsociety2.backend.services.custom.script_generator import ScriptGenerator
 
-用户无需直接使用此包中的代码。
-"""
-
-__all__ = []
+__all__ = [
+    "CustomModuleJsonGenerator",
+    "CustomModuleScanner",
+    "ENV_COMPATIBILITY_RULES",
+    "CompatibilityIssue",
+    "ScanDiagnostic",
+    "ScriptGenerator",
+    "ValidationCheck",
+]

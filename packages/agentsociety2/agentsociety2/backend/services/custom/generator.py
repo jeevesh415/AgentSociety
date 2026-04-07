@@ -89,7 +89,7 @@ class CustomModuleJsonGenerator:
                 json.dump(data, f, ensure_ascii=False, indent=2)
 
             return True
-        except Exception as e:
+        except Exception:
             return False
 
     def _generate_env_json(self, env_info: Dict[str, Any]) -> bool:
@@ -125,7 +125,7 @@ class CustomModuleJsonGenerator:
                 json.dump(data, f, ensure_ascii=False, indent=2)
 
             return True
-        except Exception as e:
+        except Exception:
             return False
 
     def remove_custom_modules(self) -> int:

@@ -15,7 +15,6 @@ import json
 import shutil
 from datetime import datetime
 from pathlib import Path
-from typing import Dict, Any, List
 import aiohttp
 
 
@@ -61,6 +60,9 @@ def init_custom_modules(target_dir: Path, force: bool = False) -> dict:
         (custom_dir / "envs").mkdir(parents=True, exist_ok=True)
         result["created"].append("custom/envs/")
 
+        (custom_dir / "skills").mkdir(parents=True, exist_ok=True)
+        result["created"].append("custom/skills/")
+
         # 复制示例文件到 custom/agents/ 和 custom/envs/
         # 这些是直接可用的示例，不是放在 examples 子目录中
         agents_src = template_path / "agents" / "examples"
@@ -78,6 +80,16 @@ def init_custom_modules(target_dir: Path, force: bool = False) -> dict:
                 if not dst.exists() or force:
                     shutil.copy2(py_file, dst)
                     result["created"].append(f"custom/envs/{py_file.name}")
+
+        # 复制 skills 示例
+        skills_src = template_path / "skills" / "examples"
+        if skills_src.exists():
+            for skill_dir in skills_src.iterdir():
+                if skill_dir.is_dir():
+                    dst = custom_dir / "skills" / skill_dir.name
+                    if not dst.exists() or force:
+                        shutil.copytree(str(skill_dir), str(dst), dirs_exist_ok=True)
+                        result["created"].append(f"custom/skills/{skill_dir.name}/")
 
         # 复制 __init__.py 文件
         init_files = [
@@ -106,6 +118,7 @@ def init_custom_modules(target_dir: Path, force: bool = False) -> dict:
 
 - `agents/` - 自定义 Agent 类
 - `envs/` - 自定义环境模块
+- `skills/` - 自定义 Agent Skills（给 Agent 添加行为能力）
 
 ## 开发指南
 
@@ -164,16 +177,55 @@ class MyEnv(EnvBase):
         self.t = t
 ```
 
+### 创建自定义 Agent Skill
+
+1. 在 `skills/` 目录下创建新目录（如 `my-skill/`）
+2. 添加 `SKILL.md`（行为规范，必需）和可选的 `scripts/<skill_name>.py`（subprocess 模式）
+
+```
+skills/my-skill/
+├── SKILL.md
+├── _order.txt          # 可选，定义加载优先级
+└── scripts/
+    └── my-skill.py     # （可选）subprocess 脚本：--args-json + 写入 AGENT_WORK_DIR
+```
+
+```python
+# skills/my-skill/scripts/my-skill.py
+from __future__ import annotations
+
+import argparse
+import json
+from pathlib import Path
+
+
+def main() -> int:
+    parser = argparse.ArgumentParser()
+    parser.add_argument("--args-json", default="{}")
+    ns = parser.parse_args()
+    args = json.loads(ns.args_json or "{}")
+    result = {"ok": True, "summary": f"MySkill: executed (tick={args.get('tick')})"}
+    Path("my_skill_result.json").write_text(json.dumps(result, ensure_ascii=False, indent=2), encoding="utf-8")
+    print(json.dumps(result, ensure_ascii=False))
+    return 0
+
+
+if __name__ == "__main__":
+    raise SystemExit(main())
+```
+
 ### 注册和测试
 
 1. 在 VSCode 中运行"扫描自定义模块"命令
 2. 运行"测试自定义模块"验证功能
+3. 使用"扫描 Agent Skills"发现新的 skill
 
 ## 示例
 
 本目录已包含示例文件：
 - `agents/` 目录下有 Agent 示例
 - `envs/` 目录下有环境模块示例
+- `skills/` 目录用于放置自定义 Agent Skill
 
 这些示例可以直接运行测试，也可以作为开发参考。
 """
@@ -510,6 +562,12 @@ async def init_workspace(target_dir: Path, topic: str = "", components: list[str
             (target_dir / ".agentsociety" / "agent_classes").mkdir(parents=True, exist_ok=True)
             (target_dir / ".agentsociety" / "env_modules").mkdir(parents=True, exist_ok=True)
             (target_dir / ".agentsociety" / "data").mkdir(parents=True, exist_ok=True)
+            (
+                target_dir
+                / ".agentsociety"
+                / "custom_env_skill"
+                / "runs"
+            ).mkdir(parents=True, exist_ok=True)
 
             # 下载地图文件
             download_result = await download_map_file(target_dir)

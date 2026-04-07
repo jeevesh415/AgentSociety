@@ -158,15 +158,16 @@ intervene() 方法 - 读写修改
            answer = await society.ask(f"Agent {agent.id}: {question}")
            # Save answer to database or file
 
-使用 ReplayWriter 进行数据收集
+使用 ReplayWriter 进行环境数据收集
 ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
 
 .. code-block:: python
 
+   from pathlib import Path
    from agentsociety2.storage import ReplayWriter
 
-   writer = ReplayWriter("experiment.db")
-   await writer.initialize()
+   writer = ReplayWriter(Path("experiment.db"))
+   await writer.init()
 
    society = AgentSociety(
        agents=agents,
@@ -176,13 +177,11 @@ intervene() 方法 - 读写修改
    )
    await society.init()
 
-   # Run simulation - all interactions are automatically recorded
+   # Run simulation - environment replay datasets are recorded to SQLite
    await society.run(num_steps=10, tick=3600)
 
-   # Read back collected data
-   profiles = await writer.read_agent_profiles()
-   dialogs = await writer.read_agent_dialogs()
-   statuses = await writer.read_agent_status()
+   # Query replay catalog or environment tables later
+   # sqlite3 experiment.db "SELECT * FROM replay_dataset_catalog;"
 
    await society.close()
 
@@ -264,7 +263,7 @@ intervene() 方法 - 读写修改
 
 2. **对更改使用 intervene()**: 只在想修改状态时使用 ``intervene()``
 
-3. **结合 ReplayWriter**: 启用回放记录以进行全面的数据收集
+3. **结合 ReplayWriter**: 用环境 replay dataset 做实验分析；agent 本地调试则查看 ``run/agents/agent_xxxx/`` 下的 workspace 文件
 
 4. **查询特定智能体**: 向特定智能体提问以获得有针对性的响应
 

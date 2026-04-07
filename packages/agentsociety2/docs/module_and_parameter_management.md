@@ -102,28 +102,6 @@ scan_result = scan_and_register_custom_modules(
 
 ### 1.5 模块查询接口
 
-#### 命令行脚本
-
-```bash
-# 列出所有模块
-PYTHONPATH=/workspace uv run extension/skills/agentsociety-experiment-config/scripts/module_info.py --list --workspace /workspace
-
-# 查询特定环境模块
-PYTHONPATH=/workspace uv run extension/skills/agentsociety-experiment-config/scripts/module_info.py --env reputation_game_env --workspace /workspace
-
-# 查询特定 Agent
-PYTHONPATH=/workspace uv run extension/skills/agentsociety-experiment-config/scripts/module_info.py --agent person_agent --workspace /workspace
-
-# 包含预填充参数
-PYTHONPATH=/workspace uv run extension/skills/agentsociety-experiment-config/scripts/module_info.py --prefill --workspace /workspace
-
-# 扫描自定义模块
-PYTHONPATH=/workspace uv run extension/skills/agentsociety-experiment-config/scripts/module_info.py --scan-custom --workspace /workspace
-
-# JSON 输出
-PYTHONPATH=/workspace uv run extension/skills/agentsociety-experiment-config/scripts/module_info.py --list --json
-```
-
 #### API 接口
 
 ```
@@ -143,7 +121,15 @@ GET /api/v1/custom/classes?workspace_path=/path&include_custom=true
       "has_prefill": true
     }
   },
-  "agents": {...},
+  "agents": {
+    "llm_donor_agent": {
+      "type": "llm_donor_agent",
+      "class_name": "LLMDonorAgent",
+      "description": "...",
+      "is_custom": false,
+      "has_prefill": false
+    }
+  },
   "env_module_count": 16,
   "agent_count": 7
 }
@@ -245,10 +231,7 @@ GET /api/v1/prefill-params/agent/person_agent?workspace_path=/path
 
 #### 验证脚本
 
-```bash
-PYTHONPATH=/workspace uv run extension/skills/agentsociety-experiment-config/scripts/validate_config.py \
-  --hypothesis-id 1 --experiment-id 1 --workspace /workspace
-```
+``extension/skills/agentsociety-experiment-config/scripts/validate_config.py`` 用于对生成的配置做端到端校验。
 
 **验证内容：**
 1. 加载 `init_config.json`
@@ -320,10 +303,9 @@ class MyCustomAgent(AgentBase):
         self,
         id: int,
         profile: dict,
-        replay_writer=None,
         custom_param: str = "default",  # 自定义参数
     ):
-        super().__init__(id=id, profile=profile, replay_writer=replay_writer)
+        super().__init__(id=id, profile=profile)
         self.custom_param = custom_param
 ```
 
@@ -344,7 +326,7 @@ class MyCustomEnv(EnvBase):
         self.config_param = config_param
 
     @tool(readonly=True, kind="observe")
-    def observe(self) -> str:
+    def get_state(self, agent_id: int) -> str:
         """返回环境状态"""
         return f"Current state: {self.config_param}"
 ```
@@ -361,189 +343,9 @@ curl -X POST http://localhost:8001/api/v1/custom/rescan \
   -d '{"workspace_path": "/path/to/workspace"}'
 ```
 
-## 五、改进建议
+## 五、使用示例
 
-### 5.1 当前问题
-
-1. **参数类型推断不完整**
-   - 当前只获取参数名和默认值
-   - 缺少完整的类型信息（嵌套类型、枚举等）
-
-2. **预填充参数校验缺失**
-   - 预填充参数与类定义不匹配时无提示
-   - 缺少参数有效性验证
-
-3. **模块发现性能**
-   - 每次导入都会扫描所有 contrib 模块
-   - 大量模块时启动较慢
-
-4. **自定义模块热重载**
-   - 修改自定义模块后需要重启服务
-   - 缺少热重载机制
-
-5. **配置版本管理**
-   - 缺少配置版本控制
-   - 难以追溯历史配置
-
-### 5.2 改进方案
-
-#### 1. 增强类型推断
-
-```python
-# 建议添加 get_type_hints 支持
-import inspect
-from typing import get_type_hints
-
-def get_full_parameter_info(cls):
-    """获取完整的参数类型信息"""
-    hints = get_type_hints(cls.__init__)
-    sig = inspect.signature(cls.__init__)
-    params = {}
-    for name, param in sig.parameters.items():
-        if name == 'self':
-            continue
-        param_info = {
-            'name': name,
-            'annotation': str(hints.get(name, param.annotation)),
-            'default': param.default,
-            'is_required': param.default == inspect.Parameter.empty,
-        }
-        # 添加嵌套类型解析
-        if hasattr(hints.get(name), '__args__'):
-            param_info['generic_args'] = [
-                str(arg) for arg in hints[name].__args__
-            ]
-        params[name] = param_info
-    return params
-```
-
-#### 2. 预填充参数校验
-
-```python
-# 建议添加预填充参数验证
-def validate_prefill_params(class_type: str, prefill: dict):
-    """验证预填充参数是否与类定义匹配"""
-    from agentsociety2.registry import get_env_module_class
-
-    cls = get_env_module_class(class_type)
-    if cls is None:
-        raise ValueError(f"Unknown module type: {class_type}")
-
-    sig = inspect.signature(cls.__init__)
-    valid_params = set(sig.parameters.keys()) - {'self'}
-
-    for key in prefill.keys():
-        if key not in valid_params:
-            logger.warning(
-                f"Invalid prefill param '{key}' for {class_type}. "
-                f"Valid params: {valid_params}"
-            )
-```
-
-#### 3. 模块发现缓存
-
-```python
-# 建议添加模块发现缓存
-import hashlib
-import pickle
-from pathlib import Path
-
-def get_cached_modules(cache_file: Path):
-    """从缓存加载模块信息"""
-    if cache_file.exists():
-        with open(cache_file, 'rb') as f:
-            return pickle.load(f)
-    return None
-
-def save_cached_modules(modules, cache_file: Path):
-    """保存模块信息到缓存"""
-    cache_file.parent.mkdir(parents=True, exist_ok=True)
-    with open(cache_file, 'wb') as f:
-        pickle.dump(modules, f)
-```
-
-#### 4. 自定义模块热重载
-
-```python
-# 建议添加热重载机制
-import importlib
-
-def reload_custom_module(module_type: str):
-    """重新加载自定义模块"""
-    registry = get_registry()
-
-    if module_type in registry._env_modules:
-        cls = registry._env_modules[module_type]
-        if getattr(cls, '_is_custom', False):
-            module = importlib.import_module(cls.__module__)
-            importlib.reload(module)
-            logger.info(f"Reloaded custom module: {module_type}")
-```
-
-#### 5. 配置版本管理
-
-```python
-# 建议添加配置版本控制
-from datetime import datetime
-import git
-
-def save_config_with_version(config: dict, workspace: Path):
-    """保存配置并记录版本"""
-    version_file = workspace / ".agentsociety" / "config_versions.json"
-
-    versions = []
-    if version_file.exists():
-        versions = json.loads(version_file.read_text())
-
-    new_version = {
-        "timestamp": datetime.now().isoformat(),
-        "git_commit": get_git_commit(),
-        "config": config,
-    }
-    versions.append(new_version)
-
-    version_file.write_text(json.dumps(versions, indent=2))
-```
-
-#### 6. 统一配置接口
-
-```python
-# 建议提供统一的配置获取接口
-class ConfigManager:
-    """统一配置管理器"""
-
-    def get_full_config(
-        self, module_type: str, workspace: Path
-    ) -> dict:
-        """获取模块的完整配置（合并默认、预填充、生成参数）"""
-        # 1. 获取类定义参数
-        class_params = self._get_class_parameters(module_type)
-
-        # 2. 加载预填充参数
-        prefill_params = self._load_prefill_params(
-            workspace, module_type
-        )
-
-        # 3. 合并参数
-        merged = self._deep_merge(class_params, prefill_params)
-
-        return merged
-```
-
-### 5.3 优先级建议
-
-| 优先级 | 改进项 | 预期效果 |
-|--------|--------|----------|
-| 高 | 预填充参数校验 | 防止配置错误 |
-| 高 | 统一配置接口 | 简化使用 |
-| 中 | 增强类型推断 | 更好的类型提示 |
-| 中 | 模块发现缓存 | 提升启动速度 |
-| 低 | 热重载机制 | 开发体验 |
-| 低 | 版本管理 | 可追溯性 |
-
-## 六、使用示例
-
-### 6.1 获取模块信息
+### 5.1 获取模块信息
 
 ```python
 from agentsociety2.registry import get_registry
@@ -566,7 +368,7 @@ print(env_info)
 agent_info = registry.get_module_info("person_agent", "agent")
 ```
 
-### 6.2 实例化模块
+### 5.2 实例化模块
 
 ```python
 from agentsociety2.registry import get_env_module_class
@@ -578,7 +380,7 @@ EnvClass = get_env_module_class("reputation_game_env")
 env_instance = EnvClass(config={"Z": 100, "BENEFIT": 5})
 ```
 
-### 6.3 列出所有模块
+### 5.3 列出所有模块
 
 ```python
 from agentsociety2.registry import (
@@ -595,7 +397,7 @@ for agent_type, agent_class in get_registered_agent_modules():
     print(f"{agent_type}: {agent_class.__name__}")
 ```
 
-### 6.4 使用预填充参数
+### 5.4 使用预填充参数
 
 ```python
 import json
@@ -610,7 +412,7 @@ env_prefill = prefill_params["env_modules"].get("reputation_game_env", {})
 print(env_prefill)  # {"config": {"Z": 100, ...}}
 ```
 
-## 七、总结
+## 六、总结
 
 AgentSociety2 的模块和参数管理系统提供了：
 
@@ -619,5 +421,3 @@ AgentSociety2 的模块和参数管理系统提供了：
 3. **多源参数管理**：类定义、生成参数、预填充参数
 4. **灵活的查询接口**：命令行脚本和 API 接口
 5. **严格的验证**：通过实例化验证配置有效性
-
-通过实施上述改进建议，可以进一步提升系统的健壮性、性能和易用性。

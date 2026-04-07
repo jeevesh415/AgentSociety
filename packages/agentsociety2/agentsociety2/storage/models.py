@@ -1,14 +1,20 @@
-"""SQLModel definitions for replay data storage."""
+"""历史 agent 回放表的兼容模型（SQLModel）。
+
+该模块保留 ``agent_profile``、``agent_status``、``agent_dialog`` 三张旧表的 ORM
+定义，供后端读取历史 SQLite 数据库时使用。
+
+当前 :class:`~agentsociety2.storage.ReplayWriter` 不再初始化或写入这些表。
+"""
 
 from datetime import datetime
-from typing import Any, Dict, List, Optional
+from typing import Any, Dict, Optional
 
 from sqlalchemy import JSON, Column
 from sqlmodel import Field, SQLModel
 
 
 class AgentProfile(SQLModel, table=True):
-    """Agent profile information."""
+    """agent 档案信息（框架表）。"""
 
     __tablename__ = "agent_profile"
 
@@ -19,7 +25,7 @@ class AgentProfile(SQLModel, table=True):
 
 
 class AgentStatus(SQLModel, table=True):
-    """Agent status snapshot at a specific step."""
+    """agent 在某一步的状态快照（框架表）。"""
 
     __tablename__ = "agent_status"
 
@@ -32,7 +38,7 @@ class AgentStatus(SQLModel, table=True):
 
 
 class AgentDialog(SQLModel, table=True):
-    """Agent dialog record."""
+    """agent 对话记录（框架表）。"""
 
     __tablename__ = "agent_dialog"
 

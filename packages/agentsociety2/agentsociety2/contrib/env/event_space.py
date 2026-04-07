@@ -11,10 +11,11 @@ Supports 7 specific event types:
 """
 
 from datetime import datetime, timedelta
-from typing import Any, Dict, List, Literal, Optional
+from typing import Any, ClassVar, Dict, List, Literal, Optional
 
 from agentsociety2.env import EnvBase, tool
 from agentsociety2.logger import get_logger
+from agentsociety2.storage import ColumnDef
 from pydantic import BaseModel, ConfigDict, Field
 
 # Valid event types for person behavior tracking
@@ -198,6 +199,13 @@ class EventSpace(EnvBase):
     - End/cancel events with timestamps
     """
 
+    _env_state_columns: ClassVar[list[ColumnDef]] = [
+        ColumnDef("active_event_count", "INTEGER", nullable=False),
+        ColumnDef("active_events", "JSON", nullable=False),
+        ColumnDef("allowed_event_types", "JSON", nullable=False),
+        ColumnDef("event_types_description", "TEXT", nullable=False),
+    ]
+
     def __init__(
         self,
         allowed_event_types: List[str] = DEFAULT_ALLOWED_EVENT_TYPES,
@@ -209,6 +217,7 @@ class EventSpace(EnvBase):
         self._event_types_description = event_types_description
         self._agent_events: Dict[int, CurrentEvent] = {}
         """Storage for current event of each person: person_id -> CurrentEvent"""
+        self._step_counter: int = 0
 
     @property
     def description(self):
@@ -240,7 +249,21 @@ class EventSpace(EnvBase):
             start_datetime: The simulation start time
         """
         await super().init(start_datetime)
+        self._agent_events.clear()
+        self._step_counter = 0
         get_logger().info("EventSpace initialized")
+
+    def _serialize_active_events(self, current_time: datetime) -> Dict[str, Dict[str, Any]]:
+        """Serialize active events to JSON-safe dictionaries for replay output."""
+        result: Dict[str, Dict[str, Any]] = {}
+        for person_id, event in self._agent_events.items():
+            result[str(person_id)] = {
+                **event.model_dump(mode="json"),
+                "elapsed_seconds": event.get_elapsed_seconds(current_time),
+                "remaining_seconds": event.get_remaining_seconds(current_time),
+                "progress_percentage": event.get_progress_percentage(current_time),
+            }
+        return result
 
     def _create_and_start_event(
         self,
@@ -422,6 +445,16 @@ class EventSpace(EnvBase):
             t: The current datetime after this step
         """
         self.t = t
+        active_events = self._serialize_active_events(t)
+        await self._write_env_state(
+            step=self._step_counter,
+            t=t,
+            active_event_count=len(self._agent_events),
+            active_events=active_events,
+            allowed_event_types=list(self._allowed_event_types),
+            event_types_description=self._event_types_description,
+        )
+        self._step_counter += 1
 
     def _dump_state(self) -> dict:
         """
@@ -444,7 +477,12 @@ class EventSpace(EnvBase):
             }
             events_data[str(person_id)] = event_dict
 
-        return {"events": events_data}
+        return {
+            "events": events_data,
+            "allowed_event_types": list(self._allowed_event_types),
+            "event_types_description": self._event_types_description,
+            "step_counter": self._step_counter,
+        }
 
     def _load_state(self, state: dict):
         """
@@ -453,6 +491,13 @@ class EventSpace(EnvBase):
         Args:
             state: The state dictionary produced by _dump_state()
         """
+        self._allowed_event_types = state.get(
+            "allowed_event_types", DEFAULT_ALLOWED_EVENT_TYPES
+        )
+        self._event_types_description = state.get(
+            "event_types_description", DEFAULT_EVENT_TYPES_CONFIG
+        )
+        self._step_counter = state.get("step_counter", 0)
         events_data = state.get("events", {})
         self._agent_events = {}
         for person_id_str, event_dict in events_data.items():

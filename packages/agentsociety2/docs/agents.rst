@@ -9,7 +9,7 @@
 PersonAgent
 ~~~~~~~~~~~
 
-``PersonAgent`` 类是一个现成的智能体实现：
+``PersonAgent`` 是一个 **skills-first / tool-using** 智能体实现。它本身是一个轻量编排器，核心行为是“对标 Claude Code 的工具循环”：在每个 step 内注入身份与技能目录，然后由主模型逐轮选择并执行工具（包括技能激活与技能执行）。
 
 .. code-block:: python
 
@@ -25,10 +25,42 @@ PersonAgent
        }
    )
 
-配置文件可以包含您想要的任何字段。智能体将使用此信息来塑造其响应和决策。
+内置 Skills
+^^^^^^^^^^^
+
+每个 simulation tick，PersonAgent 都会执行同一套“工具循环”的流程：
+
+.. list-table::
+     :widths: 28 72
+     :header-rows: 1
+
+     * - 阶段
+       - 说明
+     * - 注入上下文
+       - system prompt 注入身份信息、技能目录、工具表。
+     * - 激活技能
+       - 需要某个技能时，先用 ``activate_skill`` 加载该技能完整说明（通常来自 ``SKILL.md``）。
+     * - 执行技能/工具
+       - 用 ``execute_skill`` 执行技能，或直接调用 ``bash`` / ``grep`` / ``glob`` / ``codegen`` 等工具。
+     * - 结束条件
+       - 当主模型输出 ``done=true`` 时结束本 step。
+
+常见内置技能包括 ``observation``、``needs``、``cognition``、``plan``、``memory``。
+它们都不再属于固定“必须执行层”，而是由 LLM 按上下文按需选择。
+
+详细说明请参见 :doc:`agent_skills`。
+
+配置文件可以包含你希望的任何字段；PersonAgent 会把这些信息用于塑造其行为与决策。
 
 自定义智能体
 ~~~~~~~~~~~~~
+
+.. note::
+
+   对于扩展 PersonAgent 的认知能力，推荐使用 **Agent Skills** 系统。
+   参见 :doc:`agent_skills` 了解如何创建自定义 skill。
+
+   只有在需要完全不同的智能体架构时，才需要创建自定义智能体类。
 
 要创建自定义智能体，请继承 ``AgentBase`` 并实现必需的抽象方法：
 
@@ -170,38 +202,30 @@ step() 方法
    # tick = duration in seconds, t = current simulation time
    action_description = await agent.step(tick=3600, t=datetime.now())
 
-回放跟踪
+持久化
 ~~~~~~~~~~~~~~~
 
-.. code-block:: python
+``PersonAgent`` 当前的持久化分成两层：
 
-   from agentsociety2.storage import ReplayWriter
+1. **Agent workspace 文件**：由 ``PersonAgent`` 自身维护，位于 ``run/agents/agent_xxxx/``。
+2. **环境 replay dataset**：由环境模块通过 ``ReplayWriter`` 写入 SQLite。
 
-   writer = ReplayWriter("experiment.db")
-   await writer.initialize()
+也就是说，``PersonAgent`` 不会把自己的 step 状态直接写入 ``agent_status`` 之类的
+SQLite 表；如果你需要检查 agent 过程数据，应优先查看：
 
-   agent = PersonAgent(id=1, profile=..., replay_writer=writer)
+* ``agent_config.json``
+* ``session_state.json``
+* ``tool_calls.jsonl``
+* ``thread_messages.jsonl``
 
 智能体记忆
 ------------
 
-AgentSociety 2 集成了 `mem0ai`_ 用于记忆管理：
+在当前版本中，记忆能力推荐通过 **Agent Skills** 来实现（例如 `memory` 技能）。
 
-.. code-block:: python
+也就是说：
 
-   # Enable memory for an agent
-   from agentsociety2 import PersonAgent
+1. `PersonAgent` 提供独立工作目录与工具能力（读写文件、执行技能等）。
+2. 是否写入记忆、写入什么、以及持久化方式，由 `memory` 技能的 `SKILL.md` 与其脚本实现决定。
 
-   agent = PersonAgent(
-       id=1,
-       profile={"name": "Alice"},
-       enable_memory=True  # Enable memory
-   )
-
-启用记忆后，智能体可以：
-
-* 记住过去的互动
-* 回忆相关信息
-* 随着时间建立上下文
-
-.. _mem0ai: https://github.com/mem0ai/mem0
+如果你想替换/扩展记忆策略，优先做法是新增/替换 skill，而不是修改 `PersonAgent` 本体。

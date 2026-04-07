@@ -1,15 +1,11 @@
-"""Base module registry class
-
-Provides a centralized registry for agent classes and environment modules.
-Supports lazy loading - modules are only discovered when first accessed.
-"""
+"""模块注册中心（agent/env 的集中注册与惰性发现）。"""
 
 from __future__ import annotations
 
 from typing import Dict, List, Tuple, Type, Optional, Any
 from pathlib import Path
-from importlib import import_module
 import inspect
+import os
 
 from agentsociety2.agent.base import AgentBase
 from agentsociety2.env.base import EnvBase
@@ -19,12 +15,14 @@ logger = get_logger()
 
 
 class ModuleRegistry:
-    """Central registry for agent and environment modules
+    """agent 与环境模块的集中注册中心（单例）。
 
-    This class manages registration and retrieval of agent classes and
-    environment modules, supporting both built-in and custom modules.
+    支持两类来源：
 
-    Implements lazy loading - built-in modules are only discovered on first access.
+    - 内置模块：来自 ``agentsociety2.contrib`` 与内置 agent（例如 PersonAgent）
+    - 自定义模块：来自 workspace 的 ``custom/`` 目录
+
+    默认启用惰性加载：只有在第一次访问 registry 内容时才触发发现与注册。
     """
 
     _instance: Optional["ModuleRegistry"] = None
@@ -52,7 +50,7 @@ class ModuleRegistry:
         logger.info("ModuleRegistry initialized (lazy loading enabled)")
 
     def _ensure_builtin_loaded(self) -> None:
-        """Ensure built-in modules are loaded (lazy loading trigger)"""
+        """确保内置模块已加载（惰性加载触发点）。"""
         if not self._lazy_enabled:
             return
         if self._builtin_loaded:
@@ -64,47 +62,48 @@ class ModuleRegistry:
         self._builtin_loaded = True
 
     def _ensure_custom_loaded(self) -> None:
-        """Ensure custom modules are loaded (lazy loading trigger)"""
+        """确保自定义模块已加载（惰性加载触发点）。"""
         if not self._lazy_enabled:
-            return
-        if not self._workspace_path:
-            # No workspace set, nothing to load
-            self._custom_loaded = True
             return
         if self._custom_loaded:
             return
 
+        workspace_path = self._resolve_workspace_path()
+        if workspace_path is None:
+            # No workspace set, nothing to load
+            self._custom_loaded = True
+            return
+
         from agentsociety2.registry.modules import scan_and_register_custom_modules
 
-        scan_and_register_custom_modules(self._workspace_path, self)
+        scan_and_register_custom_modules(workspace_path, self)
         self._custom_loaded = True
 
     def _ensure_loaded(self) -> None:
-        """Ensure all modules are loaded (lazy loading trigger)"""
+        """确保内置与自定义模块都已加载（惰性加载触发点）。"""
         self._ensure_builtin_loaded()
         self._ensure_custom_loaded()
 
     @property
     def env_modules(self) -> Dict[str, Type[EnvBase]]:
-        """Get all registered environment modules (triggers lazy loading)"""
+        """:returns: 已注册环境模块映射（访问会触发惰性加载）。"""
         self._ensure_loaded()
         return self._env_modules.copy()
 
     @property
     def agent_modules(self) -> Dict[str, Type[AgentBase]]:
-        """Get all registered agent modules (triggers lazy loading)"""
+        """:returns: 已注册 agent 映射（访问会触发惰性加载）。"""
         self._ensure_loaded()
         return self._agent_modules.copy()
 
     def register_env_module(
         self, module_type: str, module_class: Type[EnvBase], is_custom: bool = False
     ) -> None:
-        """Register an environment module
+        """注册环境模块。
 
-        Args:
-            module_type: The type identifier (e.g., "simple_social_space")
-            module_class: The environment module class
-            is_custom: Whether this is a custom module
+        :param module_type: type identifier（例如 ``simple_social_space``）。
+        :param module_class: 环境模块类。
+        :param is_custom: 是否为自定义模块。
         """
         if module_type in self._env_modules and not is_custom:
             logger.debug(f"Env module '{module_type}' already registered, skipping")
@@ -116,12 +115,11 @@ class ModuleRegistry:
     def register_agent_module(
         self, agent_type: str, agent_class: Type[AgentBase], is_custom: bool = False
     ) -> None:
-        """Register an agent module
+        """注册 agent。
 
-        Args:
-            agent_type: The type identifier (e.g., "person_agent")
-            agent_class: The agent class
-            is_custom: Whether this is a custom agent
+        :param agent_type: type identifier（例如 ``person_agent``）。
+        :param agent_class: agent 类。
+        :param is_custom: 是否为自定义 agent。
         """
         if agent_type in self._agent_modules and not is_custom:
             logger.debug(f"Agent '{agent_type}' already registered, skipping")
@@ -131,72 +129,79 @@ class ModuleRegistry:
         logger.debug(f"Registered agent: {agent_type} -> {agent_class.__name__}")
 
     def get_env_module(self, module_type: str) -> Optional[Type[EnvBase]]:
-        """Get an environment module class by type (triggers lazy loading)
+        """按 type 获取环境模块类（会触发惰性加载）。
 
-        Args:
-            module_type: The type identifier
-
-        Returns:
-            The environment module class, or None if not found
+        :param module_type: type identifier。
+        :returns: 环境模块类；未找到返回 ``None``。
         """
-        self._ensure_builtin_loaded()
+        self._ensure_loaded()
         return self._env_modules.get(module_type)
 
     def get_agent_module(self, agent_type: str) -> Optional[Type[AgentBase]]:
-        """Get an agent module class by type (triggers lazy loading)
+        """按 type 获取 agent 类（会触发惰性加载）。
 
-        Args:
-            agent_type: The type identifier
-
-        Returns:
-            The agent class, or None if not found
+        :param agent_type: type identifier。
+        :returns: agent 类；未找到返回 ``None``。
         """
-        self._ensure_builtin_loaded()
+        self._ensure_loaded()
         return self._agent_modules.get(agent_type)
 
     def list_env_modules(self) -> List[Tuple[str, Type[EnvBase]]]:
-        """List all registered environment modules (triggers lazy loading)
-
-        Returns:
-            List of (module_type, module_class) tuples
-        """
+        """:returns: 已注册环境模块列表（会触发惰性加载）。"""
         self._ensure_loaded()
         return list(self._env_modules.items())
 
     def list_agent_modules(self) -> List[Tuple[str, Type[AgentBase]]]:
-        """List all registered agent modules (triggers lazy loading)
-
-        Returns:
-            List of (agent_type, agent_class) tuples
-        """
+        """:returns: 已注册 agent 列表（会触发惰性加载）。"""
         self._ensure_loaded()
         return list(self._agent_modules.items())
 
     def set_workspace(self, workspace_path: Path) -> None:
-        """Set the workspace path for custom module discovery
+        """设置 workspace 路径（用于 custom 模块发现）。
 
-        Args:
-            workspace_path: Path to the workspace directory
+        :param workspace_path: workspace 目录。
         """
         self._workspace_path = workspace_path.resolve()
         # Reset custom loaded flag so modules will be discovered on next access
         self._custom_loaded = False
         logger.debug(f"Registry workspace set to: {self._workspace_path}")
 
+    def _resolve_workspace_path(self) -> Optional[Path]:
+        """:returns: 用于 custom 模块发现的 workspace 路径；若无法推断则返回 ``None``。"""
+
+        if self._workspace_path is not None:
+            return self._workspace_path
+
+        env_workspace = os.getenv("WORKSPACE_PATH")
+        if env_workspace:
+            self._workspace_path = Path(env_workspace).resolve()
+            logger.debug(f"Registry workspace inferred from WORKSPACE_PATH: {self._workspace_path}")
+            return self._workspace_path
+
+        cwd = Path.cwd().resolve()
+        candidates = [cwd, *cwd.parents]
+        for candidate in candidates:
+            if (candidate / "custom" / "envs").exists() or (candidate / "custom" / "agents").exists():
+                self._workspace_path = candidate
+                logger.debug(f"Registry workspace inferred from cwd: {self._workspace_path}")
+                return self._workspace_path
+
+        return None
+
     def load_builtin_modules(self) -> None:
-        """Eagerly load built-in modules"""
+        """主动加载内置模块（禁用惰性等待）。"""
         self._ensure_builtin_loaded()
 
     def load_custom_modules(self) -> None:
-        """Eagerly load custom modules"""
+        """主动加载自定义模块（禁用惰性等待）。"""
         self._ensure_custom_loaded()
 
     def load_all_modules(self) -> None:
-        """Eagerly load all modules"""
+        """主动加载全部模块（内置 + 自定义）。"""
         self._ensure_loaded()
 
     def clear_custom_modules(self) -> None:
-        """Clear all custom modules from the registry"""
+        """清除 registry 中所有 custom 模块。"""
         to_remove = [
             mt for mt, mc in self._env_modules.items()
             if getattr(mc, "_is_custom", False)
@@ -217,14 +222,11 @@ class ModuleRegistry:
         logger.info(f"Cleared {len(to_remove)} custom modules")
 
     def get_module_info(self, module_type: str, kind: str) -> Dict[str, Any]:
-        """Get information about a module (triggers lazy loading)
+        """获取模块信息（会触发惰性加载）。
 
-        Args:
-            module_type: The type identifier
-            kind: Either "env_module" or "agent"
-
-        Returns:
-            Dictionary with module information
+        :param module_type: type identifier。
+        :param kind: ``env_module`` 或 ``agent``。
+        :returns: 模块信息字典（含参数签名、描述、是否 custom 等）。
         """
         self._ensure_builtin_loaded()
 
@@ -281,7 +283,7 @@ _registry: Optional[ModuleRegistry] = None
 
 
 def get_registry() -> ModuleRegistry:
-    """Get the global module registry instance"""
+    """:returns: 全局 :class:`~agentsociety2.registry.base.ModuleRegistry` 单例。"""
     global _registry
     if _registry is None:
         _registry = ModuleRegistry()

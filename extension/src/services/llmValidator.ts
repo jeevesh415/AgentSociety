@@ -12,11 +12,10 @@
  */
 
 import * as vscode from 'vscode';
-import * as path from 'path';
-import { exec } from 'child_process';
+import { execFile } from 'child_process';
 import { promisify } from 'util';
 
-const execAsync = promisify(exec);
+const execFileAsync = promisify(execFile);
 
 export interface ValidationResult {
   success: boolean;
@@ -156,6 +155,32 @@ export class LLMValidator {
  */
 export class PythonValidator {
   private outputChannel: vscode.OutputChannel;
+  private static readonly AGENTSOCIETY2_CHECK_SCRIPT = `
+import importlib.util
+import json
+import sys
+
+try:
+    from importlib.metadata import PackageNotFoundError, version
+except ImportError:
+    from importlib_metadata import PackageNotFoundError, version
+
+spec = importlib.util.find_spec("agentsociety2")
+if spec is None:
+    print(json.dumps({"installed": False}))
+    raise SystemExit(1)
+
+try:
+    package_version = version("agentsociety2")
+except PackageNotFoundError:
+    package_version = None
+
+print(json.dumps({
+    "installed": True,
+    "version": package_version,
+    "location": spec.origin,
+}))
+`.trim();
 
   constructor() {
     this.outputChannel = vscode.window.createOutputChannel('Python Validator');
@@ -173,7 +198,7 @@ export class PythonValidator {
     const { pythonPath } = config;
 
     // 如果没有指定 Python 路径，尝试自动检测
-    const pythonCmd = pythonPath || 'python3';
+    const pythonCmd = this.normalizePythonPath(pythonPath) || 'python3';
     this.log(`Validating Python: ${pythonCmd}`);
 
     try {
@@ -190,25 +215,34 @@ export class PythonValidator {
         };
       }
 
-      this.log(`Python version: ${versionResult.stdout.trim()}`);
+      const pythonVersion = this.getCommandOutput(versionResult);
+      this.log(`Python version: ${pythonVersion}`);
 
       // 检查 agentsociety2 是否安装
       this.log(`Checking agentsociety2 installation...`);
       const importResult = await this.execCommand(
         pythonCmd,
         '-c',
-        '"import agentsociety2; print(agentsociety2.__version__)"'
+        PythonValidator.AGENTSOCIETY2_CHECK_SCRIPT
       );
 
       if (!importResult.success) {
+        const importError = this.getCommandOutput(importResult);
         return {
           success: false,
-          error: `agentsociety2 未安装在此 Python 环境中。\n版本信息: ${versionResult.stdout.trim()}`
+          error: [
+            'agentsociety2 未安装在此 Python 环境中。',
+            `版本信息: ${pythonVersion}`,
+            importError ? `检测详情: ${importError}` : null,
+          ].filter(Boolean).join('\n')
         };
       }
 
-      const version = importResult.stdout.trim();
+      const packageInfo = this.parsePackageCheckResult(importResult.stdout);
+      const version = packageInfo?.version || 'unknown';
+      const location = packageInfo?.location || 'unknown';
       this.log(`agentsociety2 version: ${version}`);
+      this.log(`agentsociety2 location: ${location}`);
 
       return {
         success: true,
@@ -226,13 +260,13 @@ export class PythonValidator {
    * 执行命令并返回结果
    */
   private async execCommand(command: string, ...args: string[]): Promise<{ success: boolean; stdout: string; stderr: string }> {
-    const fullCmd = [command, ...args].join(' ');
     this.log(`Executing: ${command} ${args.join(' ')}`);
 
     try {
-      const { stdout, stderr } = await execAsync(fullCmd, {
+      const { stdout, stderr } = await execFileAsync(command, args, {
         timeout: 10000, // 10秒超时
         env: { ...process.env, PYTHONIOENCODING: 'utf-8' },
+        windowsHide: true,
       });
 
       return { success: true, stdout: stdout || '', stderr: stderr || '' };
@@ -243,6 +277,29 @@ export class PythonValidator {
         stdout: error.stdout || '',
         stderr: error.stderr || error.message || ''
       };
+    }
+  }
+
+  private normalizePythonPath(pythonPath?: string): string {
+    const trimmed = pythonPath?.trim() || '';
+    return trimmed.replace(/^["'](.+)["']$/, '$1');
+  }
+
+  private getCommandOutput(result: { stdout: string; stderr: string }): string {
+    return (result.stdout || result.stderr || '').trim();
+  }
+
+  private parsePackageCheckResult(stdout: string): { installed: boolean; version?: string | null; location?: string | null } | null {
+    const trimmed = stdout.trim();
+    if (!trimmed) {
+      return null;
+    }
+
+    try {
+      return JSON.parse(trimmed) as { installed: boolean; version?: string | null; location?: string | null };
+    } catch {
+      this.log(`Failed to parse package check result: ${trimmed}`);
+      return null;
     }
   }
 

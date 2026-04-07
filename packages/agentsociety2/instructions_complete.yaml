@@ -274,9 +274,9 @@ instructions:
     expected_calls:
       - ["SocialMediaSpace", "refresh_feed", {"user_id": "@", "algorithm": "twitter_ranking", "limit": 20}]
 
-  - instruction: "Get posts created by a specific user to review their content history and mindful sharing patterns."
+  - instruction: "Search for posts from a specific user to review their content history and mindful sharing patterns."
     expected_calls:
-      - ["SocialMediaSpace", "get_user_posts", {"user_id": "*", "limit": 20}]
+      - ["SocialMediaSpace", "search_posts", {"keyword": "*", "tags": "*", "limit": 20, "sort_by": "*"}]
 
   - instruction: "Refresh the social media feed using Reddit Hot algorithm to discover trending mindful content."
     expected_calls:
@@ -288,17 +288,17 @@ instructions:
       - ["SocialMediaSpace", "view_post", {"user_id": "@", "post_id": "*"}]
       - ["SocialMediaSpace", "follow_user", {"follower_id": "@", "followee_id": "*"}]
 
-  - instruction: "View the profile of a user who resonates with my values to understand their mindful presence better."
+  - instruction: "View a user's recent post to understand their mindful presence better."
     expected_calls:
-      - ["SocialMediaSpace", "get_user_profile", {"user_id": "*"}]
+      - ["SocialMediaSpace", "view_post", {"user_id": "@", "post_id": "*"}]
 
   - instruction: "Search for posts about mindfulness, wellness and quiet focus using keyword and tag filters."
     expected_calls:
       - ["SocialMediaSpace", "search_posts", {"keyword": "mindfulness", "tags": ["QuietFocus"], "limit": 20, "sort_by": "relevance"}]
 
-  - instruction: "Get trending topics in the mindfulness and self-care categories to stay aligned with community interests."
+  - instruction: "Search for mindfulness and self-care posts to stay aligned with community interests."
     expected_calls:
-      - ["SocialMediaSpace", "get_trending_topics", {"time_window_hours": 24, "limit": 10}]
+      - ["SocialMediaSpace", "search_posts", {"keyword": "mindfulness", "tags": [], "limit": 20, "sort_by": "relevance"}]
 
   - instruction: "Refresh the social media feed using a random algorithm for unexpected discoveries in mindful content."
     expected_calls:
@@ -358,11 +358,11 @@ instructions:
       - ["SocialMediaSpace", "view_post", {"user_id": "@", "post_id": "*"}]
       - ["SocialMediaSpace", "unlike_post", {"user_id": "@", "post_id": "*"}]
 
-  - instruction: "Search for mindfulness posts, view one, then reply to a relevant comment to deepen conversation."
+  - instruction: "Search for mindfulness posts, view one, then comment on it to deepen conversation."
     expected_calls:
       - ["SocialMediaSpace", "search_posts", {"keyword": "mindfulness", "tags": ["QuietFocus"], "limit": 20, "sort_by": "relevance"}]
       - ["SocialMediaSpace", "view_post", {"user_id": "@", "post_id": "*"}]
-      - ["SocialMediaSpace", "reply_to_comment", {"user_id": "@", "comment_id": "*", "content": "*"}]
+      - ["SocialMediaSpace", "comment_on_post", {"user_id": "@", "post_id": "*", "content": "*"}]
 
   - instruction: "Refresh the feed, view an inspiring quiet-focus post, then repost it with a reflection to amplify its message."
     expected_calls:
@@ -443,18 +443,18 @@ instructions:
     expected_calls:
       - ["SocialMediaSpace", "send_direct_message", {"from_user_id": "@", "to_user_id": 8, "content": "*"}]
 
-  - instruction: "Retrieve and analyze environment statistics to understand overall community engagement patterns."
+  - instruction: "Observe my social media state and review recent feed activity to understand overall community engagement patterns."
     expected_calls:
-      - ["SocialMediaSpace", "get_environment_stats", {"include_time_series": true}]
+      - ["SocialMediaSpace", "observe_user", {"person_id": "@"}]
 
   # 11. 社交网络 - 观察（检查资料/通知/分析）
   - instruction: "Check my social media notifications and available actions to observe community responses."
     expected_calls:
       - ["SocialMediaSpace", "observe_user", {"person_id": "@"}]
 
-  - instruction: "Get my complete social media profile to review followers, following, and posts statistics."
+  - instruction: "Check my social media state to review followers, following, and post counts."
     expected_calls:
-      - ["SocialMediaSpace", "get_user_profile", {"user_id": "@"}]
+      - ["SocialMediaSpace", "observe_user", {"person_id": "@"}]
 
   - instruction: "View direct messages with User 24 to review the conversation history and emotional context."
     expected_calls:
@@ -464,29 +464,29 @@ instructions:
     expected_calls:
       - ["SocialMediaSpace", "get_direct_messages", {"user1_id": "@", "user2_id": 37, "limit": 50}]
 
-  - instruction: "Analyze engagement patterns on the #QuietFocus topic to understand community sentiment and participation."
+  - instruction: "Search for #QuietFocus posts to understand community sentiment and participation."
     expected_calls:
-      - ["SocialMediaSpace", "get_topic_analytics", {"topic": "QuietFocus", "time_window_hours": 24}]
+      - ["SocialMediaSpace", "search_posts", {"keyword": "QuietFocus", "tags": ["QuietFocus"], "limit": 20, "sort_by": "relevance"}]
 
   - instruction: "Retrieve direct messages with User 33 to review shared quiet reflections."
     expected_calls:
       - ["SocialMediaSpace", "get_direct_messages", {"user1_id": "@", "user2_id": 33, "limit": 50}]
 
-  - instruction: "Get environment statistics including user activity and engagement metrics."
+  - instruction: "Observe my social media state to review user activity and engagement context."
     expected_calls:
-      - ["SocialMediaSpace", "get_environment_stats", {"include_time_series": false}]
+      - ["SocialMediaSpace", "observe_user", {"person_id": "@"}]
 
-  - instruction: "Analyze the #HealthyLunch topic to see how the community shares nourishment and wellness moments."
+  - instruction: "Search the #HealthyLunch topic to see how the community shares nourishment and wellness moments."
     expected_calls:
-      - ["SocialMediaSpace", "get_topic_analytics", {"topic": "HealthyLunch", "time_window_hours": 24}]
+      - ["SocialMediaSpace", "search_posts", {"keyword": "HealthyLunch", "tags": ["HealthyLunch"], "limit": 20, "sort_by": "relevance"}]
 
   - instruction: "Check direct messages with User 8 to maintain evening connection and stillness sharing."
     expected_calls:
       - ["SocialMediaSpace", "get_direct_messages", {"user1_id": "@", "user2_id": 8, "limit": 50}]
 
-  - instruction: "View trending topics analytics to understand what the community values in quiet focus and mindful living."
+  - instruction: "Search for #MindfulWork posts to understand what the community values in quiet focus and mindful living."
     expected_calls:
-      - ["SocialMediaSpace", "get_topic_analytics", {"topic": "MindfulWork", "time_window_hours": 48}]
+      - ["SocialMediaSpace", "search_posts", {"keyword": "MindfulWork", "tags": ["MindfulWork"], "limit": 20, "sort_by": "relevance"}]
 
   # 12. 连续社交互动序列
   - instruction: "Search for #QuietFocus content multiple times to discover resonant posts, then publish a reflective update about morning stillness."
@@ -503,42 +503,42 @@ instructions:
       - ["SocialMediaSpace", "view_post", {"user_id": "@", "post_id": "*"}]
       - ["SocialMediaSpace", "comment_on_post", {"user_id": "@", "post_id": "*", "content": "*"}]
 
-  - instruction: "Refresh the feed twice to assess tone, then open a user's profile to understand their content context."
+  - instruction: "Refresh the feed twice to assess tone, then view a user's post to understand their content context."
     expected_calls:
       - ["SocialMediaSpace", "refresh_feed", {"user_id": "@", "algorithm": "*", "limit": "*"}]
       - ["SocialMediaSpace", "refresh_feed", {"user_id": "@", "algorithm": "*", "limit": "*"}]
-      - ["SocialMediaSpace", "get_user_profile", {"user_id": "*"}]
+      - ["SocialMediaSpace", "view_post", {"user_id": "@", "post_id": "*"}]
 
-  - instruction: "Check trending topics, search for related posts, repost one with reflection, then publish original content."
+  - instruction: "Search for related posts, repost one with reflection, then publish original content."
     expected_calls:
-      - ["SocialMediaSpace", "get_trending_topics", {"time_window_hours": "*", "limit": "*"}]
+      - ["SocialMediaSpace", "search_posts", {"keyword": "*", "tags": "*", "limit": "*", "sort_by": "*"}]
       - ["SocialMediaSpace", "search_posts", {"keyword": "*", "tags": "*", "limit": "*", "sort_by": "*"}]
       - ["SocialMediaSpace", "repost", {"user_id": "@", "post_id": "*", "comment": "*"}]
       - ["SocialMediaSpace", "create_post", {"author_id": "@", "content": "*", "tags": "*"}]
 
-  - instruction: "Search for a mindful creator, review their posts, like several, observe their profile context, then comment on a post."
+  - instruction: "Search for a mindful creator, review related posts, like several, observe community context, then comment on a post."
     expected_calls:
       - ["SocialMediaSpace", "search_posts", {"keyword": "*", "tags": "*", "limit": "*", "sort_by": "*"}]
-      - ["SocialMediaSpace", "get_user_posts", {"user_id": "*", "limit": "*"}]
+      - ["SocialMediaSpace", "search_posts", {"keyword": "*", "tags": "*", "limit": "*", "sort_by": "*"}]
       - ["SocialMediaSpace", "like_post", {"user_id": "@", "post_id": "*"}]
       - ["SocialMediaSpace", "like_post", {"user_id": "@", "post_id": "*"}]
       - ["SocialMediaSpace", "like_post", {"user_id": "@", "post_id": "*"}]
       - ["SocialMediaSpace", "observe_user", {"person_id": "@"}]
       - ["SocialMediaSpace", "comment_on_post", {"user_id": "@", "post_id": "*", "content": "*"}]
 
-  - instruction: "Analyze #QuietFocus engagement, check trending topics, search related posts, observe community state, then post and follow aligned users."
+  - instruction: "Search #QuietFocus engagement, search related posts, observe community state, then post and follow aligned users."
     expected_calls:
-      - ["SocialMediaSpace", "get_topic_analytics", {"topic": "*", "time_window_hours": "*"}]
-      - ["SocialMediaSpace", "get_trending_topics", {"time_window_hours": "*", "limit": "*"}]
+      - ["SocialMediaSpace", "search_posts", {"keyword": "*", "tags": ["QuietFocus"], "limit": "*", "sort_by": "*"}]
+      - ["SocialMediaSpace", "search_posts", {"keyword": "*", "tags": "*", "limit": "*", "sort_by": "*"}]
       - ["SocialMediaSpace", "search_posts", {"keyword": "*", "tags": "*", "limit": "*", "sort_by": "*"}]
       - ["SocialMediaSpace", "observe_user", {"person_id": "@"}]
       - ["SocialMediaSpace", "create_post", {"author_id": "@", "content": "*", "tags": "*"}]
       - ["SocialMediaSpace", "follow_user", {"follower_id": "@", "followee_id": "*"}]
       - ["SocialMediaSpace", "follow_user", {"follower_id": "@", "followee_id": "*"}]
 
-  - instruction: "Check trending topics, search wellness content, observe community state, then send a direct message to a friend."
+  - instruction: "Search wellness content and related community posts, observe community state, then send a direct message to a friend."
     expected_calls:
-      - ["SocialMediaSpace", "get_trending_topics", {"time_window_hours": "*", "limit": "*"}]
+      - ["SocialMediaSpace", "search_posts", {"keyword": "*", "tags": "*", "limit": "*", "sort_by": "*"}]
       - ["SocialMediaSpace", "search_posts", {"keyword": "*", "tags": "*", "limit": "*", "sort_by": "*"}]
       - ["SocialMediaSpace", "observe_user", {"person_id": "@"}]
       - ["SocialMediaSpace", "send_direct_message", {"from_user_id": "@", "to_user_id": "*", "content": "*"}]
@@ -549,11 +549,10 @@ instructions:
       - ["SocialMediaSpace", "send_group_message", {"group_id": "*", "from_user_id": "@", "content": "*"}]
       - ["SocialMediaSpace", "get_group_messages", {"group_id": "*", "limit": "*"}]
 
-  - instruction: "Search for mindfulness content, review a user's profile and posts, refresh the feed, then publish a new reflection."
+  - instruction: "Search for mindfulness content, review a user's recent post, refresh the feed, then publish a new reflection."
     expected_calls:
       - ["SocialMediaSpace", "search_posts", {"keyword": "*", "tags": "*", "limit": "*", "sort_by": "*"}]
-      - ["SocialMediaSpace", "get_user_profile", {"user_id": "*"}]
-      - ["SocialMediaSpace", "get_user_posts", {"user_id": "*", "limit": "*"}]
+      - ["SocialMediaSpace", "view_post", {"user_id": "@", "post_id": "*"}]
       - ["SocialMediaSpace", "refresh_feed", {"user_id": "@", "algorithm": "*", "limit": "*"}]
       - ["SocialMediaSpace", "create_post", {"author_id": "@", "content": "*", "tags": "*"}]
 
@@ -817,13 +816,13 @@ instructions:
       - ["SocialMediaSpace", "search_posts", {"keyword": "*", "tags": ["QuietFocus"], "limit": 20, "sort_by": "time"}]
 
   # 17. 移动+社交网络组合
-  - instruction: "Check current location, scan nearby facilities, drive toward work, then refresh the feed and check trending topics."
+  - instruction: "Check current location, scan nearby facilities, drive toward work, then refresh the feed and search related posts."
     expected_calls:
       - ["MobilitySpace", "get_person", {"person_id": "@"}]
       - ["MobilitySpace", "find_nearby_pois", {"x": "*", "y": "*", "category": "*", "radius": "*"}]
       - ["MobilitySpace", "move_to", {"person_id": "@", "aoi_id_or_poi_id": "*", "mode": "driving"}]
       - ["SocialMediaSpace", "refresh_feed", {"user_id": "@", "algorithm": "*", "limit": "*"}]
-      - ["SocialMediaSpace", "get_trending_topics", {"time_window_hours": "*", "limit": "*"}]
+      - ["SocialMediaSpace", "search_posts", {"keyword": "*", "tags": "*", "limit": "*", "sort_by": "*"}]
 
   - instruction: "Check location, find nearby restaurants, walk to one, then search for dining-related posts."
     expected_calls:
@@ -833,7 +832,7 @@ instructions:
       - ["SocialMediaSpace", "search_posts", {"keyword": "*", "tags": "*", "limit": "*", "sort_by": "*"}]
       - ["SocialMediaSpace", "search_posts", {"keyword": "*", "tags": "*", "limit": "*", "sort_by": "*"}]
 
-  - instruction: "Check location, find nearby workplaces, move to work, refresh the feed, search posts, then follow a user and view their profile."
+  - instruction: "Check location, find nearby workplaces, move to work, refresh the feed, search posts, then follow a user and view one of their posts."
     expected_calls:
       - ["MobilitySpace", "get_person", {"person_id": "@"}]
       - ["MobilitySpace", "find_nearby_pois", {"x": "*", "y": "*", "category": "*", "radius": "*"}]
@@ -841,7 +840,7 @@ instructions:
       - ["SocialMediaSpace", "refresh_feed", {"user_id": "@", "algorithm": "*", "limit": "*"}]
       - ["SocialMediaSpace", "search_posts", {"keyword": "*", "tags": "*", "limit": "*", "sort_by": "*"}]
       - ["SocialMediaSpace", "follow_user", {"follower_id": "@", "followee_id": "*"}]
-      - ["SocialMediaSpace", "get_user_profile", {"user_id": "*"}]
+      - ["SocialMediaSpace", "view_post", {"user_id": "@", "post_id": "*"}]
 
   - instruction: "Check current location, walk to a destination, search for commute-related posts, view one, then comment."
     expected_calls:
@@ -851,12 +850,12 @@ instructions:
       - ["SocialMediaSpace", "view_post", {"user_id": "@", "post_id": "*"}]
       - ["SocialMediaSpace", "comment_on_post", {"user_id": "@", "post_id": "*", "content": "*"}]
 
-  - instruction: "Check current location, explore nearby POIs, move to a selected spot, then view trending topics and refresh the feed."
+  - instruction: "Check current location, explore nearby POIs, move to a selected spot, then search related posts and refresh the feed."
     expected_calls:
       - ["MobilitySpace", "get_person", {"person_id": "@"}]
       - ["MobilitySpace", "find_nearby_pois", {"x": "*", "y": "*", "category": "*", "radius": "*"}]
       - ["MobilitySpace", "move_to", {"person_id": "@", "aoi_id_or_poi_id": "*", "mode": "walking"}]
-      - ["SocialMediaSpace", "get_trending_topics", {"time_window_hours": "*", "limit": "*"}]
+      - ["SocialMediaSpace", "search_posts", {"keyword": "*", "tags": "*", "limit": "*", "sort_by": "*"}]
       - ["SocialMediaSpace", "refresh_feed", {"user_id": "@", "algorithm": "*", "limit": "*"}]
 
   - instruction: "Check location, move between work and home, observe community state, then send a direct message."
@@ -884,13 +883,13 @@ instructions:
       - ["SocialMediaSpace", "search_posts", {"keyword": "*", "tags": "*", "limit": "*", "sort_by": "*"}]
       - ["MobilitySpace", "move_to", {"person_id": "@", "aoi_id_or_poi_id": "*", "mode": "walking"}]
 
-  - instruction: "Check location, explore nearby POIs, move to a destination, create a travel post, view a profile, then refresh the feed."
+  - instruction: "Check location, explore nearby POIs, move to a destination, create a travel post, view a related post, then refresh the feed."
     expected_calls:
       - ["MobilitySpace", "get_person", {"person_id": "@"}]
       - ["MobilitySpace", "find_nearby_pois", {"x": "*", "y": "*", "category": "*", "radius": "*"}]
       - ["MobilitySpace", "move_to", {"person_id": "@", "aoi_id_or_poi_id": "*", "mode": "driving"}]
       - ["SocialMediaSpace", "create_post", {"author_id": "@", "content": "*", "tags": "*"}]
-      - ["SocialMediaSpace", "get_user_profile", {"user_id": "*"}]
+      - ["SocialMediaSpace", "view_post", {"user_id": "@", "post_id": "*"}]
       - ["SocialMediaSpace", "refresh_feed", {"user_id": "@", "algorithm": "*", "limit": "*"}]
 
   - instruction: "Check location, find nearby cafés, move to one, search posts about quiet places, like a post, observe community state, then send a message."

@@ -3,6 +3,8 @@
     "title": "SIM Settings Configuration",
     "description": "Configure the simulation environment settings for testing this hypothesis",
     "descriptionDetail": "Configure the agent classes and environment modules that will be used to test this hypothesis in the simulation experiment. These settings define the simulation environment for validating your research hypothesis.",
+    "custom": "Custom",
+    "builtin": "Built-in",
     "agentClasses": {
       "title": "Agent Classes",
       "description": "Select the agent classes that will participate in the simulation to test this hypothesis.",

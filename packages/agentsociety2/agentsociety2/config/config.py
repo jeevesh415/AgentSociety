@@ -1,11 +1,23 @@
-"""LLM configuration from environment variables for AgentSociety2"""
+"""LLM 配置（从环境变量读取）。
+
+该模块集中管理 AgentSociety2 的 LLM 相关配置，并提供若干便捷函数：
+
+- :class:`~agentsociety2.config.config.Config`：从环境变量读取各类 API Key / base_url / model name 等。
+- :func:`~agentsociety2.config.config.get_llm_router`：获取（并缓存）指定用途的 LiteLLM :class:`litellm.router.Router`。
+- :func:`~agentsociety2.config.config.get_llm_router_and_model`：同时返回 Router 与模型名。
+- :func:`~agentsociety2.config.config.get_model_name`：获取指定用途的模型名。
+- :func:`~agentsociety2.config.config.extract_json`：从 LLM 响应文本中提取 JSON 片段。
+
+.. important::
+   ``AGENTSOCIETY_LLM_API_KEY`` 与 ``AGENTSOCIETY_LLM_API_BASE`` 在模块导入时校验；未配置会直接抛出异常。
+"""
 
 from __future__ import annotations
 
 import os
 import re
 import uuid
-from typing import Literal, Optional
+from typing import Any, Literal, Optional
 from litellm.router import Router
 
 from agentsociety2.logger import get_logger, setup_litellm_logging
@@ -33,13 +45,29 @@ __all__ = [
 logger = get_logger()
 
 
+def _redact_router_config_for_log(obj: Any) -> Any:
+    if isinstance(obj, dict):
+        out: dict[str, Any] = {}
+        for k, v in obj.items():
+            if k == "api_key" and isinstance(v, str) and v:
+                out[k] = (v[:4] + "…") if len(v) > 4 else "****"
+            else:
+                out[k] = _redact_router_config_for_log(v)
+        return out
+    if isinstance(obj, list):
+        return [_redact_router_config_for_log(x) for x in obj]
+    return obj
+
+
 def _is_truthy(value: str) -> bool:
     return value.strip().lower() in {"1", "true", "yes", "on"}
 
 
 def _disable_mem0_telemetry_if_needed() -> None:
-    """
-    Force-disable mem0 telemetry capture to avoid per-call Posthog client creation.
+    """必要时强制禁用 mem0 遥测。
+
+    避免上游版本在每次调用时创建 Posthog client，导致长仿真中后台线程过多。
+    若用户显式设置 ``MEM0_TELEMETRY=true`` 则尊重用户配置，不做覆盖。
     """
     if _is_truthy(os.getenv("MEM0_TELEMETRY", "False")):
         return
@@ -57,28 +85,18 @@ _litellm_logging_initialized = False
 
 
 class Config:
-    """
-    Configuration from environment variables for AgentSociety2.
+    """AgentSociety2 配置（环境变量来源）。
 
-    This class manages all configuration settings for the AgentSociety2 framework,
-    including LLM API credentials, model selections, and system paths. All settings
-    can be configured via environment variables with sensible defaults.
+    该类以“类属性”的形式暴露配置项，便于在不实例化的情况下读取。
 
-    Environment Variables:
-        AGENTSOCIETY_HOME_DIR: Base directory for storing agent data and memories
-        AGENTSOCIETY_LLM_API_KEY: API key for the default LLM service
-        AGENTSOCIETY_LLM_API_BASE: Base URL for the default LLM API endpoint
-        AGENTSOCIETY_LLM_MODEL: Model name for the default LLM
-        AGENTSOCIETY_CODER_LLM_API_KEY: API key for code generation LLM (falls back to LLM_API_KEY)
-        AGENTSOCIETY_CODER_LLM_API_BASE: Base URL for code generation LLM API
-        AGENTSOCIETY_CODER_LLM_MODEL: Model name for code generation tasks
-        AGENTSOCIETY_NANO_LLM_API_KEY: API key for high-frequency operations LLM (falls back to LLM_API_KEY)
-        AGENTSOCIETY_NANO_LLM_API_BASE: Base URL for nano LLM API
-        AGENTSOCIETY_NANO_LLM_MODEL: Model name for high-frequency/low-latency operations
-        AGENTSOCIETY_EMBEDDING_API_KEY: API key for embedding model (falls back to LLM_API_KEY)
-        AGENTSOCIETY_EMBEDDING_API_BASE: Base URL for embedding API
-        AGENTSOCIETY_EMBEDDING_MODEL: Model name for text embeddings
-        AGENTSOCIETY_EMBEDDING_DIMS: Dimensionality of embedding vectors
+    主要环境变量（节选）：
+
+    - ``AGENTSOCIETY_HOME_DIR``：数据目录
+    - ``AGENTSOCIETY_LLM_API_KEY`` / ``AGENTSOCIETY_LLM_API_BASE`` / ``AGENTSOCIETY_LLM_MODEL``：默认模型配置
+    - ``AGENTSOCIETY_CODER_LLM_*``：代码生成模型配置
+    - ``AGENTSOCIETY_NANO_LLM_*``：高频/低延迟模型配置
+    - ``AGENTSOCIETY_ANALYSIS_LLM_*``：分析写作模型配置
+    - ``AGENTSOCIETY_EMBEDDING_*``：embedding 配置
     """
 
     HOME_DIR: str = os.getenv("AGENTSOCIETY_HOME_DIR", "./agentsociety_data")
@@ -224,6 +242,51 @@ class Config:
     you might choose a smaller or faster model for these operations to reduce response time.
     """
 
+    # Analysis LLM settings
+    # These are optimized for data analysis, insight generation, and report writing.
+
+    ANALYSIS_LLM_API_KEY: Optional[str] = (
+        os.getenv("AGENTSOCIETY_ANALYSIS_LLM_API_KEY") or LLM_API_KEY
+    )
+    """
+    API key for the analysis LLM service.
+
+    Environment variable: AGENTSOCIETY_ANALYSIS_LLM_API_KEY
+    Default: Falls back to LLM_API_KEY if not set
+
+    This key is used specifically for data analysis, insight generation, and report
+    writing tasks. Setting a separate key allows you to use a more capable model
+    for these complex reasoning tasks.
+    """
+
+    ANALYSIS_LLM_API_BASE: str = (
+        os.getenv("AGENTSOCIETY_ANALYSIS_LLM_API_BASE") or LLM_API_BASE
+    )
+    """
+    Base URL endpoint for the analysis LLM API.
+
+    Environment variable: AGENTSOCIETY_ANALYSIS_LLM_API_BASE
+    Default: Falls back to LLM_API_BASE if not set
+
+    Allows you to use a different API endpoint specifically for analysis tasks.
+    This is useful if you want to route analysis requests to a more capable model
+    or a different service.
+    """
+
+    ANALYSIS_LLM_MODEL: str = os.getenv(
+        "AGENTSOCIETY_ANALYSIS_LLM_MODEL", "qwen3-next-80b-a3b-instruct"
+    )
+    """
+    Model identifier for data analysis and report generation tasks.
+
+    Environment variable: AGENTSOCIETY_ANALYSIS_LLM_MODEL
+    Default: "qwen3-next-80b-a3b-instruct"
+
+    This model is specifically used for data analysis, insight generation,
+    visualization planning, and report writing. Choose a model with strong
+    reasoning and writing capabilities for best results.
+    """
+
     # Embedding model settings
     # These are used for converting text into vector embeddings for semantic search and similarity.
 
@@ -283,6 +346,17 @@ class Config:
 
     # Web Search API settings
 
+    LITERATURE_SEARCH_API_URL: str = (
+        os.getenv("LITERATURE_SEARCH_API_URL", "").strip()
+        or "http://localhost:8002/api/v1/search"
+    )
+    """
+    Base URL for the literature search service.
+
+    Environment variable: LITERATURE_SEARCH_API_URL
+    Default: "http://localhost:8002/api/v1/search"
+    """
+
     WEB_SEARCH_API_URL: str = os.getenv("WEB_SEARCH_API_URL", "").strip()
     """
     Base URL for the Web Search / MiroFlow MCP HTTP endpoint.
@@ -341,16 +415,13 @@ class Config:
 
     @classmethod
     def get_router(
-        cls, model_type: Literal["default", "coder", "nano"] = "default"
+        cls, model_type: Literal["default", "coder", "nano", "analysis"] = "default"
     ) -> Router:
-        """
-        Get LLM router for specified model type
+        """获取指定用途的 LLM Router（不做全局缓存）。
 
-        Args:
-            model_type: One of "default", "coder", "nano"
-
-        Returns:
-            Router instance
+        :param model_type: ``default`` / ``coder`` / ``nano`` / ``analysis``。
+        :returns: LiteLLM :class:`litellm.router.Router` 实例。
+        :raises ValueError: 当所需 API key 未配置时抛出。
         """
         global _litellm_logging_initialized
 
@@ -359,7 +430,80 @@ class Config:
             setup_litellm_logging()
             _litellm_logging_initialized = True
 
-        if model_type == "coder":
+        if model_type == "analysis":
+            # Analysis model with fallback to default, then nano
+            analysis_api_key = cls.ANALYSIS_LLM_API_KEY
+            analysis_api_base = cls.ANALYSIS_LLM_API_BASE
+            analysis_model = cls.ANALYSIS_LLM_MODEL
+
+            default_api_key = cls.LLM_API_KEY
+            default_api_base = cls.LLM_API_BASE
+            default_model = cls.LLM_MODEL
+
+            nano_api_key = cls.NANO_LLM_API_KEY
+            nano_api_base = cls.NANO_LLM_API_BASE
+            nano_model = cls.NANO_LLM_MODEL
+
+            if not analysis_api_key:
+                raise ValueError(
+                    "API key not configured for analysis model. "
+                    "Set AGENTSOCIETY_ANALYSIS_LLM_API_KEY or AGENTSOCIETY_LLM_API_KEY"
+                )
+            if not default_api_key:
+                raise ValueError(
+                    "API key not configured for default model (fallback). "
+                    "Set AGENTSOCIETY_LLM_API_KEY"
+                )
+            if not nano_api_key:
+                raise ValueError(
+                    "API key not configured for nano model (fallback). "
+                    "Set AGENTSOCIETY_NANO_LLM_API_KEY or AGENTSOCIETY_LLM_API_KEY"
+                )
+
+            # Build model_list with all three models
+            model_list = [
+                {
+                    "model_name": analysis_model,
+                    "litellm_params": {
+                        "model": f"openai/{analysis_model}",
+                        "api_key": analysis_api_key,
+                        "api_base": analysis_api_base,
+                    },
+                },
+                {
+                    "model_name": default_model,
+                    "litellm_params": {
+                        "model": f"openai/{default_model}",
+                        "api_key": default_api_key,
+                        "api_base": default_api_base,
+                    },
+                },
+                {
+                    "model_name": nano_model,
+                    "litellm_params": {
+                        "model": f"openai/{nano_model}",
+                        "api_key": nano_api_key,
+                        "api_base": nano_api_base,
+                    },
+                },
+            ]
+
+            # Configure fallback chain: analysis -> default -> nano
+            fallbacks = [{analysis_model: [default_model, nano_model]}]
+
+            logger.debug(
+                "Model list for analysis (with fallbacks): %s",
+                _redact_router_config_for_log(model_list),
+            )
+            logger.debug("Fallbacks: %s", fallbacks)
+
+            return Router(
+                model_list=model_list,
+                fallbacks=fallbacks,
+                cache_responses=True,
+                num_retries=10,
+            )
+        elif model_type == "coder":
             # Coder model with fallback to default, then nano
             coder_api_key = cls.CODER_LLM_API_KEY
             coder_api_base = cls.CODER_LLM_API_BASE
@@ -421,8 +565,11 @@ class Config:
             # fallbacks should be a list of dicts, where each dict maps primary model to fallback models
             fallbacks = [{coder_model: [default_model, nano_model]}]
 
-            print(f"Model list for coder (with fallbacks): {model_list}")
-            print(f"Fallbacks: {fallbacks}")
+            logger.debug(
+                "Model list for coder (with fallbacks): %s",
+                _redact_router_config_for_log(model_list),
+            )
+            logger.debug("Fallbacks: %s", fallbacks)
 
             return Router(
                 model_list=model_list,
@@ -474,8 +621,11 @@ class Config:
             # Configure fallback chain: default -> nano
             fallbacks = [{default_model: [nano_model]}]
 
-            print(f"Model list for default (with fallbacks): {model_list}")
-            print(f"Fallbacks: {fallbacks}")
+            logger.debug(
+                "Model list for default (with fallbacks): %s",
+                _redact_router_config_for_log(model_list),
+            )
+            logger.debug("Fallbacks: %s", fallbacks)
 
             return Router(
                 model_list=model_list,
@@ -505,7 +655,7 @@ class Config:
                 },
             ]
             logger.info("Nano LLM configured: model=%s api_base=%s", model, api_base)
-            print(model_list)
+            logger.debug("Nano model_list: %s", _redact_router_config_for_log(model_list))
             return Router(
                 model_list=model_list,
                 cache_responses=True,
@@ -513,8 +663,50 @@ class Config:
             )
 
     @classmethod
+    def get_literature_search_api_url(cls) -> str:
+        """Get literature search API URL, preferring the latest environment value."""
+        return (
+            os.getenv("LITERATURE_SEARCH_API_URL", "").strip()
+            or cls.LITERATURE_SEARCH_API_URL
+        )
+
+    @classmethod
+    def get_web_search_api_url(cls) -> str:
+        """Get web search MCP URL, preferring the latest environment value."""
+        return os.getenv("WEB_SEARCH_API_URL", "").strip() or cls.WEB_SEARCH_API_URL
+
+    @classmethod
+    def get_web_search_api_token(cls) -> str:
+        """Get web search MCP token, preferring the latest environment value."""
+        return (
+            os.getenv("WEB_SEARCH_API_TOKEN", "").strip()
+            or cls.WEB_SEARCH_API_TOKEN
+        )
+
+    @classmethod
+    def get_miroflow_default_llm(cls) -> str:
+        """Get default MiroFlow LLM, preferring the latest environment value."""
+        return (
+            os.getenv("MIROFLOW_DEFAULT_LLM", "").strip()
+            or cls.MIROFLOW_DEFAULT_LLM
+        )
+
+    @classmethod
+    def get_miroflow_default_agent(cls) -> str:
+        """Get default MiroFlow agent, preferring the latest environment value."""
+        return (
+            os.getenv("MIROFLOW_DEFAULT_AGENT", "").strip()
+            or cls.MIROFLOW_DEFAULT_AGENT
+        )
+
+    @classmethod
+    def get_easypaper_api_url(cls) -> str:
+        """Get EasyPaper API URL, preferring the latest environment value."""
+        return os.getenv("EASYPAPER_API_URL", "").strip() or cls.EASYPAPER_API_URL
+
+    @classmethod
     def get_default_router(cls) -> Router:
-        """Get default LLM router"""
+        """:returns: 默认用途的 LLM Router。"""
         return cls.get_router("default")
 
     @classmethod
@@ -573,21 +765,22 @@ if not Config.LLM_API_BASE:
 _default_router: Optional[Router] = None
 _coder_router: Optional[Router] = None
 _nano_router: Optional[Router] = None
+_analysis_router: Optional[Router] = None
 
 
 def get_llm_router(model_type: str = "default") -> Router:
+    """获取（并缓存）指定用途的 LLM Router。
+
+    :param model_type: ``default`` / ``coder`` / ``nano`` / ``analysis``。
+    :returns: LiteLLM :class:`litellm.router.Router` 实例（进程内单例缓存）。
     """
-    Get LLM router (cached)
+    global _default_router, _coder_router, _nano_router, _analysis_router
 
-    Args:
-        model_type: One of "default", "coder", "nano"
-
-    Returns:
-        Router instance
-    """
-    global _default_router, _coder_router, _nano_router
-
-    if model_type == "coder":
+    if model_type == "analysis":
+        if _analysis_router is None:
+            _analysis_router = Config.get_router("analysis")
+        return _analysis_router
+    elif model_type == "coder":
         if _coder_router is None:
             _coder_router = Config.get_router("coder")
         return _coder_router
@@ -602,16 +795,14 @@ def get_llm_router(model_type: str = "default") -> Router:
 
 
 def get_model_name(model_type: str = "default") -> str:
-    """
-    Get model name for specified model type
+    """获取指定用途的模型名。
 
-    Args:
-        model_type: One of "default", "coder", "nano"
-
-    Returns:
-        Model name string
+    :param model_type: ``default`` / ``coder`` / ``nano`` / ``analysis``。
+    :returns: 模型名字符串。
     """
-    if model_type == "coder":
+    if model_type == "analysis":
+        return Config.ANALYSIS_LLM_MODEL
+    elif model_type == "coder":
         return Config.CODER_LLM_MODEL
     elif model_type == "nano":
         return Config.NANO_LLM_MODEL
@@ -620,14 +811,10 @@ def get_model_name(model_type: str = "default") -> str:
 
 
 def get_llm_router_and_model(model_type: str = "default") -> tuple[Router, str]:
-    """
-    Get LLM router and model name (cached)
+    """同时获取 Router 与模型名（Router 使用缓存）。
 
-    Args:
-        model_type: One of "default", "coder", "nano"
-
-    Returns:
-        Tuple of (Router instance, model_name)
+    :param model_type: ``default`` / ``coder`` / ``nano`` / ``analysis``。
+    :returns: ``(router, model_name)``。
     """
     router = get_llm_router(model_type)
     model_name = get_model_name(model_type)
@@ -635,31 +822,12 @@ def get_llm_router_and_model(model_type: str = "default") -> tuple[Router, str]:
 
 
 def extract_json(text: str) -> str | None:
-    """
-    Robustly extract JSON text from content that may contain other text.
+    """从文本中尽量稳健地提取 JSON 字符串片段。
 
-    This function finds and extracts JSON objects or arrays from text that may
-    have surrounding non-JSON content. It handles nested structures and correctly
-    tracks string boundaries to find the matching closing bracket/brace.
+    该函数只做“截取”，不负责修复不合法 JSON；若需要修复，请配合 ``json_repair`` 等工具。
 
-    Note: This function only extracts the JSON text content. For repairing
-    malformed JSON, use json_repair or similar libraries.
-
-    Args:
-        text: The input text that may contain JSON.
-
-    Returns:
-        The extracted JSON string if found, None otherwise.
-
-    Examples:
-        >>> extract_json("Some text {\"key\": \"value\"} more text")
-        '{\"key\": \"value\"}'
-
-        >>> extract_json("```json\n{\"a\": 1}\n```")
-        '{\"a\": 1}'
-
-        >>> extract_json("Response: {'key': 'value'}")
-        "{'key': 'value'}"
+    :param text: 可能包含 JSON 的文本（例如 LLM 输出，可能夹杂 Markdown code fences）。
+    :returns: 提取出的 JSON 文本；若未找到则返回 ``None``。
     """
     if not text:
         return None

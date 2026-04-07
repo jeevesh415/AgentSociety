@@ -11,6 +11,7 @@ RUN npm install -g @vscode/vsce
 # Copy extension dependency files first for better caching
 WORKDIR /app/extension
 COPY ./extension/package.json ./extension/package-lock.json ./
+COPY ./extension/.npmrc ./
 RUN npm ci
 
 # Copy extension source code and config files
@@ -79,5 +80,14 @@ ENV LC_ALL=C.UTF-8
 
 # Install pipx and ensure path is set up
 RUN uv pip install --system pipx && pipx ensurepath
+
+# ==================== Node.js + Claude Code ====================
+RUN NODE_VERSION="22.14.0" \
+    && curl -fsSLO https://nodejs.org/dist/v${NODE_VERSION}/node-v${NODE_VERSION}-linux-x64.tar.xz \
+    && tar -C /usr/local -xJf node-v*.tar.xz --strip-components=1 \
+    && rm node-v*.tar.xz \
+    && npm install -g @anthropic-ai/claude-code \
+    && npm cache clean --force \
+    && rm -rf ~/.npm
 
 USER coder

@@ -1,5 +1,5 @@
 """API routers"""
 
-from . import prefill_params, experiments, replay, custom
+from . import prefill_params, experiments, replay, custom, modules, agent_skills
 
-__all__ = ["prefill_params", "experiments", "replay", "custom"]
+__all__ = ["prefill_params", "experiments", "replay", "custom", "modules", "agent_skills"]

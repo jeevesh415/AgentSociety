@@ -1,17 +1,22 @@
 """
-分析模块通用工具。分析相关 LLM 输出统一使用 XML 格式解析；
-为 generate_paper 工具提供 parse_llm_json_response。
+分析模块工具：路径、`instruction_md` 发现、SQLite schema、LLM XML/报告解析。
+
+行为与目录约定见同包 `README.md`。
 """
 
 import re
 import sqlite3
 import xml.etree.ElementTree as ET
+from dataclasses import dataclass
 from pathlib import Path
 from typing import Any, Awaitable, Callable, Dict, List, Optional, TypeVar, Type
 
 import json_repair
 from pydantic import BaseModel
-from xenon import TrustLevel, repair_xml_safe
+from agentsociety2.storage.replay_metadata import (
+    COLUMN_CATALOG_TABLE,
+    DATASET_CATALOG_TABLE,
+)
 
 from .models import (
     DIR_ARTIFACTS,
@@ -43,8 +48,19 @@ class XmlParseError(Exception):
         self.raw_content = raw_content
 
 
-_SKILLS_DIR = Path(__file__).resolve().parent / "skills"
+_INSTRUCTION_MD_DIR = Path(__file__).resolve().parent / "instruction_md"
 T = TypeVar("T", bound=BaseModel)
+
+
+@dataclass(frozen=True)
+class AnalysisSkillMeta:
+    """`instruction_md/*.md` 条目的元数据（供按名筛选并注入 LLM 系统上下文）。"""
+
+    name: str
+    priority: int
+    description: str
+    path: Path
+    required: bool = False  # If True, always loaded regardless of selection
 
 
 def _sanitize_id(raw: str) -> str:
@@ -102,14 +118,129 @@ def presentation_paths(
     )
 
 
-def get_analysis_skills() -> str:
-    """从 skills/ 目录按文件名顺序加载所有 .md 技能文件。"""
+def _parse_skill_frontmatter(path: Path) -> Dict[str, Any]:
+    """Parse YAML-like frontmatter from markdown skill files.
+
+    Supported keys: name, priority, description, required.
+    """
+    if not path.exists():
+        return {}
+    try:
+        content = path.read_text(encoding="utf-8")
+    except Exception:
+        return {}
+
+    lines = content.splitlines()
+    if len(lines) < 3 or lines[0].strip() != "---":
+        return {}
+
+    result: Dict[str, Any] = {}
+    for line in lines[1:]:
+        s = line.strip()
+        if s == "---":
+            break
+        if not s or ":" not in s:
+            continue
+        key, value = s.split(":", 1)
+        k = key.strip()
+        v = value.strip().strip('"').strip("'")
+        if k == "priority":
+            try:
+                result[k] = int(v)
+            except ValueError:
+                continue
+        elif k == "required":
+            result[k] = v.lower() in ("true", "yes", "1")
+        else:
+            result[k] = v
+    return result
+
+
+def _strip_md_frontmatter(text: str) -> str:
+    """去掉 YAML frontmatter，只保留注入 LLM 的正文。"""
+    lines = text.strip().splitlines()
+    if not lines or lines[0].strip() != "---":
+        return text.strip()
+    for i in range(1, len(lines)):
+        if lines[i].strip() == "---":
+            return "\n".join(lines[i + 1 :]).strip()
+    return text.strip()
+
+
+def list_analysis_skills() -> List[AnalysisSkillMeta]:
+    """扫描 `instruction_md/` 下 Markdown，返回元数据（不读取正文）。"""
+    result: List[AnalysisSkillMeta] = []
+    if not _INSTRUCTION_MD_DIR.exists():
+        return result
+
+    for idx, path in enumerate(sorted(_INSTRUCTION_MD_DIR.glob("*.md"))):
+        meta = _parse_skill_frontmatter(path)
+        name = meta.get("name") or path.stem
+        priority = int(meta.get("priority", idx + 1))
+        description = meta.get("description", "")
+        required = meta.get("required", False)
+        result.append(
+            AnalysisSkillMeta(
+                name=name,
+                priority=priority,
+                description=description,
+                path=path,
+                required=required,
+            )
+        )
+
+    result.sort(key=lambda x: (x.priority, x.name))
+    return result
+
+
+def get_analysis_skills(
+    selected_names: Optional[List[str]] = None,
+    strict_selection: bool = True,
+) -> str:
+    """加载选中的 `instruction_md/*.md` 全文并拼接为 LLM 上下文片段。
+
+    strict_selection=True：仅加载 required 条目 + 显式点名的条目。
+    标记为 required 的片段始终会加载。
+    """
+    metas = list_analysis_skills()
+    if not metas:
+        return ""
+
+    # Always include required skills
+    required_skills = [m for m in metas if m.required]
+    selected_set = set(selected_names or [])
+
+    if strict_selection:
+        # In strict mode: load required + explicitly selected
+        targets = required_skills + [
+            m for m in metas if m.name in selected_set and not m.required
+        ]
+    else:
+        # In non-strict mode: load all if no selection, or required + selected
+        if not selected_set:
+            targets = metas
+        else:
+            targets = required_skills + [
+                m for m in metas if m.name in selected_set and not m.required
+            ]
+
+    # Remove duplicates while preserving order
+    seen = set()
+    unique_targets: List[AnalysisSkillMeta] = []
+    for m in targets:
+        if m.name not in seen:
+            seen.add(m.name)
+            unique_targets.append(m)
+
+    # Sort by priority
+    unique_targets.sort(key=lambda x: (x.priority, x.name))
+
     parts: List[str] = []
-    if _SKILLS_DIR.exists():
-        for p in sorted(_SKILLS_DIR.glob("*.md")):
-            txt = p.read_text(encoding="utf-8").strip()
-            if txt:
-                parts.append(txt)
+    for m in unique_targets:
+        raw = m.path.read_text(encoding="utf-8")
+        body = _strip_md_frontmatter(raw).strip()
+        if body:
+            parts.append(body)
     return "\n\n---\n\n".join(parts).strip()
 
 
@@ -153,24 +284,30 @@ def _xml_element_to_value(el: ET.Element) -> Any:
 
 
 def _parse_xml_to_root(xml_str: str) -> ET.Element:
-    """解析 XML 字符串为 Element，失败时尝试用 xenon 修复后再解析。失败则抛出 XmlParseError。"""
+    """解析 XML 字符串为 Element，使用 elemental-xenon 修复 LLM 生成的畸形 XML。"""
+    from xenon import repair_xml_safe, TrustLevel
+    
+    # 使用 xenon 修复 XML（专为 LLM 输出设计）
+    repaired = repair_xml_safe(xml_str, trust=TrustLevel.UNTRUSTED)
+    
     try:
-        return ET.fromstring(xml_str)
-    except ET.ParseError:
-        try:
-            repaired = repair_xml_safe(xml_str, trust=TrustLevel.UNTRUSTED)
-            return ET.fromstring(repaired)
-        except Exception as e:
-            raise XmlParseError(
-                f"XML parse failed after repair attempt: {e}", raw_content=xml_str
-            ) from e
+        return ET.fromstring(repaired)
+    except ET.ParseError as e:
+        raise XmlParseError(f"XML parse failed even after repair: {e}", raw_content=repaired) from e
 
 
 def parse_llm_xml_response(content: str, root_tag: str = "result") -> Dict[str, Any]:
-    """
-    解析 LLM 返回的 XML，转为 dict。
-    解析失败抛出 XmlParseError，供调用方捕获并触发 LLM 重试。
-    root_tag: 根标签名，用于提取顶层 dict（若根为 <judgment>，则取其子节点为 dict）。
+    """解析 LLM 返回的 XML 为字典。
+
+    Args:
+        content: LLM 返回的原始内容（可包含 ```xml 代码块）
+        root_tag: 根标签名，用于提取顶层 dict
+
+    Returns:
+        解析后的字典
+
+    Raises:
+        XmlParseError: XML 解析失败
     """
     xml_str = _extract_xml_from_content(content)
     if not xml_str:
@@ -218,25 +355,37 @@ def _take_json_string(content: str) -> str:
 
 
 def parse_llm_json_response(content: str) -> Dict[str, Any]:
-    """解析 LLM 返回的 JSON，约定为单段 JSON 或 ```json ... ```。返回 dict，失败返回 {}。"""
+    """解析 LLM 返回的 JSON，约定为单段 JSON 或 ```json ... ```。
+
+    - 提取不到 JSON 或 JSON 根不是 object：抛出 ValueError。
+    """
     json_str = _take_json_string(content)
     if not json_str:
-        return {}
+        raise ValueError("No JSON content extracted")
     data = json_repair.loads(json_str)
-    return data if isinstance(data, dict) else {}
+    if not isinstance(data, dict):
+        raise ValueError("JSON root must be an object")
+    return data
 
 
 def parse_llm_report_response(content: str) -> Dict[str, str]:
-    """
-    解析报告类 LLM 输出，仅支持 XML 格式。
-    格式：<report><markdown><![CDATA[...]]></markdown><html><![CDATA[...]]></html></report>
-    CDATA 便于嵌入 HTML，无需转义。
-    解析失败（含 xenon 修复后仍失败）则抛出 XmlParseError，由调用方触发 LLM 重试。
+    """解析报告类 LLM 输出（XML 格式，双语）。
+
+    格式::
+        <report>
+          <markdown_zh><![CDATA[...]]></markdown_zh>
+          <html_zh><![CDATA[...]]></html_zh>
+          <markdown_en><![CDATA[...]]></markdown_en>
+          <html_en><![CDATA[...]]></html_en>
+        </report>
+
+    Returns dict with keys: markdown_zh, html_zh, markdown_en, html_en, markdown, html.
+
+    - 缺少必须的字段（至少 markdown_zh/markdown_en + html_zh/html_en）：抛出 XmlParseError。
     """
     raw = (content or "").strip()
     if not raw:
         raise XmlParseError("Empty report content", raw_content=content)
-    # 从代码块提取 XML（若 LLM 包在 ```xml 中）
     xml_str = raw
     if "```" in raw:
         for part in raw.split("```"):
@@ -245,45 +394,141 @@ def parse_llm_report_response(content: str) -> Dict[str, str]:
                 xml_str = s
                 break
     root = _parse_xml_to_root(xml_str)
-    md_el = root.find(".//markdown")
-    if md_el is None:
-        md_el = root.find("markdown")
-    html_el = root.find(".//html")
-    if html_el is None:
-        html_el = root.find("html")
-    md = "".join((md_el.itertext() if md_el is not None else []))
-    html = "".join((html_el.itertext() if html_el is not None else []))
-    return {"markdown": md.strip(), "html": html.strip()}
+
+    def _text(tag: str) -> str:
+        el = root.find(f".//{tag}")
+        if el is None:
+            el = root.find(tag)
+        return "".join(el.itertext()).strip() if el is not None else ""
+
+    md_zh = _text("markdown_zh")
+    html_zh = _text("html_zh")
+    md_en = _text("markdown_en")
+    html_en = _text("html_en")
+
+    if not md_zh and not md_en:
+        raise XmlParseError(
+            "Report must include markdown_zh or markdown_en",
+            raw_content=content
+        )
+    if not html_zh and not html_en:
+        raise XmlParseError(
+            "Report must include html_zh or html_en",
+            raw_content=content
+        )
+
+    return {
+        "markdown_zh": md_zh,
+        "html_zh": html_zh,
+        "markdown_en": md_en,
+        "html_en": html_en,
+        "markdown": md_zh or md_en,
+        "html": html_zh or html_en,
+    }
 
 
 # ---------- 先读结构再处理：DB schema 与实验文件 ----------
 
 
+def _quote_identifier(name: str) -> str:
+    """安全引用 SQLite 标识符（表名、列名）。"""
+    return '"' + str(name).replace('"', '""') + '"'
+
+
 def extract_database_schema(db_path: Path) -> Dict[str, Any]:
-    """提取 SQLite 表结构；先查 sqlite_master 再按表取 PRAGMA。"""
+    """Extract replay schema from metadata catalog tables."""
     if not db_path or not db_path.exists():
         return {}
     conn = sqlite3.connect(str(db_path))
     cursor = conn.cursor()
-    cursor.execute(
-        "SELECT name FROM sqlite_master WHERE type='table' AND name NOT LIKE 'sqlite_%'"
-    )
-    tables = cursor.fetchall()
-    schema = {}
-    for (table_name,) in tables:
-        cursor.execute(f"PRAGMA table_info({table_name})")
-        columns = cursor.fetchall()
-        schema[table_name] = [
-            {
-                "name": col[1],
-                "type": col[2],
-                "notnull": bool(col[3]),
-                "pk": bool(col[5]),
+    try:
+        cursor.execute(
+            "SELECT name FROM sqlite_master WHERE type='table' AND name NOT LIKE 'sqlite_%'"
+        )
+        tables = {row[0] for row in cursor.fetchall()}
+        if DATASET_CATALOG_TABLE not in tables or COLUMN_CATALOG_TABLE not in tables:
+            # Fallback to PRAGMA-based schema extraction when catalog tables are absent
+            schema = {}
+            for table_name in tables:
+                cursor.execute(f"PRAGMA table_info({_quote_identifier(table_name)})")
+                columns = cursor.fetchall()
+                schema[table_name] = [
+                    {
+                        "name": col[1],
+                        "type": col[2],
+                        "notnull": bool(col[3]),
+                        "pk": bool(col[5]),
+                    }
+                    for col in columns
+                ]
+            conn.close()
+            return schema
+
+        cursor.execute(
+            f"SELECT dataset_id, table_name, kind, title, description, entity_key, step_key, time_key, default_order_json, capabilities_json "
+            f"FROM {DATASET_CATALOG_TABLE} ORDER BY dataset_id"
+        )
+        dataset_rows = cursor.fetchall()
+        dataset_meta_by_table: Dict[str, Dict[str, Any]] = {}
+        for row in dataset_rows:
+            default_order = json_repair.loads(row[8]) if row[8] else []
+            capabilities = json_repair.loads(row[9]) if row[9] else []
+            dataset_meta_by_table[row[1]] = {
+                "dataset_id": row[0],
+                "kind": row[2],
+                "title": row[3],
+                "description": row[4],
+                "entity_key": row[5],
+                "step_key": row[6],
+                "time_key": row[7],
+                "default_order": default_order if isinstance(default_order, list) else [],
+                "capabilities": capabilities if isinstance(capabilities, list) else [],
             }
-            for col in columns
-        ]
-    conn.close()
-    return schema
+
+        cursor.execute(
+            f"SELECT dataset_id, column_name, sqlite_type, logical_type, analysis_role, title, description, unit, enum_json, example_json, nullable, tags_json "
+            f"FROM {COLUMN_CATALOG_TABLE} ORDER BY dataset_id, column_name"
+        )
+        column_rows = cursor.fetchall()
+        columns_by_dataset: Dict[str, List[Dict[str, Any]]] = {}
+        for row in column_rows:
+            enum_values = json_repair.loads(row[8]) if row[8] else None
+            example = json_repair.loads(row[9]) if row[9] else None
+            tags = json_repair.loads(row[11]) if row[11] else []
+            columns_by_dataset.setdefault(row[0], []).append(
+                {
+                    "name": row[1],
+                    "type": row[2],
+                    "logical_type": row[3],
+                    "analysis_role": row[4],
+                    "title": row[5],
+                    "description": row[6],
+                    "unit": row[7],
+                    "enum_values": enum_values,
+                    "example": example,
+                    "notnull": not bool(row[10]),
+                    "pk": False,
+                    "tags": tags if isinstance(tags, list) else [],
+                }
+            )
+
+        schema: Dict[str, Any] = {}
+        for table_name, meta in dataset_meta_by_table.items():
+            dataset_columns = columns_by_dataset.get(meta["dataset_id"], [])
+            pk_columns = {
+                key
+                for key in (meta.get("entity_key"), meta.get("step_key"))
+                if key
+            }
+            schema[table_name] = []
+            for column in dataset_columns:
+                column = dict(column)
+                column["pk"] = column["name"] in pk_columns
+                column["dataset"] = meta
+                schema[table_name].append(column)
+        return schema
+    finally:
+        conn.close()
 
 
 def format_database_schema_markdown(
@@ -291,23 +536,44 @@ def format_database_schema_markdown(
     include_row_counts: bool = False,
     db_path: Optional[Path] = None,
 ) -> str:
-    """将 schema 格式化为 Markdown，可选行数。"""
+    """将 replay metadata schema 格式化为 Markdown，可选行数。"""
     if not schema:
         return "Schema not available"
     lines = []
     for table_name, columns in schema.items():
-        lines.append(f"### Table: `{table_name}`")
+        dataset = columns[0].get("dataset") if columns else None
+        dataset_id = dataset.get("dataset_id") if isinstance(dataset, dict) else table_name
+        lines.append(f"### Dataset: `{dataset_id}`")
+        lines.append(f"- Table: `{table_name}`")
+        if isinstance(dataset, dict):
+            lines.append(f"- Kind: `{dataset.get('kind', '')}`")
+            capabilities = dataset.get("capabilities") or []
+            if capabilities:
+                lines.append(f"- Capabilities: {', '.join(f'`{cap}`' for cap in capabilities)}")
+            description = dataset.get("description")
+            if description:
+                lines.append(f"- Description: {description}")
         lines.append(f"Columns: {', '.join([col['name'] for col in columns])}")
         for col in columns:
             pk_marker = " (PRIMARY KEY)" if col.get("pk") else ""
-            lines.append(f"  - {col['name']} ({col['type']}){pk_marker}")
+            extras = []
+            if col.get("logical_type"):
+                extras.append(f"logical_type={col['logical_type']}")
+            if col.get("analysis_role"):
+                extras.append(f"analysis_role={col['analysis_role']}")
+            if col.get("unit"):
+                extras.append(f"unit={col['unit']}")
+            extra_text = f" [{' ; '.join(extras)}]" if extras else ""
+            lines.append(f"  - {col['name']} ({col['type']}){pk_marker}{extra_text}")
+            if col.get("description"):
+                lines.append(f"    description: {col['description']}")
         lines.append("")
     if include_row_counts and db_path:
         conn = sqlite3.connect(str(db_path))
         cursor = conn.cursor()
         lines.append("### Table Row Counts")
         for table_name in schema:
-            cursor.execute(f"SELECT COUNT(*) FROM {table_name}")
+            cursor.execute(f"SELECT COUNT(*) FROM {_quote_identifier(table_name)}")
             count = cursor.fetchone()[0]
             lines.append(f"- `{table_name}`: {count} rows")
         conn.close()

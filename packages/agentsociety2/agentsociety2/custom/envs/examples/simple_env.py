@@ -7,7 +7,6 @@
 from agentsociety2.env import EnvBase, tool
 from datetime import datetime
 from pydantic import BaseModel, Field
-from typing import Dict, Any
 
 
 class SimpleEnvConfig(BaseModel):

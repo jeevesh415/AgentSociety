@@ -8,11 +8,11 @@ from datetime import datetime
 # -- Project information -----------------------------------------------------
 # https://www.sphinx-doc.org/en/master/usage/configuration.html#project-information
 
-project = 'AgentSociety 2'
+project = "AgentSociety 2"
 copyright = f'{datetime.now().year}, FIBLAB'
 author = 'AgentSociety Team'
-release = '2.0.0'
-version = '2.0.0'
+release = "2.0.0"
+version = "2.0.0"
 
 # -- General configuration ---------------------------------------------------
 # https://www.sphinx-doc.org/en/master/usage/configuration.html#general-configuration
@@ -22,11 +22,29 @@ extensions = [
     'sphinx.ext.graphviz',
     'sphinx.ext.napoleon',
     'sphinx.ext.intersphinx',
+    'sphinx.ext.autodoc',      # 自动从代码生成 API 文档
+    'sphinx.ext.autosummary',  # 自动生成 API 摘要
+    'sphinx.ext.viewcode',     # 添加 [source] 链接
     'myst_parser',
 ]
 
 templates_path = ['_templates']
 exclude_patterns = ['_build', 'Thumbs.db', '.DS_Store']
+
+# -- Autodoc configuration ---------------------------------------------------
+autodoc_default_options = {
+    'members': True,
+    'member-order': 'bysource',
+    'special-members': '__init__',
+    'undoc-members': True,
+    'exclude-members': '__weakref__',
+}
+autodoc_typehints = 'description'
+autodoc_typehints_description_target = 'documented'
+
+# -- Autosummary configuration -----------------------------------------------
+autosummary_generate = True
+autosummary_imported_members = True
 
 # The suffix(es) of source filenames.
 source_suffix = {
@@ -99,7 +117,7 @@ html_favicon = '_static/logo/square.png'
 
 intersphinx_mapping = {
     'python': ('https://docs.python.org/3', None),
-    'pydantic': ('https://docs.pydantic.dev/', None),
+    'pydantic': ('https://docs.pydantic.dev/latest/', None),
 }
 
 # -- Options for Napoleon -----------------------------------------------------

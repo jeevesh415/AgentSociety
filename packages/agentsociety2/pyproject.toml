@@ -4,7 +4,7 @@ build-backend = "hatchling.build"
 
 [project]
 name = "agentsociety2"
-version = "2.1.2"
+version = "2.1.3"
 description = "A modern, LLM-native agent simulation platform for social science research"
 readme = "README.md"
 requires-python = ">=3.11"
@@ -86,6 +86,10 @@ dependencies = [
     "pandas>=2.0.0",
     "ydata-profiling>=4.6.0",
     "sweetviz>=2.3.0",
+    "missingno>=0.5.0",
+    "networkx>=3.0",
+    "scipy>=1.10.0",
+    "statsmodels>=0.14.0",
 ]
 
 [project.scripts]
