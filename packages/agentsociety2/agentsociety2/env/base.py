@@ -733,36 +733,115 @@ It contains no functions or methods.
         if self._replay_writer is None or self._state_tables_registered:
             return
 
-        from agentsociety2.storage import ColumnDef, TableSchema
+        from agentsociety2.storage import ColumnDef, ReplayDatasetSpec, TableSchema
 
         prefix = self._state_table_prefix
 
         if self._agent_state_columns:
+            table_name = f"{prefix}_agent_state"
+            columns = [
+                ColumnDef(
+                    "agent_id",
+                    "INTEGER",
+                    nullable=False,
+                    logical_type="identifier",
+                    analysis_role="identifier",
+                    description="Agent identifier for this snapshot row.",
+                ),
+                ColumnDef(
+                    "step",
+                    "INTEGER",
+                    nullable=False,
+                    logical_type="step",
+                    analysis_role="timestamp",
+                    description="Simulation step for this snapshot row.",
+                ),
+                ColumnDef(
+                    "t",
+                    "TIMESTAMP",
+                    nullable=False,
+                    logical_type="timestamp",
+                    analysis_role="timestamp",
+                    description="Simulation timestamp for this snapshot row.",
+                ),
+                *self._agent_state_columns,
+            ]
             schema = TableSchema(
-                name=f"{prefix}_agent_state",
+                name=table_name,
                 columns=[
-                    ColumnDef("agent_id", "INTEGER", nullable=False),
-                    ColumnDef("step", "INTEGER", nullable=False),
-                    ColumnDef("t", "TIMESTAMP", nullable=False),
-                    *self._agent_state_columns,
+                    *columns,
                 ],
                 primary_key=["agent_id", "step"],
                 indexes=[["step"], ["t"]],
             )
             await self._replay_writer.register_table(schema)
+            capabilities = ["agent_snapshot", "timeseries"]
+            column_names = {col.name for col in columns}
+            if {"lng", "lat"}.issubset(column_names):
+                capabilities.extend(["geo_point", "trajectory"])
+            await self._replay_writer.register_dataset(
+                ReplayDatasetSpec(
+                    dataset_id=f"{prefix}.agent_state",
+                    table_name=table_name,
+                    module_name=self.name,
+                    kind="entity_snapshot",
+                    title=f"{self.name} Agent State",
+                    description=f"Per-agent replay snapshots exported by {self.name}.",
+                    entity_key="agent_id",
+                    step_key="step",
+                    time_key="t",
+                    default_order=["step", "agent_id"],
+                    capabilities=capabilities,
+                ),
+                columns,
+            )
 
         if self._env_state_columns:
+            table_name = f"{prefix}_env_state"
+            columns = [
+                ColumnDef(
+                    "step",
+                    "INTEGER",
+                    nullable=False,
+                    logical_type="step",
+                    analysis_role="timestamp",
+                    description="Simulation step for this environment snapshot row.",
+                ),
+                ColumnDef(
+                    "t",
+                    "TIMESTAMP",
+                    nullable=False,
+                    logical_type="timestamp",
+                    analysis_role="timestamp",
+                    description="Simulation timestamp for this environment snapshot row.",
+                ),
+                *self._env_state_columns,
+            ]
             schema = TableSchema(
-                name=f"{prefix}_env_state",
+                name=table_name,
                 columns=[
-                    ColumnDef("step", "INTEGER", nullable=False),
-                    ColumnDef("t", "TIMESTAMP", nullable=False),
-                    *self._env_state_columns,
+                    *columns,
                 ],
                 primary_key=["step"],
                 indexes=[["t"]],
             )
             await self._replay_writer.register_table(schema)
+            await self._replay_writer.register_dataset(
+                ReplayDatasetSpec(
+                    dataset_id=f"{prefix}.env_state",
+                    table_name=table_name,
+                    module_name=self.name,
+                    kind="env_snapshot",
+                    title=f"{self.name} Environment State",
+                    description=f"Per-step environment snapshots exported by {self.name}.",
+                    entity_key=None,
+                    step_key="step",
+                    time_key="t",
+                    default_order=["step"],
+                    capabilities=["env_snapshot", "timeseries"],
+                ),
+                columns,
+            )
 
         self._state_tables_registered = True
 

@@ -16,8 +16,8 @@ class AdvancedAgent(AgentBase):
     展示如何添加记忆、情绪等高级功能。
     """
 
-    def __init__(self, id: int, profile: Any, name: str = None, replay_writer = None):
-        super().__init__(id, profile, name, replay_writer)
+    def __init__(self, id: int, profile: Any, name: str = None):
+        super().__init__(id, profile, name)
         # 添加自定义属性
         self._memories: List[str] = []  # 记忆列表
         self._mood: str = "平静"  # 当前情绪
@@ -85,7 +85,7 @@ class AdvancedAgent(AgentBase):
     async def step(self, tick: int, t: datetime) -> str:
         """执行仿真步骤，更新情绪"""
         try:
-            ctx, observation = await self.ask_env(
+            _, observation = await self.ask_env(
                 {"variables": {}},
                 "当前环境状态是什么？",
                 readonly=True
@@ -102,18 +102,6 @@ class AdvancedAgent(AgentBase):
             self._mood = "平静"
 
         action = f"Agent {self.name}（情绪：{self._mood}）观察到：{observation}"
-
-        await self._write_status_snapshot(
-            step=tick,
-            t=t,
-            action=action,
-            status={
-                "observation": observation,
-                "mood": self._mood,
-                "memory_count": len(self._memories)
-            }
-        )
-
         return action
 
     async def dump(self) -> dict:

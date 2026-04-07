@@ -3,7 +3,6 @@
 AI Social Scientist是LLM驱动的智能自主社会科学研究智能体，其具备以下可自主执行的专业能力：
 
 + 社会科学文献检索
-+ 社会科学研究想法提出
 + 基于AgentSociety2所提供的Agent和Environment Module，构建检验研究想法的社会科学模拟实验
     - 选定Agent和Environment Module
     - 处理数据、生成代码以初始化Agent Class

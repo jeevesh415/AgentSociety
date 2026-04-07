@@ -1,20 +1,15 @@
 """
 实验数据API
 
-提供实验结果数据的查询接口，支持：
-- 获取实验时间线
-- 获取agent状态
-- 获取实验指标
-- 兼容V1前端API格式
+提供实验信息与产出文件查询接口。
 
 关联文件：
-- @extension/src/replayWebviewProvider.ts - 前端Replay Webview（调用此API）
+- @frontend/src/pages/Console/index.tsx - 实验列表与产出下载
 
 API端点：
 - GET /api/v1/experiments/{hypothesis_id}/{experiment_id}/info - 实验信息
-- GET /api/v1/experiments/{hypothesis_id}/{experiment_id}/timeline - 时间线
-- GET /api/v1/experiments/{hypothesis_id}/{experiment_id}/agents/* - Agent数据
-- GET /api/v1/experiments/{hypothesis_id}/{experiment_id}/state - 最新状态
+- GET /api/v1/experiments/{hypothesis_id}/{experiment_id}/artifacts - 产出文件列表
+- GET /api/v1/experiments/{hypothesis_id}/{experiment_id}/artifacts/{artifact_name} - 产出文件内容
 """
 
 from __future__ import annotations
@@ -23,12 +18,16 @@ import json
 import sqlite3
 from datetime import datetime
 from pathlib import Path
-from typing import Any, Dict, List, Optional
+from typing import Any, Dict, List, Optional, Tuple
 
 from fastapi import APIRouter, HTTPException, Query
 from pydantic import BaseModel
 
 from agentsociety2.logger import get_logger
+from agentsociety2.storage.replay_metadata import (
+    AGENT_PROFILE_DATASET_CAPABILITY,
+    DATASET_CATALOG_TABLE,
+)
 
 logger = get_logger()
 
@@ -40,33 +39,12 @@ router = APIRouter(prefix="/experiments", tags=["experiments"])
 # ============================================================================
 
 
-class TimePoint(BaseModel):
-    """时间点"""
-
-    day: int
-    t: int  # 当天秒数 (0-86400)
-    timestamp: str
-
-
 class AgentProfile(BaseModel):
     """Agent配置文件"""
 
     id: int
     name: Optional[str] = None
     profile: Optional[Dict[str, Any]] = None
-
-
-class AgentStatus(BaseModel):
-    """Agent状态"""
-
-    id: int
-    day: int
-    t: int
-    lng: Optional[float] = None
-    lat: Optional[float] = None
-    parent_id: Optional[int] = None
-    action: Optional[str] = None
-    status: Optional[Dict[str, Any]] = None
 
 
 class ExperimentInfo(BaseModel):
@@ -79,19 +57,6 @@ class ExperimentInfo(BaseModel):
     end_time: Optional[str] = None
     agent_count: int
     step_count: int
-
-
-class StepExecution(BaseModel):
-    """步骤执行记录"""
-
-    id: int
-    step_index: int
-    step_type: str
-    step_config: Dict[str, Any]
-    start_time: str
-    end_time: Optional[str] = None
-    success: bool
-    result: Optional[str] = None
 
 
 # ============================================================================
@@ -120,20 +85,404 @@ def _get_db_connection(db_path: Path) -> sqlite3.Connection:
     return sqlite3.connect(db_path)
 
 
-def _parse_state_data(state_data_json: str) -> Dict[str, Any]:
-    """解析状态数据JSON"""
-    try:
-        return json.loads(state_data_json)
-    except json.JSONDecodeError:
-        return {}
+def _parse_json_field(raw: Any, default: Any) -> Any:
+    """解析 SQLite 中保存的 JSON 字段。"""
+    if raw is None:
+        return default
+    if isinstance(raw, (dict, list)):
+        return raw
+    if isinstance(raw, (bytes, bytearray)):
+        raw = raw.decode("utf-8", errors="ignore")
+    if isinstance(raw, str):
+        try:
+            return json.loads(raw)
+        except json.JSONDecodeError:
+            return default
+    return default
 
 
-def _datetime_to_day_t(dt: datetime, start_t: datetime) -> tuple[int, int]:
-    """将datetime转换为(day, t)格式"""
-    delta = dt - start_t
-    day = delta.days
-    t = int(delta.seconds)
-    return day, t
+def _table_exists(cursor: sqlite3.Cursor, table_name: str) -> bool:
+    cursor.execute(
+        "SELECT 1 FROM sqlite_master WHERE type='table' AND name = ?",
+        (table_name,),
+    )
+    return cursor.fetchone() is not None
+
+
+def _quote_identifier(name: str) -> str:
+    return '"' + name.replace('"', '""') + '"'
+
+
+def _coerce_datetime(raw: Any) -> Optional[datetime]:
+    if raw is None:
+        return None
+    if isinstance(raw, datetime):
+        return raw
+    if isinstance(raw, (bytes, bytearray)):
+        raw = raw.decode("utf-8", errors="ignore")
+    if isinstance(raw, str):
+        try:
+            return datetime.fromisoformat(raw)
+        except ValueError:
+            return None
+    return None
+
+
+def _load_dataset_catalog(cursor: sqlite3.Cursor) -> List[Dict[str, Any]]:
+    if not _table_exists(cursor, DATASET_CATALOG_TABLE):
+        return []
+
+    cursor.execute(
+        f"""
+        SELECT dataset_id, table_name, module_name, kind,
+               entity_key, step_key, time_key,
+               default_order_json, capabilities_json
+        FROM {DATASET_CATALOG_TABLE}
+        ORDER BY dataset_id ASC
+        """
+    )
+    datasets: List[Dict[str, Any]] = []
+    for row in cursor.fetchall():
+        (
+            dataset_id,
+            table_name,
+            module_name,
+            kind,
+            entity_key,
+            step_key,
+            time_key,
+            default_order_raw,
+            capabilities_raw,
+        ) = row
+        default_order = _parse_json_field(default_order_raw, [])
+        capabilities = _parse_json_field(capabilities_raw, [])
+        datasets.append(
+            {
+                "dataset_id": dataset_id,
+                "table_name": table_name,
+                "module_name": module_name,
+                "kind": kind,
+                "entity_key": entity_key,
+                "step_key": step_key,
+                "time_key": time_key,
+                "default_order": default_order if isinstance(default_order, list) else [],
+                "capabilities": capabilities if isinstance(capabilities, list) else [],
+            }
+        )
+    return datasets
+
+
+def _get_table_columns(cursor: sqlite3.Cursor, table_name: str) -> set[str]:
+    cursor.execute(f"PRAGMA table_info({_quote_identifier(table_name)})")
+    return {str(row[1]) for row in cursor.fetchall()}
+
+
+def _dataset_has_columns(
+    cursor: sqlite3.Cursor,
+    dataset: Dict[str, Any],
+    *column_names: str,
+) -> bool:
+    available = _get_table_columns(cursor, dataset["table_name"])
+    return all(column_name in available for column_name in column_names)
+
+
+def _get_agent_status_dataset(cursor: sqlite3.Cursor) -> Optional[Dict[str, Any]]:
+    candidates = [
+        dataset
+        for dataset in _load_dataset_catalog(cursor)
+        if dataset.get("kind") == "entity_snapshot"
+        and "agent_snapshot" in dataset.get("capabilities", [])
+        and dataset.get("entity_key")
+        and dataset.get("step_key")
+        and dataset.get("time_key")
+        and _table_exists(cursor, dataset["table_name"])
+        and _dataset_has_columns(
+            cursor,
+            dataset,
+            dataset["entity_key"],
+            dataset["step_key"],
+            dataset["time_key"],
+        )
+    ]
+    candidates.sort(
+        key=lambda item: (
+            0 if "geo_point" in item.get("capabilities", []) else 1,
+            item["dataset_id"],
+        )
+    )
+    return candidates[0] if candidates else None
+
+
+def _get_agent_profile_dataset(cursor: sqlite3.Cursor) -> Optional[Dict[str, Any]]:
+    candidates = [
+        dataset
+        for dataset in _load_dataset_catalog(cursor)
+        if AGENT_PROFILE_DATASET_CAPABILITY in dataset.get("capabilities", [])
+        and dataset.get("entity_key")
+        and _table_exists(cursor, dataset["table_name"])
+        and _dataset_has_columns(cursor, dataset, dataset["entity_key"])
+    ]
+    candidates.sort(key=lambda item: item["dataset_id"])
+    return candidates[0] if candidates else None
+
+
+def _load_agent_profiles(cursor: sqlite3.Cursor) -> List[AgentProfile]:
+    if not _table_exists(cursor, "agent_profile"):
+        return []
+
+    cursor.execute("SELECT id, name, profile FROM agent_profile ORDER BY id ASC")
+    agents: List[AgentProfile] = []
+    for agent_id, name, profile_raw in cursor.fetchall():
+        profile = _parse_json_field(profile_raw, {})
+        if not isinstance(profile, dict):
+            profile = {}
+        agents.append(
+            AgentProfile(
+                id=int(agent_id),
+                name=name or profile.get("name"),
+                profile=profile,
+            )
+        )
+    return agents
+
+
+def _build_profiles_from_status_rows(
+    status_rows: List[Tuple[int, int, datetime, Optional[str], Dict[str, Any]]],
+) -> List[AgentProfile]:
+    agent_ids = sorted({agent_id for agent_id, _, _, _, _ in status_rows})
+    return [
+        AgentProfile(id=agent_id, name=f"Agent_{agent_id}", profile={})
+        for agent_id in agent_ids
+    ]
+
+
+def _build_profiles_from_status_entries(
+    status_entries: List[Dict[str, Any]],
+) -> List[AgentProfile]:
+    agent_ids = sorted({int(entry["id"]) for entry in status_entries})
+    return [
+        AgentProfile(id=agent_id, name=f"Agent_{agent_id}", profile={})
+        for agent_id in agent_ids
+    ]
+
+
+def _load_agent_status_rows(
+    cursor: sqlite3.Cursor,
+    agent_id: Optional[int] = None,
+) -> List[Tuple[int, int, datetime, Optional[str], Dict[str, Any]]]:
+    if not _table_exists(cursor, "agent_status"):
+        return []
+
+    query = "SELECT id, step, t, action, status FROM agent_status"
+    params: tuple[Any, ...] = ()
+    if agent_id is not None:
+        query += " WHERE id = ?"
+        params = (agent_id,)
+    query += " ORDER BY step ASC, id ASC"
+    cursor.execute(query, params)
+
+    rows: List[Tuple[int, int, datetime, Optional[str], Dict[str, Any]]] = []
+    for raw_agent_id, step, t_raw, action, status_raw in cursor.fetchall():
+        if not t_raw:
+            continue
+        try:
+            timestamp = datetime.fromisoformat(str(t_raw))
+        except ValueError:
+            continue
+        status = _parse_json_field(status_raw, {})
+        if not isinstance(status, dict):
+            status = {}
+        rows.append((int(raw_agent_id), int(step), timestamp, action, status))
+    return rows
+
+
+def _load_agent_profiles_from_status_dataset(
+    cursor: sqlite3.Cursor,
+    dataset: Dict[str, Any],
+) -> List[AgentProfile]:
+    entity_key = dataset["entity_key"]
+    table_name = dataset["table_name"]
+    cursor.execute(
+        f"""
+        SELECT DISTINCT {_quote_identifier(entity_key)}
+        FROM {_quote_identifier(table_name)}
+        WHERE {_quote_identifier(entity_key)} IS NOT NULL
+        ORDER BY {_quote_identifier(entity_key)} ASC
+        """
+    )
+    return [
+        AgentProfile(id=int(agent_id), name=f"Agent_{int(agent_id)}", profile={})
+        for (agent_id,) in cursor.fetchall()
+        if agent_id is not None
+    ]
+
+
+def _load_agent_profiles_from_profile_dataset(
+    cursor: sqlite3.Cursor,
+    dataset: Dict[str, Any],
+) -> List[AgentProfile]:
+    entity_key = dataset["entity_key"]
+    table_name = dataset["table_name"]
+    cursor.execute(
+        f"SELECT * FROM {_quote_identifier(table_name)} "
+        f"ORDER BY {_quote_identifier(entity_key)} ASC"
+    )
+    column_names = [description[0] for description in cursor.description or []]
+
+    profiles: List[AgentProfile] = []
+    for row in cursor.fetchall():
+        payload = dict(zip(column_names, row))
+        raw_agent_id = payload.get(entity_key)
+        if raw_agent_id is None:
+            continue
+
+        profile_raw = _parse_json_field(payload.get("profile"), {})
+        if not isinstance(profile_raw, dict):
+            profile_raw = {}
+
+        name = payload.get("name")
+        if not isinstance(name, str) or not name.strip():
+            profile_name = profile_raw.get("name")
+            if isinstance(profile_name, str) and profile_name.strip():
+                name = profile_name
+            else:
+                name = f"Agent_{int(raw_agent_id)}"
+
+        profiles.append(
+            AgentProfile(id=int(raw_agent_id), name=name, profile=profile_raw)
+        )
+    return profiles
+
+
+def _load_agent_status_entries_from_dataset(
+    cursor: sqlite3.Cursor,
+    dataset: Dict[str, Any],
+    *,
+    agent_id: Optional[int] = None,
+) -> List[Dict[str, Any]]:
+    entity_key = dataset["entity_key"]
+    step_key = dataset["step_key"]
+    time_key = dataset["time_key"]
+    table_name = dataset["table_name"]
+
+    query = f"SELECT * FROM {_quote_identifier(table_name)}"
+    params: tuple[Any, ...] = ()
+    if agent_id is not None:
+        query += f" WHERE {_quote_identifier(entity_key)} = ?"
+        params = (agent_id,)
+    query += (
+        f" ORDER BY {_quote_identifier(step_key)} ASC, "
+        f"{_quote_identifier(entity_key)} ASC"
+    )
+
+    cursor.execute(query, params)
+    column_names = [description[0] for description in cursor.description or []]
+
+    entries: List[Dict[str, Any]] = []
+    for row in cursor.fetchall():
+        payload = dict(zip(column_names, row))
+        timestamp = _coerce_datetime(payload.pop(time_key, None))
+        raw_agent_id = payload.pop(entity_key, None)
+        step = payload.pop(step_key, None)
+        if timestamp is None or raw_agent_id is None or step is None:
+            continue
+
+        lng = payload.pop("lng", None)
+        lat = payload.pop("lat", None)
+        action = payload.pop("action", None)
+        parent_id = payload.pop("parent_id", None)
+        payload.pop("created_at", None)
+
+        entries.append(
+            {
+                "id": int(raw_agent_id),
+                "step": int(step),
+                "timestamp": timestamp,
+                "lng": float(lng) if lng is not None else None,
+                "lat": float(lat) if lat is not None else None,
+                "parent_id": int(parent_id) if parent_id is not None else None,
+                "action": action,
+                "status": payload,
+            }
+        )
+    return entries
+
+
+def _load_agent_profiles_compat(cursor: sqlite3.Cursor) -> List[AgentProfile]:
+    dataset = _get_agent_profile_dataset(cursor)
+    if dataset is not None:
+        profiles = _load_agent_profiles_from_profile_dataset(cursor, dataset)
+        if profiles:
+            return profiles
+
+    if _table_exists(cursor, "agent_profile"):
+        return _load_agent_profiles(cursor)
+
+    dataset = _get_agent_status_dataset(cursor)
+    if dataset is None:
+        return []
+    return _load_agent_profiles_from_status_dataset(cursor, dataset)
+
+
+def _load_agent_status_entries(
+    cursor: sqlite3.Cursor,
+    *,
+    agent_id: Optional[int] = None,
+) -> List[Dict[str, Any]]:
+    if _table_exists(cursor, "agent_status"):
+        return [
+            {
+                "id": raw_agent_id,
+                "step": step,
+                "timestamp": timestamp,
+                "lng": None,
+                "lat": None,
+                "parent_id": None,
+                "action": action,
+                "status": status,
+            }
+            for raw_agent_id, step, timestamp, action, status in _load_agent_status_rows(
+                cursor, agent_id=agent_id
+            )
+        ]
+
+    dataset = _get_agent_status_dataset(cursor)
+    if dataset is None:
+        return []
+    return _load_agent_status_entries_from_dataset(cursor, dataset, agent_id=agent_id)
+
+
+def _get_agent_dataset_summary(
+    cursor: sqlite3.Cursor,
+) -> Tuple[int, Optional[datetime], Optional[datetime], int]:
+    dataset = _get_agent_status_dataset(cursor)
+    if dataset is None:
+        return 0, None, None, 0
+
+    table_name = dataset["table_name"]
+    entity_key = dataset["entity_key"]
+    step_key = dataset["step_key"]
+    time_key = dataset["time_key"]
+    cursor.execute(
+        f"""
+        SELECT COUNT(DISTINCT {_quote_identifier(step_key)}),
+               MIN({_quote_identifier(time_key)}),
+               MAX({_quote_identifier(time_key)}),
+               COUNT(DISTINCT {_quote_identifier(entity_key)})
+        FROM {_quote_identifier(table_name)}
+        """
+    )
+    row = cursor.fetchone()
+    if row is None:
+        return 0, None, None, 0
+
+    total_steps, start_raw, end_raw, agent_count = row
+    return (
+        int(total_steps or 0),
+        _coerce_datetime(start_raw),
+        _coerce_datetime(end_raw),
+        int(agent_count or 0),
+    )
 
 
 # ============================================================================
@@ -204,21 +553,23 @@ async def get_experiment_info(
             conn = _get_db_connection(db_file)
             cursor = conn.cursor()
 
-            # 从最新的state_data获取agent数量
-            cursor.execute("""
-                SELECT state_data FROM experiment_state
-                ORDER BY id DESC LIMIT 1
-            """)
-            row = cursor.fetchone()
-            if row and row[0]:
-                state_data = _parse_state_data(row[0])
-                agents = state_data.get("agents", [])
-                agent_count = len(agents)
+            profiles = _load_agent_profiles_compat(cursor)
+            if profiles:
+                agent_count = len(profiles)
+            elif _table_exists(cursor, "agent_status"):
+                cursor.execute("SELECT COUNT(DISTINCT id) FROM agent_status")
+                row = cursor.fetchone()
+                agent_count = row[0] if row else 0
+            else:
+                _, _, _, agent_count = _get_agent_dataset_summary(cursor)
 
             # 获取step数量
-            cursor.execute("SELECT COUNT(*) FROM step_executions")
-            row = cursor.fetchone()
-            step_count = row[0] if row else 0
+            if _table_exists(cursor, "agent_status"):
+                cursor.execute("SELECT COUNT(DISTINCT step) FROM agent_status")
+                row = cursor.fetchone()
+                step_count = row[0] if row else 0
+            else:
+                step_count, _, _, _ = _get_agent_dataset_summary(cursor)
 
             conn.close()
         except Exception as e:
@@ -233,368 +584,6 @@ async def get_experiment_info(
         agent_count=agent_count,
         step_count=step_count,
     )
-
-
-@router.get("/{hypothesis_id}/{experiment_id}/timeline")
-async def get_timeline(
-    hypothesis_id: str,
-    experiment_id: str,
-    workspace_path: str = Query(..., description="Workspace directory path"),
-) -> List[TimePoint]:
-    """
-    获取实验时间线
-
-    返回实验所有记录的时间点，用于在时间轴上展示实验进度。
-
-    Args:
-        hypothesis_id: 假设ID
-        experiment_id: 实验ID
-        workspace_path: 工作区根目录路径
-
-    Returns:
-        List[TimePoint]: 时间点列表，每个时间点包含：
-            - day: 模拟天数（从0开始）
-            - t: 当天秒数 (0-86400)
-            - timestamp: ISO格式的时间戳字符串
-
-    Raises:
-        HTTPException: 404 - 数据库不存在（实验未运行）
-    """
-    workspace = Path(workspace_path)
-    exp_path = _get_experiment_path(workspace, hypothesis_id, experiment_id)
-    db_file = exp_path / "run" / "sqlite.db"
-
-    conn = _get_db_connection(db_file)
-    cursor = conn.cursor()
-
-    cursor.execute("""
-        SELECT id, current_time, step_count FROM experiment_state
-        ORDER BY id ASC
-    """)
-
-    timeline = []
-    first_time = None
-
-    for row in cursor.fetchall():
-        state_id, current_time_str, step_count = row
-        if current_time_str:
-            try:
-                current_time = datetime.fromisoformat(current_time_str)
-                if first_time is None:
-                    first_time = current_time
-
-                day, t = _datetime_to_day_t(current_time, first_time)
-                timeline.append(
-                    TimePoint(
-                        day=day,
-                        t=t,
-                        timestamp=current_time_str,
-                    )
-                )
-            except ValueError:
-                continue
-
-    conn.close()
-    return timeline
-
-
-@router.get("/{hypothesis_id}/{experiment_id}/agents")
-async def get_agents(
-    hypothesis_id: str,
-    experiment_id: str,
-    workspace_path: str = Query(..., description="Workspace directory path"),
-) -> List[AgentProfile]:
-    """
-    获取所有Agent的配置信息
-
-    返回实验中所有Agent的配置文件信息。
-
-    Args:
-        hypothesis_id: 假设ID
-        experiment_id: 实验ID
-        workspace_path: 工作区根目录路径
-
-    Returns:
-        List[AgentProfile]: Agent配置列表，每个配置包含：
-            - id: Agent唯一标识符
-            - name: Agent名称
-            - profile: Agent详细配置字典
-
-    Raises:
-        HTTPException: 404 - 数据库不存在
-    """
-    workspace = Path(workspace_path)
-    exp_path = _get_experiment_path(workspace, hypothesis_id, experiment_id)
-    db_file = exp_path / "run" / "sqlite.db"
-
-    conn = _get_db_connection(db_file)
-    cursor = conn.cursor()
-
-    # 获取最新的状态数据
-    cursor.execute("""
-        SELECT state_data FROM experiment_state
-        ORDER BY id DESC LIMIT 1
-    """)
-    row = cursor.fetchone()
-    conn.close()
-
-    if not row or not row[0]:
-        return []
-
-    state_data = _parse_state_data(row[0])
-    agents_data = state_data.get("agents", [])
-
-    agents = []
-    for agent_data in agents_data:
-        dump_data = agent_data.get("dump", {})
-        profile = dump_data.get("profile", {})
-
-        agents.append(
-            AgentProfile(
-                id=agent_data.get("id", 0),
-                name=profile.get("name", f"Agent_{agent_data.get('id', 0)}"),
-                profile=profile,
-            )
-        )
-
-    return agents
-
-
-@router.get("/{hypothesis_id}/{experiment_id}/agents/{agent_id}/status")
-async def get_agent_status(
-    hypothesis_id: str,
-    experiment_id: str,
-    agent_id: int,
-    workspace_path: str = Query(..., description="Workspace directory path"),
-    day: Optional[int] = Query(None, description="Day number (0-indexed)"),
-    t: Optional[int] = Query(None, description="Time within day (seconds, 0-86400)"),
-) -> List[AgentStatus]:
-    """
-    获取指定Agent的状态历史
-
-    返回指定Agent在实验中的状态变化记录。
-
-    Args:
-        hypothesis_id: 假设ID
-        experiment_id: 实验ID
-        agent_id: Agent的唯一标识符
-        workspace_path: 工作区根目录路径
-        day: 可选，指定查询的模拟天数（0-indexed）
-        t: 可选，指定查询的当天秒数（0-86400），与day配合使用
-
-    Returns:
-        List[AgentStatus]: Agent状态列表，每个状态包含：
-            - id: Agent ID
-            - day: 模拟天数
-            - t: 当天秒数
-            - lng: 经度坐标（如果有位置信息）
-            - lat: 纬度坐标（如果有位置信息）
-            - parent_id: 父Agent ID（如果有）
-            - action: 当前动作
-            - status: 状态详情字典
-
-    Note:
-        如果指定了day和t参数，返回该时刻附近的状态（允许1分钟误差）；
-        否则返回所有历史状态记录。
-
-    Raises:
-        HTTPException: 404 - 数据库不存在
-    """
-    workspace = Path(workspace_path)
-    exp_path = _get_experiment_path(workspace, hypothesis_id, experiment_id)
-    db_file = exp_path / "run" / "sqlite.db"
-
-    conn = _get_db_connection(db_file)
-    cursor = conn.cursor()
-
-    cursor.execute("""
-        SELECT current_time, state_data FROM experiment_state
-        ORDER BY id ASC
-    """)
-
-    statuses = []
-    first_time = None
-
-    for row in cursor.fetchall():
-        current_time_str, state_data_json = row
-        if not current_time_str or not state_data_json:
-            continue
-
-        try:
-            current_time = datetime.fromisoformat(current_time_str)
-            if first_time is None:
-                first_time = current_time
-
-            current_day, current_t = _datetime_to_day_t(current_time, first_time)
-
-            # 如果指定了时间，只返回匹配的状态
-            if day is not None and t is not None:
-                if current_day != day or abs(current_t - t) > 60:  # 允许1分钟误差
-                    continue
-
-            state_data = _parse_state_data(state_data_json)
-            agents_data = state_data.get("agents", [])
-
-            for agent_data in agents_data:
-                if agent_data.get("id") == agent_id:
-                    dump_data = agent_data.get("dump", {})
-
-                    # 提取位置信息（如果有）
-                    position = dump_data.get("position", {})
-                    lng = position.get("lng") or position.get("longitude")
-                    lat = position.get("lat") or position.get("latitude")
-
-                    statuses.append(
-                        AgentStatus(
-                            id=agent_id,
-                            day=current_day,
-                            t=current_t,
-                            lng=lng,
-                            lat=lat,
-                            parent_id=dump_data.get("parent_id"),
-                            action=dump_data.get("current_action"),
-                            status=dump_data.get("status", {}),
-                        )
-                    )
-                    break
-
-        except ValueError:
-            continue
-
-    conn.close()
-    return statuses
-
-
-@router.get("/{hypothesis_id}/{experiment_id}/steps")
-async def get_step_executions(
-    hypothesis_id: str,
-    experiment_id: str,
-    workspace_path: str = Query(..., description="Workspace directory path"),
-) -> List[StepExecution]:
-    """
-    获取步骤执行记录
-
-    返回实验中所有步骤的执行记录，包括ask、intervene、step等操作。
-
-    Args:
-        hypothesis_id: 假设ID
-        experiment_id: 实验ID
-        workspace_path: 工作区根目录路径
-
-    Returns:
-        List[StepExecution]: 步骤执行记录列表，每条记录包含：
-            - id: 记录ID
-            - step_index: 步骤索引
-            - step_type: 步骤类型 (ask/intervene/step)
-            - step_config: 步骤配置参数
-            - start_time: 开始时间
-            - end_time: 结束时间
-            - success: 是否成功执行
-            - result: 执行结果
-
-    Raises:
-        HTTPException: 404 - 数据库不存在
-    """
-    workspace = Path(workspace_path)
-    exp_path = _get_experiment_path(workspace, hypothesis_id, experiment_id)
-    db_file = exp_path / "run" / "sqlite.db"
-
-    conn = _get_db_connection(db_file)
-    cursor = conn.cursor()
-
-    cursor.execute("""
-        SELECT id, step_index, step_type, step_config, start_time, end_time, success, result
-        FROM step_executions
-        ORDER BY step_index ASC
-    """)
-
-    steps = []
-    for row in cursor.fetchall():
-        (
-            step_id,
-            step_index,
-            step_type,
-            step_config_json,
-            start_time,
-            end_time,
-            success,
-            result,
-        ) = row
-
-        try:
-            step_config = json.loads(step_config_json)
-        except json.JSONDecodeError:
-            step_config = {}
-
-        steps.append(
-            StepExecution(
-                id=step_id,
-                step_index=step_index,
-                step_type=step_type,
-                step_config=step_config,
-                start_time=start_time,
-                end_time=end_time,
-                success=bool(success),
-                result=result,
-            )
-        )
-
-    conn.close()
-    return steps
-
-
-@router.get("/{hypothesis_id}/{experiment_id}/state")
-async def get_latest_state(
-    hypothesis_id: str,
-    experiment_id: str,
-    workspace_path: str = Query(..., description="Workspace directory path"),
-) -> Dict[str, Any]:
-    """
-    获取实验最新状态数据
-
-    返回实验的最新完整状态，包括所有Agent的当前状态。
-
-    Args:
-        hypothesis_id: 假设ID
-        experiment_id: 实验ID
-        workspace_path: 工作区根目录路径
-
-    Returns:
-        Dict[str, Any]: 最新状态数据，包含：
-            - timestamp: 记录时间戳
-            - current_time: 当前模拟时间
-            - step_count: 已执行步骤数
-            - state: 完整状态数据（包含所有Agent信息）
-
-    Raises:
-        HTTPException: 404 - 数据库不存在或无状态数据
-    """
-    workspace = Path(workspace_path)
-    exp_path = _get_experiment_path(workspace, hypothesis_id, experiment_id)
-    db_file = exp_path / "run" / "sqlite.db"
-
-    conn = _get_db_connection(db_file)
-    cursor = conn.cursor()
-
-    cursor.execute("""
-        SELECT timestamp, current_time, step_count, state_data
-        FROM experiment_state
-        ORDER BY id DESC LIMIT 1
-    """)
-    row = cursor.fetchone()
-    conn.close()
-
-    if not row:
-        raise HTTPException(status_code=404, detail="No state data found")
-
-    timestamp, current_time, step_count, state_data_json = row
-
-    return {
-        "timestamp": timestamp,
-        "current_time": current_time,
-        "step_count": step_count,
-        "state": _parse_state_data(state_data_json) if state_data_json else {},
-    }
 
 
 @router.get("/{hypothesis_id}/{experiment_id}/artifacts")

@@ -1,12 +1,9 @@
-"""回放数据存储的框架表（SQLModel）。
+"""历史 agent 回放表的兼容模型（SQLModel）。
 
-该模块定义三张框架表：
+该模块保留 ``agent_profile``、``agent_status``、``agent_dialog`` 三张旧表的 ORM
+定义，供后端读取历史 SQLite 数据库时使用。
 
-- :class:`~agentsociety2.storage.models.AgentProfile`：agent 基本信息与 profile
-- :class:`~agentsociety2.storage.models.AgentStatus`：每步状态快照
-- :class:`~agentsociety2.storage.models.AgentDialog`：对话/反思记录
-
-它们由 :class:`~agentsociety2.storage.ReplayWriter` 在初始化时创建并写入。
+当前 :class:`~agentsociety2.storage.ReplayWriter` 不再初始化或写入这些表。
 """
 
 from datetime import datetime

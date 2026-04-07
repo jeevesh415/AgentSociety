@@ -137,6 +137,7 @@ class AskContext:
     # === Code 获取 (责任链) ===
     code: Optional[str] = None
     cache_entry: Optional["CacheEntry"] = None
+    cache_miss_reason: Optional[str] = None
     code_source: Optional[str] = None  # "predefined" | "cache" | "llm" | "builtin"
 
     # === LLM 重试状态 ===
@@ -467,7 +468,7 @@ class CacheStatsObserver:
                 self._router._cache_stats.predefined_hit_count += 1
             elif context.cache_entry:
                 self._router._cache_stats.cache_hit_count += 1
-            elif not context.is_observe_or_statistics:
+            elif context.template_mode and not context.is_observe_or_statistics:
                 self._router._cache_stats.cache_miss_count += 1
             if context.execution_attempted:
                 if context.success_data:
@@ -585,15 +586,19 @@ class CacheCodeProvider:
             return None
 
     @staticmethod
-    async def _lookup(router: "CodeGenRouter", instruction: str, variables: dict) -> Optional[CacheEntry]:
+    async def _lookup(
+        router: "CodeGenRouter", instruction: str, variables: dict
+    ) -> Tuple[Optional[CacheEntry], Optional[str]]:
         if not router._template_cache_enabled:
-            return None
+            return None, "template_cache_disabled"
         async with router._template_cache_lock:
             emb = await CacheCodeProvider._compute_embedding(router, instruction)
             if emb is None:
-                return None
+                return None, "embedding_unavailable"
             current_keys = set(variables.keys())
             best_match, best_sim = None, 0.0
+            saw_compatible_candidate = False
+            saw_key_incompatible_candidate = False
             if router._cache_faiss_index and router._cache_faiss_entry_indices:
                 query = np.asarray([emb], dtype=np.float32).copy()
                 faiss.normalize_L2(query)
@@ -608,22 +613,34 @@ class CacheCodeProvider:
                         continue
                     cached_keys = set(entry.variable_keys)
                     if not (current_keys.issubset(cached_keys) or cached_keys.issubset(current_keys)):
+                        saw_key_incompatible_candidate = True
                         continue
+                    saw_compatible_candidate = True
                     sim = float(score)
                     if sim >= router._template_cache_similarity_threshold and sim > best_sim:
                         best_sim, best_match = sim, entry
             if best_match:
                 best_match.last_used = datetime.now()
-                return best_match
-            return None
+                return best_match, None
+            if saw_compatible_candidate:
+                return None, "below_similarity_threshold"
+            if saw_key_incompatible_candidate:
+                return None, "variable_keys_incompatible"
+            return None, "no_similar_entry"
 
     async def get_code(self, context: AskContext, router: "CodeGenRouter") -> Optional[str]:
         if not router._template_cache_enabled or not context.template_mode or context.is_observe_or_statistics:
             return None
-        cache_entry = await self._lookup(router, context.instruction, context.variables)
+        cache_entry, miss_reason = await self._lookup(router, context.instruction, context.variables)
         if cache_entry is not None:
             context.cache_entry = cache_entry
             return cache_entry.code
+        context.cache_miss_reason = miss_reason
+        get_logger().info(
+            "Template cache miss: reason=%s instruction=%s",
+            miss_reason,
+            context.instruction[:100],
+        )
         return None
 
 
@@ -638,6 +655,14 @@ class LLMCodegenProvider:
     def _build_prompt(router: "CodeGenRouter", instruction: str, ctx: dict, readonly: bool, kind: str | None = None) -> str:
         key = (readonly, kind)
         tools_pyi = router._tools_pyi_dict[key]
+        template_note = ""
+        if isinstance(ctx.get("variables"), dict) and ctx["variables"]:
+            template_note = (
+                "\n## Template Mode Hint\n"
+                "- Runtime values are available in ctx['variables'].\n"
+                "- Prefer reading changing values from ctx['variables'] instead of hard-coding literals.\n"
+                "- This keeps the instruction reusable and improves router cache hits.\n"
+            )
         return f"""# Code Generation Task
 You are a code generation assistant. Your task is to generate Python code that calls environment module tools based on the given agent input.
 
@@ -654,6 +679,7 @@ modules = {repr(router._modules)}
 ```python
 ctx = {repr(ctx)}
 ```
+{template_note}
 
 ## Code Generation Requirements
 1. Generate Python code that accomplishes the instruction by calling appropriate tools.

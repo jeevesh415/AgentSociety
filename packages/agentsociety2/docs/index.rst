@@ -98,7 +98,6 @@ AgentSociety 2
 
    development
    module_and_parameter_management
-   person_agent_v2_architecture
    contributing
 
 .. toctree::

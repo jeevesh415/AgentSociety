@@ -32,7 +32,7 @@
             pass
 """
 
-from .base import AgentBase, DIALOG_TYPE_REFLECTION
+from .base import AgentBase
 from .person import PersonAgent
 
-__all__ = ["AgentBase", "DIALOG_TYPE_REFLECTION", "PersonAgent"]
+__all__ = ["AgentBase", "PersonAgent"]

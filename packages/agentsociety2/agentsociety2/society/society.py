@@ -31,16 +31,32 @@ Example::
 """
 
 import asyncio
+import json
 from datetime import datetime, timedelta
 from pathlib import Path
-from typing import Optional, Sequence
+from typing import Any, Optional, Sequence
 
 from agentsociety2.env import RouterBase
 from agentsociety2.agent import AgentBase
 from agentsociety2.society.helper import AgentSocietyHelper
-from agentsociety2.storage import ReplayWriter
+from agentsociety2.storage import ColumnDef, ReplayDatasetSpec, ReplayWriter, TableSchema
+from agentsociety2.storage.replay_metadata import (
+    AGENT_PROFILE_DATASET_CAPABILITY,
+    AGENT_PROFILE_DATASET_ID,
+    AGENT_PROFILE_TABLE_NAME,
+)
 
 __all__ = ["AgentSociety"]
+
+
+def _json_safe_profile(profile: Any) -> dict[str, Any]:
+    """Convert an arbitrary profile payload into a JSON-safe dict."""
+    if not isinstance(profile, dict):
+        profile = {"raw": str(profile)}
+    try:
+        return json.loads(json.dumps(profile, ensure_ascii=False, default=str))
+    except Exception:
+        return {"raw": str(profile)}
 
 
 class AgentSociety:
@@ -91,7 +107,7 @@ class AgentSociety:
         :param run_dir: 可选。运行目录（用于落地回放 sqlite 等）。
         :param enable_replay: 是否启用回放记录。
         :param replay_writer: 可选。外部传入的回放写入器；若提供则不会在 :meth:`init` 内部创建。
-            调用方需自行把 writer 注入到 agents / env_router（或后续调用 ``set_replay_writer``）。
+            该写入器仅用于环境模块回放。
         """
         self._env_router = env_router
         self._agents = agents
@@ -102,6 +118,7 @@ class AgentSociety:
         self._run_dir = run_dir
         self._enable_replay = enable_replay
         self._replay_writer: Optional[ReplayWriter] = replay_writer
+        self._agent_profiles_persisted = False
 
         self._helper = AgentSocietyHelper(
             env_router=self._env_router,
@@ -118,37 +135,91 @@ class AgentSociety:
         """:returns: 已执行的仿真步数。"""
         return self._step_count
 
-    async def init(self):
-        await self._env_router.init(self._t)
-        for agent in self._agents:
-            await agent.init(env=self._env_router)
+    async def _persist_agent_profiles_once(self) -> None:
+        if self._replay_writer is None or self._agent_profiles_persisted:
+            return
 
-        # Replay writer: use provided one or create and inject when enabled
+        columns = [
+            ColumnDef(
+                "id",
+                "INTEGER",
+                nullable=False,
+                logical_type="entity_id",
+                description="Unique agent identifier.",
+            ),
+            ColumnDef(
+                "name",
+                "TEXT",
+                nullable=False,
+                logical_type="label",
+                description="Agent display name.",
+            ),
+            ColumnDef(
+                "profile",
+                "JSON",
+                nullable=False,
+                logical_type="json",
+                description="Static agent profile payload captured at simulation init.",
+            ),
+            ColumnDef(
+                "created_at",
+                "TIMESTAMP",
+                nullable=False,
+                logical_type="timestamp",
+                description="When the agent profile snapshot was persisted.",
+            ),
+        ]
+        await self._replay_writer.register_table(
+            TableSchema(
+                name=AGENT_PROFILE_TABLE_NAME,
+                columns=columns,
+                primary_key=["id"],
+                indexes=[["name"]],
+            )
+        )
+        await self._replay_writer.register_dataset(
+            ReplayDatasetSpec(
+                dataset_id=AGENT_PROFILE_DATASET_ID,
+                table_name=AGENT_PROFILE_TABLE_NAME,
+                module_name="AgentSociety",
+                kind="entity_static",
+                title="Agent Profiles",
+                description="Static agent profiles persisted once when the simulation initializes.",
+                entity_key="id",
+                default_order=["id"],
+                capabilities=[AGENT_PROFILE_DATASET_CAPABILITY, "entity_static"],
+            ),
+            columns,
+        )
+
+        rows = [
+            {
+                "id": agent.id,
+                "name": agent.name,
+                "profile": _json_safe_profile(agent.get_profile()),
+                "created_at": self._t,
+            }
+            for agent in self._agents
+        ]
+        if rows:
+            await self._replay_writer.write_batch(AGENT_PROFILE_TABLE_NAME, rows)
+        self._agent_profiles_persisted = True
+
+    async def init(self):
+        # Replay writer: use provided one or create it before env init so
+        # modules that register replay tables during init see a ready writer.
         if self._replay_writer is None and self._enable_replay and self._run_dir is not None:
             db_path = self._run_dir / "sqlite.db"
             self._replay_writer = ReplayWriter(db_path)
             await self._replay_writer.init()
-            for agent in self._agents:
-                agent.set_replay_writer(self._replay_writer)
-                self._setup_agent_position_callback(agent)
-            self._env_router.set_replay_writer(self._replay_writer)
 
         if self._replay_writer is not None:
-            profiles = [
-                (agent.id, agent.name, agent.get_profile())
-                for agent in self._agents
-            ]
-            await self._replay_writer.write_agent_profiles_batch(profiles)
-            for agent in self._agents:
-                self._setup_agent_position_callback(agent)
+            await self._persist_agent_profiles_once()
+            self._env_router.set_replay_writer(self._replay_writer)
 
-    def _setup_agent_position_callback(self, agent: AgentBase) -> None:
-        """为 agent 注入“从环境查询位置”的回调。"""
-        async def get_position_from_env():
-            # Try to get position from environment router
-            return await self._env_router.get_agent_position(agent.id)
-
-        agent._get_position_callback = get_position_from_env
+        await self._env_router.init(self._t)
+        for agent in self._agents:
+            await agent.init(env=self._env_router)
 
     async def close(self):
         for agent in self._agents:

@@ -42,10 +42,6 @@ msgstr "**Agent Profiles**: Static characteristics and personality traits"
 msgid "**智能体状态**: 模拟期间更新的动态状态"
 msgstr "**Agent Status**: Dynamic state updated during simulation"
 
-#: ../../storage.rst:13
-msgid "**智能体对话**: 包含 LLM 输入/输出的对话历史"
-msgstr "**Agent Dialogs**: Dialog history with LLM inputs/outputs"
-
 #: ../../storage.rst:14
 msgid "**自定义表**: 特定于模块的数据"
 msgstr "**Custom Tables**: Module-specific data"
@@ -108,14 +104,6 @@ msgstr "``current_activity`` (str): Text description of current activity"
 #: ../../storage.rst:99
 msgid "``step_count`` (int): 已完成的模拟步数"
 msgstr "``step_count`` (int): Number of simulation steps completed"
-
-#: ../../storage.rst:102
-msgid "AgentDialog"
-msgstr "AgentDialog"
-
-#: ../../storage.rst:104
-msgid "存储对话历史："
-msgstr "Stores dialog history:"
 
 #: ../../storage.rst:108
 msgid "``agent_id`` (int): 生成此对话的智能体"

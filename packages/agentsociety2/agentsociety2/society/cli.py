@@ -4,7 +4,6 @@ import argparse
 import asyncio
 import json
 import os
-import sqlite3
 import sys
 import yaml
 from datetime import datetime
@@ -219,9 +218,8 @@ class ExperimentRunner:
     def _create_agents(
         self,
         agent_args: List[Dict[str, Any]],
-        replay_writer: Optional[Any] = None,
     ) -> List[AgentBase]:
-        """创建agent实例。replay_writer 若提供则传入每个 agent 的 __init__。"""
+        """创建 agent 实例。"""
         agents = []
         agent_type_map = {
             agent_type: agent_class
@@ -256,46 +254,10 @@ class ExperimentRunner:
             else:
                 init_kwargs["id"] = int(init_kwargs["id"])
 
-            if replay_writer is not None:
-                init_kwargs["replay_writer"] = replay_writer
-
             agent = agent_class(**init_kwargs)
             agents.append(agent)
 
         return agents
-
-    def _init_database(self):
-        """初始化SQLite数据库"""
-        conn = sqlite3.connect(self.db_file)
-        cursor = conn.cursor()
-
-        # 创建实验状态表
-        cursor.execute("""
-            CREATE TABLE IF NOT EXISTS experiment_state (
-                id INTEGER PRIMARY KEY AUTOINCREMENT,
-                timestamp TEXT NOT NULL,
-                current_time TEXT,
-                step_count INTEGER,
-                state_data TEXT
-            )
-        """)
-
-        # 创建步骤执行记录表
-        cursor.execute("""
-            CREATE TABLE IF NOT EXISTS step_executions (
-                id INTEGER PRIMARY KEY AUTOINCREMENT,
-                step_index INTEGER NOT NULL,
-                step_type TEXT NOT NULL,
-                step_config TEXT NOT NULL,
-                start_time TEXT NOT NULL,
-                end_time TEXT,
-                success INTEGER,
-                result TEXT
-            )
-        """)
-
-        conn.commit()
-        conn.close()
 
     def _update_pid_file(self, status: str, **kwargs):
         """更新 pid.json 文件"""
@@ -349,9 +311,6 @@ class ExperimentRunner:
             # 验证环境变量（必须在任何操作之前）
             self._validate_environment()
 
-            # 初始化数据库
-            self._init_database()
-
             # 更新状态为运行中
             self._update_pid_file("running", experiment_id=experiment_id)
 
@@ -400,7 +359,7 @@ class ExperimentRunner:
             logger.info("Creating environment modules...")
             env_modules = self._create_env_modules(env_module_types, env_kwargs)
 
-            # 若启用回放则先创建并初始化 ReplayWriter，再传入 router 与 agents
+            # 若启用回放则先创建并初始化 ReplayWriter，再传入 env router
             replay_writer: Optional[ReplayWriter] = None
             if self.run_dir is not None:
                 replay_writer = ReplayWriter(self.run_dir / "sqlite.db")
@@ -416,7 +375,7 @@ class ExperimentRunner:
             env_router.run_dir = self.run_dir.resolve()
 
             logger.info(f"Creating {len(agent_args)} agents...")
-            agents = self._create_agents(agent_args, replay_writer=replay_writer)
+            agents = self._create_agents(agent_args)
 
             logger.info("Creating AgentSociety instance...")
             self.society = AgentSociety(
@@ -434,39 +393,17 @@ class ExperimentRunner:
             # 执行步骤
             logger.info(f"Executing {len(steps)} steps...")
 
-            conn = sqlite3.connect(self.db_file)
-
             for step_idx, step in enumerate(steps):
                 if self._should_terminate:
                     logger.info("Termination requested, stopping execution")
                     break
 
                 step_type = step.type
-                step_start_time = datetime.now()
                 
                 # 更新进度到 pid.json
                 self._update_progress()
-                
-                cursor = conn.cursor()
-                
-                # 将step模型转换为字典用于存储
-                step_dict = step.model_dump()
-                cursor.execute("""
-                    INSERT INTO step_executions 
-                    (step_index, step_type, step_config, start_time, success)
-                    VALUES (?, ?, ?, ?, ?)
-                """, (
-                    step_idx,
-                    step_type,
-                    json.dumps(step_dict, ensure_ascii=False),
-                    step_start_time.isoformat(),
-                    0,  # 初始化为未完成
-                ))
-                conn.commit()
 
                 try:
-                    step_result = None  # 用于存储步骤执行结果
-                    
                     if isinstance(step, RunStep):
                         logger.info(f"Running {step.num_steps} steps with tick={step.tick}")
                         # 创建定期更新进度的任务
@@ -487,7 +424,6 @@ class ExperimentRunner:
                                 pass
                         # 最终更新进度
                         self._update_progress()
-                        step_result = "success"
 
                     elif isinstance(step, AskStep):
                         logger.info(f"Asking: {step.question}")
@@ -506,7 +442,6 @@ class ExperimentRunner:
                             # Markdown content
                             f.write(f"{answer}\n")
                         logger.info(f"Ask result saved to {artifact_file}")
-                        step_result = f"Artifact saved to {artifact_file.name}"
 
                     elif isinstance(step, InterveneStep):
                         logger.info(f"Intervening: {step.instruction}")
@@ -525,48 +460,19 @@ class ExperimentRunner:
                             # Markdown content
                             f.write(f"{intervene_result}\n")
                         logger.info(f"Intervene result saved to {artifact_file}")
-                        step_result = f"Artifact saved to {artifact_file.name}"
 
                     else:
                         logger.warning(f"Unknown step type: {step_type}, skipping")
                         continue
-
-                    # 更新步骤执行记录
-                    step_end_time = datetime.now()
-                    cursor.execute("""
-                        UPDATE step_executions
-                        SET end_time = ?, success = 1, result = ?
-                        WHERE step_index = ? AND step_type = ?
-                    """, (
-                        step_end_time.isoformat(),
-                        step_result or "success",
-                        step_idx,
-                        step_type,
-                    ))
-                    conn.commit()
                     
                     # 更新进度到 pid.json（步骤完成）
                     self._update_progress()
 
                 except Exception as e:
                     logger.error(f"Error executing step {step_idx} ({step_type}): {e}", exc_info=True)
-                    step_end_time = datetime.now()
-                    cursor.execute("""
-                        UPDATE step_executions
-                        SET end_time = ?, success = 0, result = ?
-                        WHERE step_index = ? AND step_type = ?
-                    """, (
-                        step_end_time.isoformat(),
-                        str(e),
-                        step_idx,
-                        step_type,
-                    ))
-                    conn.commit()
                     
                     # 更新进度到 pid.json（步骤失败）
                     self._update_progress()
-
-            conn.close()
 
             # 关闭society
             await self.society.close()

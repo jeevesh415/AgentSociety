@@ -346,6 +346,17 @@ class Config:
 
     # Web Search API settings
 
+    LITERATURE_SEARCH_API_URL: str = (
+        os.getenv("LITERATURE_SEARCH_API_URL", "").strip()
+        or "http://localhost:8002/api/v1/search"
+    )
+    """
+    Base URL for the literature search service.
+
+    Environment variable: LITERATURE_SEARCH_API_URL
+    Default: "http://localhost:8002/api/v1/search"
+    """
+
     WEB_SEARCH_API_URL: str = os.getenv("WEB_SEARCH_API_URL", "").strip()
     """
     Base URL for the Web Search / MiroFlow MCP HTTP endpoint.
@@ -650,6 +661,48 @@ class Config:
                 cache_responses=True,
                 num_retries=10,  # 设置429错误的重试次数为10次
             )
+
+    @classmethod
+    def get_literature_search_api_url(cls) -> str:
+        """Get literature search API URL, preferring the latest environment value."""
+        return (
+            os.getenv("LITERATURE_SEARCH_API_URL", "").strip()
+            or cls.LITERATURE_SEARCH_API_URL
+        )
+
+    @classmethod
+    def get_web_search_api_url(cls) -> str:
+        """Get web search MCP URL, preferring the latest environment value."""
+        return os.getenv("WEB_SEARCH_API_URL", "").strip() or cls.WEB_SEARCH_API_URL
+
+    @classmethod
+    def get_web_search_api_token(cls) -> str:
+        """Get web search MCP token, preferring the latest environment value."""
+        return (
+            os.getenv("WEB_SEARCH_API_TOKEN", "").strip()
+            or cls.WEB_SEARCH_API_TOKEN
+        )
+
+    @classmethod
+    def get_miroflow_default_llm(cls) -> str:
+        """Get default MiroFlow LLM, preferring the latest environment value."""
+        return (
+            os.getenv("MIROFLOW_DEFAULT_LLM", "").strip()
+            or cls.MIROFLOW_DEFAULT_LLM
+        )
+
+    @classmethod
+    def get_miroflow_default_agent(cls) -> str:
+        """Get default MiroFlow agent, preferring the latest environment value."""
+        return (
+            os.getenv("MIROFLOW_DEFAULT_AGENT", "").strip()
+            or cls.MIROFLOW_DEFAULT_AGENT
+        )
+
+    @classmethod
+    def get_easypaper_api_url(cls) -> str:
+        """Get EasyPaper API URL, preferring the latest environment value."""
+        return os.getenv("EASYPAPER_API_URL", "").strip() or cls.EASYPAPER_API_URL
 
     @classmethod
     def get_default_router(cls) -> Router:

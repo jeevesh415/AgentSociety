@@ -13,7 +13,7 @@ from pathlib import Path
 from typing import Any, Dict, List, Optional
 
 import aiohttp
-from agentsociety2.config import get_llm_router
+from agentsociety2.config import Config, get_llm_router
 from agentsociety2.logger import get_logger
 from litellm import AllMessageValues
 from litellm.router import Router
@@ -376,7 +376,7 @@ async def search_literature(
     relevant_content_limit: int = 2000,
     abstract_limit: int = 2000,
     enable_multi_query: bool = True,
-    api_url: str = "http://localhost:8002/api/v1/search",
+    api_url: Optional[str] = None,
     timeout: int = 120,
     output_dir: Path | None = None,
 ) -> Optional[Dict[str, Any]]:
@@ -402,6 +402,8 @@ async def search_literature(
     # 如果router为None，使用默认router（从llm_config获取）
     if router is None:
         router = get_llm_router("default")
+    if not api_url:
+        api_url = Config.get_literature_search_api_url()
 
     # 检测是否为中文，如果是则翻译成英文
     search_query = query

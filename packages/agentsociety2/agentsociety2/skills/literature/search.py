@@ -62,6 +62,7 @@ async def search_literature_and_save(
             "articles": [],
             "total": 0,
             "query": query,
+            "content": f"No articles found related to '{query}'.",
             "error": "No results found",
         }
 
@@ -83,6 +84,7 @@ async def search_literature_and_save(
         "total": total,
         "query": query,
         "saved_files": saved_files,
+        "content": format_search_results(articles, total, query),
     }
 
 

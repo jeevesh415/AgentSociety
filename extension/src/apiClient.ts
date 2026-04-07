@@ -16,6 +16,7 @@
  */
 
 import * as vscode from 'vscode';
+import { getBackendAccessUrl } from './runtimeConfig';
 
 /**
  * API客户端 - 用于与FastAPI后端通信
@@ -316,16 +317,7 @@ export class ApiClient {
    */
   private getBackendUrl(): string {
     try {
-      // 动态导入 EnvManager 避免循环依赖
-      const envManager = require('./envManager');
-      const EnvManagerClass = envManager.EnvManager || envManager.default;
-      if (EnvManagerClass) {
-        const manager = new EnvManagerClass();
-        const envConfig = manager.readEnv();
-        const host = envConfig.backendHost || '127.0.0.1';
-        const port = envConfig.backendPort || 8001;
-        return `http://${host}:${port}`;
-      }
+      return getBackendAccessUrl();
     } catch (error) {
       this.log(`Failed to read backend URL from .env: ${error}`);
     }
@@ -928,4 +920,3 @@ export class ApiClient {
     }
   }
 }
-

@@ -4,17 +4,12 @@
 
 **ReplayWriter** — 回放数据写入器：
 - 写入 SQLite 数据库
-- 支持框架表（agent_profile、agent_status、agent_dialog）
 - 支持动态表注册
 
-**数据模型**：
-- ``AgentProfile``: 智能体档案表
-- ``AgentStatus``: 智能体状态表
-- ``AgentDialog``: 智能体对话表
-
-**动态表**：
-- ``ColumnDef``: 列定义
+**动态表与元数据**：
+- ``ColumnDef``: 列定义与语义元数据
 - ``TableSchema``: 表结构定义
+- ``ReplayDatasetSpec``: 数据集级 replay 元数据
 
 使用示例::
 
@@ -30,22 +25,16 @@
     ))
 
     # 写入数据
-    await writer.write_agent_status(agent_id=1, step=0, t=datetime.now())
+    await writer.write("custom_data", {"key": "value"})
 """
 
 from .replay_writer import ReplayWriter
-from .models import (
-    AgentProfile,
-    AgentStatus,
-    AgentDialog,
-)
+from .replay_metadata import ReplayDatasetSpec
 from .table_schema import ColumnDef, TableSchema
 
 __all__ = [
     "ReplayWriter",
-    "AgentProfile",
-    "AgentStatus",
-    "AgentDialog",
     "ColumnDef",
     "TableSchema",
+    "ReplayDatasetSpec",
 ]

@@ -121,7 +121,15 @@ GET /api/v1/custom/classes?workspace_path=/path&include_custom=true
       "has_prefill": true
     }
   },
-  "agents": {...},
+  "agents": {
+    "llm_donor_agent": {
+      "type": "llm_donor_agent",
+      "class_name": "LLMDonorAgent",
+      "description": "...",
+      "is_custom": false,
+      "has_prefill": false
+    }
+  },
   "env_module_count": 16,
   "agent_count": 7
 }
@@ -295,10 +303,9 @@ class MyCustomAgent(AgentBase):
         self,
         id: int,
         profile: dict,
-        replay_writer=None,
         custom_param: str = "default",  # 自定义参数
     ):
-        super().__init__(id=id, profile=profile, replay_writer=replay_writer)
+        super().__init__(id=id, profile=profile)
         self.custom_param = custom_param
 ```
 

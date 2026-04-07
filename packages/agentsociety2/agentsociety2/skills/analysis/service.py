@@ -2,7 +2,6 @@
 
 import json
 import re
-import sqlite3
 from datetime import datetime
 from pathlib import Path
 from typing import Any, Dict, List, Optional, Tuple
@@ -349,44 +348,6 @@ class Analyzer:
                     status = ExperimentStatus.UNKNOWN
             except (json.JSONDecodeError, ValueError, OSError) as e:
                 errors.append(f"Failed to read pid.json: {e}")
-        try:
-            conn = sqlite3.connect(str(db_path))
-            cursor = conn.cursor()
-            cursor.execute(
-                "SELECT name FROM sqlite_master WHERE type='table' AND name NOT LIKE 'sqlite_%'"
-            )
-            tables = {row[0] for row in cursor.fetchall()}
-            if "as_experiment" in tables:
-                cursor.execute("PRAGMA table_info(as_experiment)")
-                cols = [row[1] for row in cursor.fetchall()]
-                if "status" in cols and "cur_day" in cols and "num_day" in cols:
-                    cursor.execute(
-                        "SELECT status, cur_day, num_day FROM as_experiment LIMIT 1"
-                    )
-                    row = cursor.fetchone()
-                    if row:
-                        st, cur_day, num_day = row[0], row[1], row[2]
-                        if status == ExperimentStatus.UNKNOWN and st is not None:
-                            if st == 2:
-                                status = ExperimentStatus.SUCCESSFUL
-                            elif st == 1:
-                                status = ExperimentStatus.UNKNOWN
-                            elif st == 3:
-                                status = ExperimentStatus.FAILED
-                        if num_day and num_day > 0 and cur_day is not None:
-                            completion = min(100.0, max(0.0, 100.0 * cur_day / num_day))
-            if completion == 0.0 and "step_executions" in tables:
-                try:
-                    cursor.execute("SELECT COUNT(*) FROM step_executions")
-                    r = cursor.fetchone()
-                    if r and r[0] and r[0] > 0:
-                        completion = 50.0
-                except sqlite3.OperationalError:
-                    pass
-            conn.close()
-        except sqlite3.Error as e:
-            errors.append(f"Database read error: {e}")
-
         # 补充采集 run/artifacts 与 output.log 中的失败信号，使分析上下文更贴近真实实验运行结果。
         runtime_errors = self._collect_runtime_failures(run_path)
         for msg in runtime_errors:

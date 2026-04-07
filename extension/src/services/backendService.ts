@@ -7,7 +7,7 @@
 
 import * as vscode from 'vscode';
 import type { SSEEvent } from '../shared/messages';
-import { EnvManager } from '../envManager';
+import { getBackendAccessUrl } from '../runtimeConfig';
 
 export interface BackendStatus {
   connected: boolean;
@@ -23,15 +23,7 @@ export class BackendService {
 
   constructor(context: vscode.ExtensionContext) {
     this.outputChannel = vscode.window.createOutputChannel('AI Social Scientist Backend');
-    this.baseUrl = this.getBackendUrl();
-
-    // Monitor VSCode configuration changes
-    const configChangeDisposable = vscode.workspace.onDidChangeConfiguration(() => {
-      this.baseUrl = this.getBackendUrl();
-      this.log(`Backend URL updated to: ${this.baseUrl}`);
-    });
-    this.disposables.push(configChangeDisposable);
-    context.subscriptions.push(configChangeDisposable);
+    this.baseUrl = getBackendAccessUrl();
 
     // Monitor .env file changes for port updates
     const workspaceFolder = vscode.workspace.workspaceFolders?.[0];
@@ -39,13 +31,16 @@ export class BackendService {
       const envWatcher = vscode.workspace.createFileSystemWatcher(
         new vscode.RelativePattern(workspaceFolder, '.env')
       );
-      envWatcher.onDidChange(() => {
+      const refreshBackendUrl = () => {
         const newUrl = this.getBackendUrl();
         if (newUrl !== this.baseUrl) {
           this.baseUrl = newUrl;
           this.log(`Backend URL updated from .env: ${this.baseUrl}`);
         }
-      });
+      };
+      envWatcher.onDidCreate(refreshBackendUrl);
+      envWatcher.onDidChange(refreshBackendUrl);
+      envWatcher.onDidDelete(refreshBackendUrl);
       this.disposables.push(envWatcher);
       context.subscriptions.push(envWatcher);
     }
@@ -55,11 +50,7 @@ export class BackendService {
    * Get backend URL from .env file
    */
   private getBackendUrl(): string {
-    const envManager = new EnvManager();
-    const envConfig = envManager.readEnv();
-    const host = envConfig.backendHost || '127.0.0.1';
-    const port = envConfig.backendPort || 8001;
-    return `http://${host}:${port}`;
+    return getBackendAccessUrl();
   }
 
   private log(message: string): void {

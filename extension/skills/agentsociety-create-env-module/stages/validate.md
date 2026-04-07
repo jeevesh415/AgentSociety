@@ -7,6 +7,7 @@ Reusing `--run-id` should extend an existing note trail, not replace earlier des
 
 If validation fails, run `scripts/resolve_sources.py` if needed, then read `references/runtime-sources.md` again. Use the bundled local validator implementation as the source of truth for fixes.
 If the module has mutable state or replay expectations, also re-read `references/persistence-patterns.md` and compare the code against the built-in persistence examples.
+For replay-related validation, explicitly inspect whether step-keyed tables advance over multiple simulation steps instead of silently overwriting the same primary key.
 
 Preferred paths:
 
@@ -26,4 +27,5 @@ Failure mapping:
 - Import or codegen failure: go back to `generate`
 - Compatibility or tester failure: inspect structured checks first, then choose `design` or `generate`
 - Mutable state exists but replay or dump/load logic is missing: go back to `design`, fix the persistence plan, then regenerate
+- Replay rows exist but only one step survives after a multi-step run: treat this as a persistence design bug first. Check whether the code used `tick` (duration) where it needed a monotonically increasing replay `step`.
 - Registry visibility failure: fix registry integration, not the prompt wording

@@ -53,7 +53,7 @@ AgentSociety 2 围绕三个主要组件构建：
            color=lightblue;
            Society [label="AgentSociety\n协调器"];
            Router [label="Router\n路由器"];
-           Storage [label="ReplayWriter\n存储"];
+           Storage [label="ReplayWriter / Workspace\n存储"];
        }
 
        subgraph cluster_agents {

@@ -111,6 +111,7 @@ env.register_module(MyCustomEnvironment())
 ```python
 import asyncio
 from datetime import datetime
+from pathlib import Path
 from agentsociety2 import PersonAgent
 from agentsociety2.env import CodeGenRouter
 from agentsociety2.contrib.env import SimpleSocialSpace
@@ -118,9 +119,9 @@ from agentsociety2.storage import ReplayWriter
 from agentsociety2.society import AgentSociety
 
 async def main():
-    # Setup replay writer for experiment tracking
-    writer = ReplayWriter("my_experiment.db")
-    await writer.initialize()
+    # Setup replay writer for environment dataset tracking
+    writer = ReplayWriter(Path("my_experiment.db"))
+    await writer.init()
 
     # Create agents first (needed for SimpleSocialSpace)
     agents = [
@@ -132,11 +133,11 @@ async def main():
     env_router = CodeGenRouter(
         env_modules=[SimpleSocialSpace(
             agent_id_name_pairs=[(a.id, a.name) for a in agents]
-        )]
+        )],
+        replay_writer=writer,
     )
-    env_router.set_replay_writer(writer)
 
-    # Create the society with replay enabled
+    # Create the society
     society = AgentSociety(
         agents=agents,
         env_router=env_router,
@@ -217,30 +218,36 @@ Routers mediate agent-environment interactions using different reasoning pattern
 
 ### Storage
 
-The ReplayWriter system captures all interactions for analysis:
+AgentSociety 2 currently has two persistence paths:
 
 ```python
 from agentsociety2.storage import ReplayWriter
+from pathlib import Path
 
-writer = ReplayWriter("experiment.db")
-await writer.initialize()
+writer = ReplayWriter(Path("experiment.db"))
+await writer.init()
 
-# Framework tables (auto-created):
-# - agent_profile: Agent profiles
-# - agent_status: Agent status over time
-# - agent_dialog: Agent LLM interactions
+# Replay catalog tables (auto-created):
+# - replay_dataset_catalog
+# - replay_column_catalog
 
-# Custom tables
+# Environment modules can register and write their own replay tables.
 from agentsociety2.storage import ColumnDef, TableSchema
 schema = TableSchema(
     name="custom_metrics",
     columns=[
-        ColumnDef(name="metric_id", dtype="INTEGER", primary_key=True),
-        ColumnDef(name="value", dtype="REAL"),
-    ]
+        ColumnDef("metric_id", "INTEGER", nullable=False),
+        ColumnDef("value", "REAL"),
+    ],
+    primary_key=["metric_id"],
 )
-writer.register_table(schema)
+await writer.register_table(schema)
 ```
+
+- **ReplayWriter / SQLite**: stores environment replay datasets plus dataset/column catalog metadata.
+- **PersonAgent workspace**: stores per-agent local files under `run/agents/agent_xxxx/`, such as `agent_config.json`, `session_state.json`, `tool_calls.jsonl`, and `thread_messages.jsonl`.
+
+Legacy SQLite tables like `agent_profile`, `agent_status`, and `agent_dialog` are kept only for compatibility when reading old experiment databases; new runs no longer write them.
 
 ## Configuration
 

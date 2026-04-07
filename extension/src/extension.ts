@@ -38,6 +38,7 @@ import { AIChatInvoker } from './aiChatInvoker';
 import { LiteratureIndexViewer } from './literatureIndexViewer';
 import { StepsViewer } from './stepsViewer';
 import { ExperimentResultsViewer } from './experimentResultsViewer';
+import { hasConfiguredLlmApiKey, migrateLegacySettingsToEnv } from './runtimeConfig';
 
 // Global backend manager instance
 let backendManager: BackendManager | null = null;
@@ -46,6 +47,11 @@ let mineruParser: MinerUParser | null = null;
 
 export function activate(context: vscode.ExtensionContext) {
   console.log(localize('extension.activate'));
+
+  const migratedLegacyKeys = migrateLegacySettingsToEnv();
+  if (migratedLegacyKeys.length > 0) {
+    console.log(`Migrated legacy AI Social Scientist settings to .env: ${migratedLegacyKeys.join(', ')}`);
+  }
 
   // Initialize backend manager
   backendManager = new BackendManager(context);
@@ -62,7 +68,7 @@ export function activate(context: vscode.ExtensionContext) {
   const config = vscode.workspace.getConfiguration('aiSocialScientist');
   const autoStart = config.get<boolean>('backend.autoStart', true);
   const hasCompletedInitialSetup = context.globalState.get<boolean>('configPage.hasCompletedInitialSetup');
-  const hasLlmApiKey = !!(config.get<string>('env.llmApiKey', '')?.trim());
+  const hasLlmApiKey = hasConfiguredLlmApiKey();
 
   if (!hasCompletedInitialSetup || !hasLlmApiKey) {
     // 首次启动或缺少必填配置时，打开配置页
@@ -482,7 +488,9 @@ export function activate(context: vscode.ExtensionContext) {
         } else {
           vscode.window.showErrorMessage('Failed to start backend service. Check the output panel for details.');
         }
+        return started;
       }
+      return false;
     }
   );
 
@@ -506,7 +514,9 @@ export function activate(context: vscode.ExtensionContext) {
         } else {
           vscode.window.showErrorMessage('Failed to restart backend service. Check the output panel for details.');
         }
+        return restarted;
       }
+      return false;
     }
   );
 

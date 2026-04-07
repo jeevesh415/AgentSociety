@@ -65,9 +65,9 @@
 
 展示全面的数据跟踪：
 
-* 设置 ReplayWriter 用于自动数据捕获
-* 记录智能体配置文件、对话和状态
-* 读回记录的数据进行分析
+* 为环境模块启用 ReplayWriter
+* 生成 replay catalog 和环境 replay dataset
+* 结合 agent workspace 文件检查本地 thread / 工具日志
 
 博弈论示例
 ---------------------

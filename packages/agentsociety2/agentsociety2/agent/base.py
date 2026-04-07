@@ -6,7 +6,6 @@
 
 - **LLM 交互**: 通过 litellm Router 实现与各种 LLM 的统一交互
 - **环境交互**: 通过 :class:`~agentsociety2.env.RouterBase` 与仿真环境交互
-- **回放写入**: 通过 :class:`~agentsociety2.storage.ReplayWriter` 记录仿真状态
 - **Token 统计**: 追踪 LLM 调用的 token 使用量
 - **Skill 状态管理**: 支持动态 skill 状态的注册与访问
 
@@ -41,10 +40,7 @@ import os
 from abc import ABC, abstractmethod
 from dataclasses import dataclass, field
 from datetime import datetime
-from typing import TYPE_CHECKING, Any, Dict, Literal, Optional, Tuple, Type, TypeVar, overload
-
-if TYPE_CHECKING:
-    from agentsociety2.storage import ReplayWriter
+from typing import Any, Dict, Literal, Optional, Type, TypeVar, overload
 
 import json_repair
 from agentsociety2.config import extract_json
@@ -93,7 +89,6 @@ def _is_rate_limit_like_error(error: Exception) -> bool:
 
 __all__ = [
     "AgentBase",
-    "DIALOG_TYPE_REFLECTION",
     "LLMInteractionHistory",
 ]
 
@@ -103,10 +98,6 @@ _ENABLE_LLM_HISTORY = os.getenv("ENABLE_LLM_HISTORY", "false").lower() in (
     "1",
     "yes",
 )
-
-# Dialog type for replay
-DIALOG_TYPE_REFLECTION = 0
-
 
 @dataclass
 class LLMInteractionHistory:
@@ -143,7 +134,6 @@ class AgentBase(ABC):
 
     - LLM 交互（通过 litellm Router）
     - 环境交互（通过 RouterBase）
-    - 回放写入（通过 ReplayWriter）
     - Token 使用统计
 
     子类必须实现以下抽象方法：
@@ -170,14 +160,12 @@ class AgentBase(ABC):
         id: int,
         profile: Any,
         name: Optional[str] = None,
-        replay_writer: Optional["ReplayWriter"] = None,
     ):
         """初始化 Agent 实例。
 
         :param id: 智能体唯一标识符。
         :param profile: 智能体画像对象（dict 或任意可解析类型）。子类应负责把 profile 解析为自身状态。
         :param name: 可选显示名称；为空时按 ``profile["name"]`` 或 ``Agent_{id}`` 推导。
-        :param replay_writer: 可选回放写入器（也可后续通过 :meth:`set_replay_writer` 注入）。
         """
         self._id = id
         self._profile = profile
@@ -194,7 +182,6 @@ class AgentBase(ABC):
         self._logger = get_logger()
         self._llm_interaction_history: list[LLMInteractionHistory] = []
         self._token_usage_stats: dict[str, TokenUsageStats] = {}
-        self._replay_writer = replay_writer
 
         # ── Skill 动态状态容器 ──
         # skills 可以通过 set_skill_state/get_skill_state 管理自己的状态
@@ -219,7 +206,6 @@ class AgentBase(ABC):
 - id (int): The unique identifier for the agent.
 - profile (dict | Any): The profile of the agent. Can be a dictionary with agent attributes (name, gender, age, education, occupation, marriage_status, persona, background_story, etc.) or any other type that the agent subclass can parse.
 - name (str, optional): Display name. If omitted, taken from profile["name"] or "Agent_{{id}}".
-- replay_writer (ReplayWriter, optional): Replay writer for storing simulation state. Can also be set later via set_replay_writer().
 
 **Note:** This is an abstract base class. Do not use it directly. Subclasses should override this method to provide specific descriptions and schemas for their profile format.
 
@@ -250,7 +236,6 @@ class AgentBase(ABC):
 - id (int): The unique identifier for the agent.
 - profile (dict | Any): The profile of the agent. Can be a dictionary with agent attributes or any other type that the agent subclass can parse.
 - name (str, optional): Display name. If omitted, taken from profile["name"] or "Agent_{{id}}".
-- replay_writer (ReplayWriter, optional): Replay writer for storing simulation state.
 
 **Note:** This subclass has not provided a detailed description. Please refer to the class documentation or source code for specific initialization parameters and profile format.
 """
@@ -681,16 +666,6 @@ Remember: You are simulating a real person living in a simulated world. Your beh
         """
         ...
 
-    # ==================== Replay Data Methods ====================
-
-    def set_replay_writer(self, writer: "ReplayWriter") -> None:
-        """设置回放数据写入器。
-
-        Args:
-            writer: ReplayWriter 实例，用于存储回放数据。
-        """
-        self._replay_writer = writer
-
     def get_profile(self) -> Dict[str, Any]:
         """获取智能体画像。
 
@@ -709,81 +684,6 @@ Remember: You are simulating a real person living in a simulated world. Your beh
         """智能体显示名称。"""
         return self._name
 
-    async def _write_status_snapshot(
-        self,
-        step: int,
-        t: datetime,
-        action: Optional[str] = None,
-        status: Optional[Dict[str, Any]] = None,
-    ) -> None:
-        """写入智能体状态快照到回放数据库。
-
-        子类在每一步调用此方法以记录状态。
-
-        Note:
-            位置数据（经纬度）应由 MobilitySpace 模块写入其自己的表，
-            而非通过此方法。
-
-        Args:
-            step: 仿真步编号。
-            t: 仿真时间。
-            action: 当前动作描述（可选）。
-            status: 状态数据字典（可选）。
-        """
-        if self._replay_writer is not None:
-            await self._replay_writer.write_agent_status(
-                agent_id=self._id,
-                step=step,
-                t=t,
-                action=action,
-                status=status or {},
-            )
-
-    async def _write_dialog(
-        self,
-        step: int,
-        t: datetime,
-        dialog_type: int,
-        speaker: str,
-        content: str,
-    ) -> None:
-        """写入智能体对话记录到回放数据库。
-
-        子类调用此方法以记录对话和思考。AgentBase 仅支持类型 0（反思），
-        其他类型应由其他模块写入。
-
-        Args:
-            step: 仿真步编号。
-            t: 仿真时间。
-            dialog_type: 对话类型。AgentBase 必须是 0（反思）。
-            speaker: 说话者名称。
-            content: 对话内容。
-        """
-        if dialog_type != DIALOG_TYPE_REFLECTION:
-            return
-        if self._replay_writer is not None:
-            await self._replay_writer.write_agent_dialog(
-                agent_id=self._id,
-                step=step,
-                t=t,
-                dialog_type=dialog_type,
-                speaker=speaker,
-                content=content,
-            )
-
-    async def _get_position(self) -> Tuple[Optional[float], Optional[float]]:
-        """获取智能体当前位置。
-
-        可由子类重写或通过回调设置，从环境模块（如 MobilitySpace）获取位置。
-
-        Returns:
-            元组 (经度, 纬度)，不可用时返回 (None, None)。
-        """
-        # Check if a position callback has been set
-        if hasattr(self, "_get_position_callback") and self._get_position_callback:
-            return await self._get_position_callback()
-        return None, None
-
     async def acompletion_with_pydantic_validation(
         self,
         model_type: Type[T],
@@ -799,13 +699,11 @@ Remember: You are simulating a real person living in a simulated world. Your beh
 
         支持多轮对话以向 LLM 提供错误反馈并进行修正。
 
-        流程：
-        1. 发送初始请求到 LLM
-        2. 从响应中提取 JSON 片段（``extract_json``），整段即以 ``{``/``[`` 开头时回退用全文；统一用 ``json_repair.loads`` 解析
-        3. 尝试根据 Pydantic 模型验证
-        4. 验证失败时，向 LLM 提供错误反馈并立即重试
-        5. 发生 429（速率限制）错误时，使用二进制指数退避重试
-        6. 返回验证通过的 Pydantic 模型实例
+        该方法会先向 LLM 发送请求，再从响应中提取 JSON 片段（``extract_json``），
+        当整段内容本身就以 ``{`` 或 ``[`` 开头时回退使用全文，并统一交给
+        ``json_repair.loads`` 解析。随后会使用目标 Pydantic 模型进行验证；
+        如果验证失败，则立即把错误反馈给 LLM 并重试；如果遇到 429（速率限制）
+        错误，则改为使用二进制指数退避。最终返回验证通过的模型实例。
 
         Args:
             model_type: 用于验证的 Pydantic 模型类型。
@@ -829,19 +727,6 @@ Remember: You are simulating a real person living in a simulated world. Your beh
         Note:
             二进制指数退避仅在检测到 429（速率限制）错误时应用。
             对于验证错误和其他非速率限制错误，函数立即重试以向 LLM 提供更快的反馈。
-
-        Example:
-            class MyModel(BaseModel):
-                name: str
-                age: int
-
-            result = await agent.acompletion_with_pydantic_validation(
-                model_type=MyModel,
-                messages=[{"role": "user", "content": "Generate a person"}],
-                tick=3600,
-                t=datetime.now(),
-            )
-            print(result.name, result.age)
         """
         assert (
             self._router is not None and self._model_name is not None

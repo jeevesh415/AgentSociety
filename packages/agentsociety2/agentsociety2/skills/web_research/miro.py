@@ -17,11 +17,6 @@ from agentsociety2.logger import get_logger
 
 logger = get_logger()
 
-MCP_URL = Config.WEB_SEARCH_API_URL
-MCP_TOKEN = Config.WEB_SEARCH_API_TOKEN
-DEFAULT_LLM = Config.MIROFLOW_DEFAULT_LLM
-DEFAULT_AGENT = Config.MIROFLOW_DEFAULT_AGENT
-
 
 async def execute_web_research(
     query: str,
@@ -38,14 +33,19 @@ async def execute_web_research(
     Returns:
         Dictionary with research result
     """
-    if not MCP_URL:
+    mcp_url = Config.get_web_search_api_url()
+    mcp_token = Config.get_web_search_api_token()
+    default_llm = Config.get_miroflow_default_llm()
+    default_agent = Config.get_miroflow_default_agent()
+
+    if not mcp_url:
         return {
             "success": False,
             "error": "WEB_SEARCH_API_URL not set",
             "content": "WEB_SEARCH_API_URL environment variable not configured",
         }
 
-    if not MCP_TOKEN:
+    if not mcp_token:
         return {
             "success": False,
             "error": "WEB_SEARCH_API_TOKEN not set",
@@ -60,17 +60,17 @@ async def execute_web_research(
             "content": "Query cannot be empty",
         }
 
-    llm = (llm or DEFAULT_LLM).strip()
-    agent = (agent or DEFAULT_AGENT).strip()
+    llm = (llm or default_llm).strip()
+    agent = (agent or default_agent).strip()
     task_id = f"miro_web_research_{uuid.uuid4().hex[:8]}"
 
-    logger.info(f"Miro MCP: url={MCP_URL}, task_id={task_id}")
+    logger.info(f"Miro MCP: url={mcp_url}, task_id={task_id}")
 
-    headers = {"Authorization": f"Bearer {MCP_TOKEN}"}
+    headers = {"Authorization": f"Bearer {mcp_token}"}
 
     try:
         async with create_mcp_http_client(headers=headers) as http_client:
-            async with streamable_http_client(MCP_URL, http_client=http_client) as (
+            async with streamable_http_client(mcp_url, http_client=http_client) as (
                 read,
                 write,
                 _,
@@ -122,7 +122,7 @@ async def execute_web_research(
             "content": f"## Miro Web Research (MCP) Results\n\n{content}",
             "query": query,
             "task_id": task_id,
-            "mcp_url": MCP_URL,
+            "mcp_url": mcp_url,
             "llm": llm,
             "agent": agent,
         }

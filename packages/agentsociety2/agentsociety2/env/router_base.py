@@ -67,7 +67,6 @@ from agentsociety2.env.pydantic_collector import PydanticModelCollector
 
 import black
 import json_repair
-import logging
 
 T = TypeVar("T", bound=BaseModel)
 
@@ -303,20 +302,6 @@ class RouterBase(ABC):
         """
         for env_module in self.env_modules:
             env_module.set_replay_writer(writer)
-
-    async def get_agent_position(self, agent_id: int) -> Tuple[Optional[float], Optional[float]]:
-        """从任意支持的位置模块获取 agent 坐标。
-
-        :param agent_id: agent id。
-        :returns: ``(lng, lat)``；不可用时返回 ``(None, None)``。
-        """
-        for env_module in self.env_modules:
-            # Only call if module implements get_agent_position
-            if hasattr(env_module, 'get_agent_position'):
-                lng, lat = await env_module.get_agent_position(agent_id)
-                if lng is not None and lat is not None:
-                    return lng, lat
-        return None, None
 
     def get_system_prompt(self) -> str:
         """构建 router 侧的通用 system prompt（不含具体任务指令）。
@@ -842,7 +827,6 @@ Your generated world description:"""
             dialog: list[AllMessageValues] = [{"role": "user", "content": prompt}]
 
             router, model_name = get_llm_router_and_model("coder")
-            last_error = None
             max_retries = self.max_llm_call_retry
             
             for attempt in range(max_retries + 1):
@@ -865,7 +849,6 @@ Your generated world description:"""
                             f"Retrying after {delay:.2f} seconds with exponential backoff. Error: {str(e)}"
                         )
                         await asyncio.sleep(delay)
-                        last_error = e
                         continue
 
                     if attempt >= max_retries:
@@ -874,7 +857,6 @@ Your generated world description:"""
                         f"Request failed when generating world description (attempt {attempt + 1}/{max_retries + 1}). "
                         f"Retrying immediately. Error: {str(e)}"
                     )
-                    last_error = e
             logger.info(f"  ✓ 生成世界描述的response: {world_description}")
 
             if not world_description:
@@ -1119,7 +1101,6 @@ Your generated world description:"""
                 - final_answer: LLM生成的最终答案（summary文本）
                 - determined_status: 确定的执行状态（success/in_progress/fail/error）
         """
-        logger = get_logger()
         # logger.debug(
         #     f"RouterBase: Generating final answer - instruction: {instruction[:100]}..., "
         #     f"preliminary status: {status}, results keys: {list(results.keys())}"
