@@ -853,6 +853,13 @@ export function activate(context: vscode.ExtensionContext) {
     }
   );
 
+  const updateExtensionSkillsCommand = vscode.commands.registerCommand(
+    'aiSocialScientist.updateExtensionSkills',
+    async () => {
+      await projectStructureProvider.updateExtensionSkills();
+    }
+  );
+
   // 打开 Skill 目录命令
   const openSkillFolderCommand = vscode.commands.registerCommand(
     'aiSocialScientist.openSkillFolder',
@@ -1067,6 +1074,7 @@ export function activate(context: vscode.ExtensionContext) {
     reloadAgentSkillCommand,
     openAgentSkillDocCommand,
     removeAgentSkillCommand,
+    updateExtensionSkillsCommand,
     openSkillFolderCommand,
     formatJsonCommand,
     viewLiteratureIndexCommand,
