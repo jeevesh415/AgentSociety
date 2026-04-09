@@ -152,6 +152,9 @@ const translations: Record<string, Record<string, string>> = {
     'projectStructure.skillRemoveConfirm': '确定要删除自定义 Skill "{0}" 吗？此操作无法撤销。',
     'projectStructure.skillImportLocal': '从本地目录导入 Skill',
     'projectStructure.skillImportPlaceholder': '选择 Skill 导入方式',
+    'projectStructure.extensionSkillsUpdate': '更新 Skills',
+    'projectStructure.extensionSkillsUpdateSuccess': '已更新 {0} 个 Skills',
+    'projectStructure.extensionSkillsUpdateFailed': '更新 Skills 失败: {0}',
 
     // mineruInitializer.ts
     'mineruInitializer.promptDownload.message': 'MinerU CLI 已安装但模型未下载。PDF 解析需要模型支持。是否立即下载？',
@@ -250,6 +253,8 @@ const translations: Record<string, Record<string, string>> = {
     'projectStructure.literatureIndex': '文献索引',
     'projectStructure.articles': '篇文献',
     'projectStructure.files': '个文件',
+    'projectStructure.datasets': '数据集',
+    'projectStructure.datasetItem': '数据集',
   },
   'en-US': {
     // extension.ts
@@ -394,6 +399,9 @@ const translations: Record<string, Record<string, string>> = {
     'projectStructure.skillRemoveConfirm': 'Are you sure you want to remove custom skill "{0}"? This action cannot be undone.',
     'projectStructure.skillImportLocal': 'Import Skill from local directory',
     'projectStructure.skillImportPlaceholder': 'Select Skill import method',
+    'projectStructure.extensionSkillsUpdate': 'Update Skills',
+    'projectStructure.extensionSkillsUpdateSuccess': 'Updated {0} Skills',
+    'projectStructure.extensionSkillsUpdateFailed': 'Failed to update Skills: {0}',
 
     // mineruInitializer.ts
     'mineruInitializer.promptDownload.message': 'MinerU CLI is installed but models are not downloaded. PDF parsing requires models. Download now?',
@@ -492,6 +500,8 @@ const translations: Record<string, Record<string, string>> = {
     'projectStructure.literatureIndex': 'Literature Index',
     'projectStructure.articles': 'articles',
     'projectStructure.files': 'files',
+    'projectStructure.datasets': 'Datasets',
+    'projectStructure.datasetItem': 'Dataset',
   },
 };
 
