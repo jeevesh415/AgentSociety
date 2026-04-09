@@ -173,6 +173,9 @@ export class ConfigPageViewProvider {
           case 'validatePython':
             await this._handleValidatePython(message.config || {});
             break;
+          case 'validateLiteratureSearch':
+            await this._handleValidateLiteratureSearch(message.config || {});
+            break;
           case 'closeConfigPage':
             this._panel.dispose();
             break;
@@ -223,7 +226,8 @@ export class ConfigPageViewProvider {
       easypaperLlmModel: envConfig.easypaperLlmModel || 'qwen3-next-80b-a3b-instruct',
       easypaperVlmModel: envConfig.easypaperVlmModel || 'qwen3-vl-235b-a22b-thinking',
       easypaperVlmApiKey: envConfig.easypaperVlmApiKey || '',
-      literatureSearchApiUrl: envConfig.literatureSearchApiUrl || 'http://localhost:8002/api/v1/search',
+      literatureSearchApiUrl: envConfig.literatureSearchApiUrl || 'http://localhost:8008/api/search',
+      literatureSearchApiKey: envConfig.literatureSearchApiKey || '',
     };
 
     // 获取工作区信息
@@ -317,6 +321,7 @@ export class ConfigPageViewProvider {
       easypaperVlmModel: config.easypaperVlmModel,
       easypaperVlmApiKey: config.easypaperVlmApiKey,
       literatureSearchApiUrl: config.literatureSearchApiUrl,
+      literatureSearchApiKey: config.literatureSearchApiKey,
     });
 
     // If EasyPaper URL or any model field is set, write easypaper_agentsociety.yaml to workspace for EasyPaper to use
@@ -425,6 +430,73 @@ export class ConfigPageViewProvider {
     });
   }
 
+  /**
+   * 处理文献检索 API 验证请求
+   */
+  private async _handleValidateLiteratureSearch(config: Partial<ConfigValues>): Promise<void> {
+    const apiUrl = config.literatureSearchApiUrl || '';
+    const apiKey = config.literatureSearchApiKey || '';
+
+    try {
+      // 从 API URL 中提取基础 URL（去掉 /api/search 部分）
+      const baseUrl = apiUrl.replace(/\/api\/search\/?$/, '').replace(/\/$/, '');
+
+      // 首先检查健康状态
+      const healthUrl = `${baseUrl}/health`;
+      const healthResponse = await fetch(healthUrl, { method: 'GET' });
+
+      if (!healthResponse.ok) {
+        this._panel.webview.postMessage({
+          command: 'literatureValidationResult',
+          success: false,
+          error: `服务不可用: HTTP ${healthResponse.status}`,
+        });
+        return;
+      }
+
+      // 尝试获取数据源状态（验证认证）
+      const statsUrl = `${baseUrl}/api/stats`;
+      const statsResponse = await fetch(statsUrl, {
+        method: 'GET',
+        headers: apiKey ? { 'Authorization': `Bearer ${apiKey}` } : {},
+      });
+
+      if (statsResponse.status === 401 || statsResponse.status === 403) {
+        // 需要 API Key 或 API Key 无效
+        const errorMsg = apiKey ? 'API Key 无效' : '需要输入 API Key';
+        this._panel.webview.postMessage({
+          command: 'literatureValidationResult',
+          success: false,
+          error: errorMsg,
+        });
+        return;
+      }
+
+      if (!statsResponse.ok) {
+        this._panel.webview.postMessage({
+          command: 'literatureValidationResult',
+          success: false,
+          error: `验证失败: HTTP ${statsResponse.status}`,
+        });
+        return;
+      }
+
+      const statsData = await statsResponse.json() as { sources?: Record<string, unknown> };
+      this._panel.webview.postMessage({
+        command: 'literatureValidationResult',
+        success: true,
+        sources: statsData.sources,
+      });
+    } catch (error) {
+      const errorMessage = error instanceof Error ? error.message : '未知错误';
+      this._panel.webview.postMessage({
+        command: 'literatureValidationResult',
+        success: false,
+        error: `连接失败: ${errorMessage}`,
+      });
+    }
+  }
+
   private _getHtmlForWebview(webview: vscode.Webview): string {
     const scriptUri = webview.asWebviewUri(
       vscode.Uri.file(path.join(this._extensionPath, 'out', 'webview', 'configPage.js'))
@@ -461,7 +533,7 @@ export class ConfigPageViewProvider {
     this._envManager.dispose();
     while (this._disposables.length) {
       const d = this._disposables.pop();
-      if (d) {d.dispose();}
+      if (d) { d.dispose(); }
     }
   }
 }

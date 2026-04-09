@@ -98,10 +98,14 @@ BACKEND_HOST=0.0.0.0
 BACKEND_PORT=8001
 
 # 文献检索API（必需）
-LITERATURE_SEARCH_API_URL=http://172.17.0.1:8002/api/v1/search
+LITERATURE_SEARCH_API_URL=http://localhost:8008/api/search
+LITERATURE_SEARCH_API_KEY=lit-your-api-key-here
 ```
 
-**重要提示**：`LITERATURE_SEARCH_API_URL` 必须指向文献检索服务的地址。默认值 `http://172.17.0.1:8002/api/v1/search` 适用于Docker环境。
+**重要提示**：
+- `LITERATURE_SEARCH_API_URL` 必须指向文献检索服务的地址
+- `LITERATURE_SEARCH_API_KEY` 用于认证，请替换为实际的 API Key
+- 默认支持多数据源搜索：local（本地知识库）、arxiv、crossref、openalex
 
 ### 4. 启动后端服务
 
