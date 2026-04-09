@@ -51,7 +51,8 @@ const DEFAULT_VALUES: ConfigValues = {
   easypaperLlmModel: 'qwen3-next-80b-a3b-instruct',
   easypaperVlmModel: 'qwen3-vl-235b-a22b-thinking',
   easypaperVlmApiKey: '',
-  literatureSearchApiUrl: 'http://localhost:8002/api/v1/search',
+  literatureSearchApiUrl: 'http://localhost:8008/api/search',
+  literatureSearchApiKey: '',
 };
 
 interface ConfigPageAppProps {
@@ -80,6 +81,7 @@ export const ConfigPageApp: React.FC<ConfigPageAppProps> = ({ vscode }) => {
     embedding: { validating: false, valid: null, error: null },
     easypaperVlm: { validating: false, valid: null, error: null },
     python: { validating: false, valid: null, error: null },
+    literature: { validating: false, valid: null, error: null },
   });
 
   // Validation handler - reads current form values
@@ -162,6 +164,24 @@ export const ConfigPageApp: React.FC<ConfigPageAppProps> = ({ vscode }) => {
       });
       return;
     }
+
+    // For literature search, validate API URL and Key
+    if (llmType === 'literature') {
+      if (!values.literatureSearchApiUrl) {
+        notification.warning({
+          message: t('configPage.validationFailed'),
+          description: '请输入文献检索 API URL',
+          placement: 'top',
+        });
+        return;
+      }
+      setValidationState(prev => ({ ...prev, [llmType]: { validating: true, valid: null, error: null } }));
+      vscode.postMessage({
+        command: 'validateLiteratureSearch',
+        config: values,
+      });
+      return;
+    }
   };
 
   React.useEffect(() => {
@@ -170,7 +190,7 @@ export const ConfigPageApp: React.FC<ConfigPageAppProps> = ({ vscode }) => {
 
   React.useEffect(() => {
     const handleMessage = (event: MessageEvent) => {
-      const message = event.data as { command: string; [key: string]: any };
+      const message = event.data as { command: string;[key: string]: any };
 
       if (message.command === 'initialConfig') {
         const config = message.config || {};
@@ -221,6 +241,19 @@ export const ConfigPageApp: React.FC<ConfigPageAppProps> = ({ vscode }) => {
           ...prev,
           [msg.llmType]: { validating: false, valid: msg.success ?? false, error: msg.error || null },
         }));
+      } else if (message.command === 'literatureValidationResult') {
+        const msg = message as { success?: boolean; error?: string; sources?: Record<string, unknown> };
+        setValidationState(prev => ({
+          ...prev,
+          literature: { validating: false, valid: msg.success ?? false, error: msg.error || null },
+        }));
+        if (msg.success && msg.sources) {
+          notification.success({
+            message: '文献检索配置验证成功',
+            description: `服务已连接，数据源: ${Object.keys(msg.sources).join(', ')}`,
+            placement: 'top',
+          });
+        }
       }
     };
 
@@ -447,9 +480,30 @@ export const ConfigPageApp: React.FC<ConfigPageAppProps> = ({ vscode }) => {
               </Card>
 
               {/* 文献检索 */}
-              <Card size="small" title="文献检索">
+              <Card size="small" title="文献检索" style={{ marginBottom: 12 }}>
                 <Form.Item name="literatureSearchApiUrl" label="API URL">
-                  <Input placeholder="http://localhost:8002/api/v1/search" />
+                  <Input placeholder="http://localhost:8008/api/search" />
+                </Form.Item>
+                <Form.Item name="literatureSearchApiKey" label="API Key">
+                  <Input.Password placeholder="lit-xxx" autoComplete="off" />
+                </Form.Item>
+                <Form.Item>
+                  <Space>
+                    <Button
+                      size="small"
+                      icon={<CheckCircleOutlined />}
+                      loading={validationState.literature?.validating}
+                      onClick={() => handleValidate('literature')}
+                    >
+                      验证配置
+                    </Button>
+                    {validationState.literature?.valid === true && (
+                      <Text type="success">✓ 验证成功</Text>
+                    )}
+                    {validationState.literature?.valid === false && (
+                      <Text type="danger">✗ {validationState.literature.error}</Text>
+                    )}
+                  </Space>
                 </Form.Item>
               </Card>
             </Panel>

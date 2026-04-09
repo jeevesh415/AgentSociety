@@ -45,15 +45,40 @@ Python API
 
    from agentsociety2.skills.literature import search_literature_and_save, load_literature_index
 
-   # 搜索并保存文献
+   # 搜索并保存文献（默认搜索所有数据源）
    await search_literature_and_save(
        workspace_path=Path("./workspace"),
        query="agent-based modeling social networks",
-       top_k=10
+       limit=10,
+       year_from=2020,      # 可选：年份筛选
+       year_to=2024,
+       enable_multi_query=True,  # 可选：启用多查询模式
+   )
+
+   # 指定数据源搜索
+   await search_literature_and_save(
+       workspace_path=Path("./workspace"),
+       query="machine learning",
+       limit=5,
+       sources=["local", "arxiv"],  # 可选：指定数据源
    )
 
    # 加载文献索引
    index = load_literature_index(workspace_path=Path("./workspace"))
+
+**数据源**:
+- ``local``: RAGFlow 本地知识库
+- ``arxiv``: arXiv 预印本平台
+- ``crossref``: CrossRef DOI 元数据库
+- ``openalex``: OpenAlex 学术图谱 (2.5亿+ 论文)
+
+**配置**:
+需要在 ``.env`` 文件中配置 API:
+
+.. code-block:: bash
+
+   LITERATURE_SEARCH_API_URL=http://localhost:8008/api/search
+   LITERATURE_SEARCH_API_KEY=lit-your-api-key-here
 
 假设技能 (hypothesis)
 ~~~~~~~~~~~~~~~~~~~~~~~

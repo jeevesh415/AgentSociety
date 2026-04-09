@@ -29,11 +29,11 @@ from agentsociety2.config import get_llm_router
 async def main():
     parser = argparse.ArgumentParser(description="Search academic literature")
     parser.add_argument("query", help="Search query")
-    parser.add_argument("--top-k", type=int, default=3, help="Number of articles")
-    parser.add_argument(
-        "--no-multi-query", action="store_true", help="Disable multi-query"
-    )
+    parser.add_argument("--limit", type=int, default=10, help="Number of articles (default: 10)")
+    parser.add_argument("--year-from", type=int, default=None, help="Filter by year (start)")
+    parser.add_argument("--year-to", type=int, default=None, help="Filter by year (end)")
     parser.add_argument("--workspace", default=".", help="Workspace path")
+    parser.add_argument("--multi-query", action="store_true", help="Enable multi-query mode (split complex queries into subtopics)")
 
     args = parser.parse_args()
 
@@ -44,8 +44,10 @@ async def main():
         query=args.query,
         workspace_path=workspace_path,
         router=router,
-        top_k=args.top_k,
-        enable_multi_query=not args.no_multi_query,
+        limit=args.limit,
+        year_from=args.year_from,
+        year_to=args.year_to,
+        enable_multi_query=args.multi_query,
     )
 
     if result.get("success"):

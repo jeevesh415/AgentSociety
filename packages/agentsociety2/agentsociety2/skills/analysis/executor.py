@@ -38,9 +38,11 @@ logger = get_logger()
 # 数据结构
 # ─────────────────────────────────────────────────────────────────────────
 
+
 @dataclass
 class ExecutionResult:
     """代码执行结果"""
+
     success: bool
     stdout: str = ""
     stderr: str = ""
@@ -52,6 +54,7 @@ class ExecutionResult:
 @dataclass
 class ToolInfo:
     """工具信息"""
+
     name: str
     description: str
     tool_type: str = "builtin"
@@ -60,6 +63,7 @@ class ToolInfo:
 
 class ToolResult(BaseModel):
     """工具执行结果"""
+
     success: bool
     content: str
     error: Optional[str] = None
@@ -68,6 +72,7 @@ class ToolResult(BaseModel):
 
 class ExecutionJudgment(BaseModel):
     """执行结果判断"""
+
     success: bool
     reason: str
     should_retry: bool = False
@@ -76,6 +81,7 @@ class ExecutionJudgment(BaseModel):
 
 class CodeExecutionJudgment(BaseModel):
     """代码执行裁判（与 CodeExecutor 的 ExecutionJudgment 字段一致，供 AnalysisRunner 解析 XML）"""
+
     success: bool
     reason: str
     should_retry: bool = False
@@ -85,6 +91,7 @@ class CodeExecutionJudgment(BaseModel):
 # ─────────────────────────────────────────────────────────────────────────
 # CodeExecutor: 代码执行器
 # ─────────────────────────────────────────────────────────────────────────
+
 
 class CodeExecutor:
     """Python 代码执行器"""
@@ -135,7 +142,9 @@ class CodeExecutor:
             db_filename = self._prepare_work_dir(work_dir, db_path, extra_files)
 
             # 构建 prompt
-            full_description = self._build_prompt(description, db_path, db_filename, extra_files)
+            full_description = self._build_prompt(
+                description, db_path, db_filename, extra_files
+            )
 
             # 迭代执行
             messages = [{"role": "user", "content": full_description}]
@@ -154,10 +163,12 @@ class CodeExecutor:
 
                 if not result.success and attempt < max_retries - 1:
                     # 添加错误反馈
-                    messages.append({
-                        "role": "user",
-                        "content": self._build_error_feedback(result, attempt)
-                    })
+                    messages.append(
+                        {
+                            "role": "user",
+                            "content": self._build_error_feedback(result, attempt),
+                        }
+                    )
 
             return result
         finally:
@@ -193,7 +204,9 @@ class CodeExecutor:
 
         # 执行代码
         executor = LocalCodeExecutor(work_dir=work_dir)
-        exec_result = await executor.execute(code, dependencies=dependencies, timeout=timeout)
+        exec_result = await executor.execute(
+            code, dependencies=dependencies, timeout=timeout
+        )
 
         # 判断结果
         judgment = await self._judge_execution(code, exec_result, work_dir)
@@ -274,6 +287,7 @@ The "[truncated for display]" marker means text was truncated for brevity—the 
         schema_info = ""
         if db_path and db_path.exists():
             from .data import DataReader
+
             reader = DataReader(db_path)
             schema = reader.read_schema()
             schema_info = f"""
@@ -290,8 +304,7 @@ The "[truncated for display]" marker means text was truncated for brevity—the 
         files_info = ""
         if db_filename:
             other_files = [
-                Path(f).name for f in extra_files
-                if Path(f).name != db_filename
+                Path(f).name for f in extra_files if Path(f).name != db_filename
             ]
             files_info = f"""
 ## Available Files
@@ -338,7 +351,17 @@ Please fix the issues and generate corrected code."""
 
     def _collect_artifacts(self, work_dir: Path, files_before: set) -> List[str]:
         """收集生成的文件"""
-        artifact_extensions = {".png", ".jpg", ".jpeg", ".svg", ".pdf", ".webp", ".csv", ".json", ".txt"}
+        artifact_extensions = {
+            ".png",
+            ".jpg",
+            ".jpeg",
+            ".svg",
+            ".pdf",
+            ".webp",
+            ".csv",
+            ".json",
+            ".txt",
+        }
         files_after = {p for p in work_dir.rglob("*") if p.is_file()}
         new_files = files_after - files_before
 
@@ -368,6 +391,7 @@ Please fix the issues and generate corrected code."""
 # ToolRegistry: 工具注册表
 # ─────────────────────────────────────────────────────────────────────────
 
+
 class ToolRegistry:
     """工具注册表"""
 
@@ -384,7 +408,10 @@ class ToolRegistry:
             "read_file": (ReadFileTool, "Read file contents"),
             "write_file": (WriteFileTool, "Write content to files"),
             "glob": (GlobTool, "Find files matching glob patterns"),
-            "search_file_content": (SearchFileContentTool, "Search for content in files"),
+            "search_file_content": (
+                SearchFileContentTool,
+                "Search for content in files",
+            ),
             "replace": (ReplaceTool, "Replace text in files"),
             "run_shell_command": (RunShellCommandTool, "Execute shell commands"),
             "write_todos": (WriteTodoTool, "Manage todo lists"),
@@ -434,6 +461,7 @@ class ToolRegistry:
 # 内置工具实现
 # ─────────────────────────────────────────────────────────────────────────
 
+
 class GlobTool:
     """查找匹配 glob 模式的文件"""
 
@@ -448,10 +476,18 @@ class GlobTool:
         try:
             search_dir.relative_to(self.workspace_path)
         except ValueError:
-            return ToolResult(success=False, content="Path outside workspace", error="path_outside_workspace")
+            return ToolResult(
+                success=False,
+                content="Path outside workspace",
+                error="path_outside_workspace",
+            )
 
         if not search_dir.exists():
-            return ToolResult(success=False, content=f"Path not found: {search_dir}", error="path_not_found")
+            return ToolResult(
+                success=False,
+                content=f"Path not found: {search_dir}",
+                error="path_not_found",
+            )
 
         matches = []
         for item in sorted(search_dir.rglob(pattern)):
@@ -482,19 +518,29 @@ class ListDirectoryTool:
         try:
             target_dir.relative_to(self.workspace_path)
         except ValueError:
-            return ToolResult(success=False, content="Path outside workspace", error="path_outside_workspace")
+            return ToolResult(
+                success=False,
+                content="Path outside workspace",
+                error="path_outside_workspace",
+            )
 
         if not target_dir.exists() or not target_dir.is_dir():
-            return ToolResult(success=False, content=f"Not a directory: {rel_path}", error="not_a_directory")
+            return ToolResult(
+                success=False,
+                content=f"Not a directory: {rel_path}",
+                error="not_a_directory",
+            )
 
         entries = []
         for entry in target_dir.iterdir():
             should_ignore = any(fnmatch.fnmatch(entry.name, p) for p in ignore_patterns)
             if not should_ignore:
-                entries.append({
-                    "name": entry.name,
-                    "type": "directory" if entry.is_dir() else "file",
-                })
+                entries.append(
+                    {
+                        "name": entry.name,
+                        "type": "directory" if entry.is_dir() else "file",
+                    }
+                )
 
         entries.sort(key=lambda x: (x["type"] != "directory", x["name"]))
         return ToolResult(
@@ -518,10 +564,18 @@ class ReadFileTool:
         try:
             target_file.relative_to(self.workspace_path)
         except ValueError:
-            return ToolResult(success=False, content="Path outside workspace", error="path_outside_workspace")
+            return ToolResult(
+                success=False,
+                content="Path outside workspace",
+                error="path_outside_workspace",
+            )
 
         if not target_file.exists() or not target_file.is_file():
-            return ToolResult(success=False, content=f"File not found: {file_path}", error="file_not_found")
+            return ToolResult(
+                success=False,
+                content=f"File not found: {file_path}",
+                error="file_not_found",
+            )
 
         content = target_file.read_text(encoding="utf-8")
         if limit and len(content) > limit:
@@ -549,7 +603,11 @@ class WriteFileTool:
         try:
             target_file.relative_to(self.workspace_path)
         except ValueError:
-            return ToolResult(success=False, content="Path outside workspace", error="path_outside_workspace")
+            return ToolResult(
+                success=False,
+                content="Path outside workspace",
+                error="path_outside_workspace",
+            )
 
         if create_directories:
             target_file.parent.mkdir(parents=True, exist_ok=True)
@@ -616,10 +674,18 @@ class ReplaceTool:
         try:
             target_file.relative_to(self.workspace_path)
         except ValueError:
-            return ToolResult(success=False, content="Path outside workspace", error="path_outside_workspace")
+            return ToolResult(
+                success=False,
+                content="Path outside workspace",
+                error="path_outside_workspace",
+            )
 
         if not target_file.exists():
-            return ToolResult(success=False, content=f"File not found: {file_path}", error="file_not_found")
+            return ToolResult(
+                success=False,
+                content=f"File not found: {file_path}",
+                error="file_not_found",
+            )
 
         content = target_file.read_text(encoding="utf-8")
         count = content.count(old_text)
@@ -644,7 +710,9 @@ class RunShellCommandTool:
         directory = arguments.get("directory")
 
         if not command:
-            return ToolResult(success=False, content="Command is required", error="missing_command")
+            return ToolResult(
+                success=False, content="Command is required", error="missing_command"
+            )
 
         exec_dir = self.workspace_path
         if directory:
@@ -698,7 +766,12 @@ class RunShellCommandTool:
         return ToolResult(
             success=exit_code == 0,
             content="\n".join(content_parts),
-            data={"command": command, "stdout": stdout, "stderr": stderr, "exit_code": exit_code},
+            data={
+                "command": command,
+                "stdout": stdout,
+                "stderr": stderr,
+                "exit_code": exit_code,
+            },
         )
 
 
@@ -717,7 +790,9 @@ class WriteTodoTool:
                 error="InvalidArgument",
             )
 
-        in_progress_count = sum(1 for t in todos_data if t.get("status") == "in_progress")
+        in_progress_count = sum(
+            1 for t in todos_data if t.get("status") == "in_progress"
+        )
         if in_progress_count > 1:
             return ToolResult(
                 success=False,
@@ -737,7 +812,9 @@ class WriteTodoTool:
             content_text = f"Todo list updated with {len(todos_data)} items.\n\n"
             for todo in todos_data:
                 icon = status_icons.get(todo.get("status", "pending"), "•")
-                content_text += f"{icon} {todo.get('description', '')} ({todo.get('status')})\n"
+                content_text += (
+                    f"{icon} {todo.get('description', '')} ({todo.get('status')})\n"
+                )
 
         return ToolResult(
             success=True,
@@ -780,14 +857,16 @@ class LiteratureSearchTool:
         self.workspace_path = Path(workspace_path)
 
     async def execute(self, arguments: Dict[str, Any]) -> ToolResult:
-        from agentsociety2.skills.literature.search import search_literature
+        from agentsociety2.skills.literature import search_literature_and_save
+        from agentsociety2.config import get_llm_router
 
         query = arguments.get("query", "")
         limit = arguments.get("limit", 10)
 
-        result = await search_literature(
-            workspace_path=self.workspace_path,
+        result = await search_literature_and_save(
             query=query,
+            workspace_path=self.workspace_path,
+            router=get_llm_router("default"),
             limit=limit,
         )
 
@@ -836,7 +915,10 @@ class AnalysisRunner:
             "read_file": (ReadFileTool, "Read file contents"),
             "write_file": (WriteFileTool, "Write content to files"),
             "glob": (GlobTool, "Find files matching glob patterns"),
-            "search_file_content": (SearchFileContentTool, "Search for content in files"),
+            "search_file_content": (
+                SearchFileContentTool,
+                "Search for content in files",
+            ),
             "replace": (ReplaceTool, "Replace text in files"),
             "run_shell_command": (RunShellCommandTool, "Execute shell commands"),
             "write_todos": (WriteTodoTool, "Manage todo lists"),
@@ -1004,7 +1086,9 @@ for table in actual_tables:
                 for f_path in extra_files
                 if Path(f_path).name != db_filename
             ]
-            other_files_str = "\n".join(other_files_list) if other_files_list else "None"
+            other_files_str = (
+                "\n".join(other_files_list) if other_files_list else "None"
+            )
             file_path_info = f"""
 ## Available Files
 
@@ -1088,7 +1172,9 @@ Use these libraries for analysis and visualization:
                         )
                     continue
 
-                conversation_messages.append({"role": "assistant", "content": generated_code})
+                conversation_messages.append(
+                    {"role": "assistant", "content": generated_code}
+                )
 
                 detected_dependencies = dependency_detector.detect(generated_code)
                 exec_result = await local_executor.execute(
@@ -1130,7 +1216,9 @@ Use these libraries for analysis and visualization:
 **What to fix**: {judgment.retry_instruction}
 
 Please generate corrected code that addresses the issues above."""
-                    conversation_messages.append({"role": "user", "content": execution_output})
+                    conversation_messages.append(
+                        {"role": "user", "content": execution_output}
+                    )
                 else:
                     break
 
@@ -1148,7 +1236,9 @@ Please generate corrected code that addresses the issues above."""
 
             if not final_judgment.success:
                 self.logger.warning(
-                    "All %s attempts failed. Reason: %s", max_retries, final_judgment.reason
+                    "All %s attempts failed. Reason: %s",
+                    max_retries,
+                    final_judgment.reason,
                 )
                 return {
                     "success": False,
@@ -1246,7 +1336,9 @@ Please generate corrected code that addresses the issues above."""
             t = str(s).strip()
             if len(t) <= max_len:
                 return t
-            return t[:max_len] + "\n[output truncated for display, full length=%d]" % len(t)
+            return t[
+                :max_len
+            ] + "\n[output truncated for display, full length=%d]" % len(t)
 
         stdout_trunc = _trunc(exec_result.stdout if exec_result else "", 4000)
         stderr_trunc = _trunc(exec_result.stderr if exec_result else "", 2000)
@@ -1291,7 +1383,9 @@ You should analyze the execution result and determine:
 
 {judgment_prompt()}"""
 
-        messages: List[AllMessageValues] = [{"role": "user", "content": execution_summary}]
+        messages: List[AllMessageValues] = [
+            {"role": "user", "content": execution_summary}
+        ]
 
         response = await self._router.acompletion(
             model=self._model_name,
@@ -1302,4 +1396,6 @@ You should analyze the execution result and determine:
         if not content:
             raise XmlParseError("Empty judgment content", raw_content="")
 
-        return parse_llm_xml_to_model(content, CodeExecutionJudgment, root_tag="judgment")
+        return parse_llm_xml_to_model(
+            content, CodeExecutionJudgment, root_tag="judgment"
+        )
