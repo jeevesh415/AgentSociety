@@ -54,7 +54,7 @@ export class ProjectItem extends vscode.TreeItem {
   constructor(
     public readonly label: string,
     public readonly collapsibleState: vscode.TreeItemCollapsibleState,
-    public readonly type: 'initWorkspace' | 'configureEnv' | 'fixWorkspace' | 'aiChat' | 'topic' | 'hypothesis' | 'experiment' | 'paper' | 'file' | 'papers' | 'userdata' | 'prefillParams' | 'prefillParamsGroup' | 'prefillParamsEnv' | 'prefillParamsAgent' | 'settings' | 'custom' | 'customScan' | 'customTest' | 'customClean' | 'customAgentItem' | 'customEnvItem' | 'customAgentsGroup' | 'customEnvsGroup' | 'customWorkspace' | 'presentation' | 'presentationHypothesis' | 'presentationExperiment' | 'synthesis' | 'reportHtml' | 'reportMd' | 'agentSkillsGroup' | 'agentSkillItem' | 'agentSkillScan' | 'agentSkillImport' | 'agentSkillBuiltinGroup' | 'agentSkillCustomGroup' | 'agentSkillEnvGroup' | 'extensionSkillsGroup' | 'extensionSkillItem' | 'skillFile',
+    public readonly type: 'initWorkspace' | 'configureEnv' | 'fixWorkspace' | 'aiChat' | 'topic' | 'hypothesis' | 'experiment' | 'paper' | 'file' | 'papers' | 'userdata' | 'prefillParams' | 'prefillParamsGroup' | 'prefillParamsEnv' | 'prefillParamsAgent' | 'settings' | 'custom' | 'customScan' | 'customTest' | 'customClean' | 'customAgentItem' | 'customEnvItem' | 'customAgentsGroup' | 'customEnvsGroup' | 'customWorkspace' | 'presentation' | 'presentationHypothesis' | 'presentationExperiment' | 'synthesis' | 'reportHtml' | 'reportMd' | 'agentSkillsGroup' | 'agentSkillItem' | 'agentSkillScan' | 'agentSkillImport' | 'agentSkillBuiltinGroup' | 'agentSkillCustomGroup' | 'agentSkillEnvGroup' | 'extensionSkillsGroup' | 'extensionSkillUpdate' | 'extensionSkillItem' | 'skillFile' | 'datasets' | 'datasetItem',
     public readonly filePath?: string
   ) {
     // 调用父类构造函数，初始化树节点
@@ -102,6 +102,8 @@ export class ProjectItem extends vscode.TreeItem {
       'experiment': 'beaker',     // 烧杯图标，表示实验
       'papers': 'library',        // 图书馆图标，表示文献库
       'userdata': 'database',     // 数据库图标，表示用户数据
+      'datasets': 'database',     // 数据集根目录图标
+      'datasetItem': 'folder',    // 单个数据集图标
       'prefillParams': 'settings', // 设置图标，表示预填充参数
       'prefillParamsGroup': 'folder', // 文件夹图标，表示预填充参数组
       'prefillParamsEnv': 'symbol-namespace', // 命名空间图标，表示环境模块预置参数
@@ -129,6 +131,7 @@ export class ProjectItem extends vscode.TreeItem {
       'agentSkillCustomGroup': 'tools', // 自定义 Skills 组图标
       'agentSkillEnvGroup': 'server-environment', // 环境 Skills 组图标
       'extensionSkillsGroup': 'package', // 扩展自带 Skills
+      'extensionSkillUpdate': 'sync', // 更新 Skills 按钮
       'extensionSkillItem': 'puzzle', // 扩展自带 Skill
     };
 
@@ -650,9 +653,24 @@ export class ProjectStructureProvider implements vscode.TreeDataProvider<Project
 
     // AgentSociety（扩展自带）Skills 分组
     if (element.type === 'extensionSkillsGroup') {
+      const items: ProjectItem[] = [];
+
+      // Update Skills button at the top
+      const updateItem = new ProjectItem(
+        localize('projectStructure.extensionSkillsUpdate'),
+        vscode.TreeItemCollapsibleState.None,
+        'extensionSkillUpdate',
+        undefined
+      );
+      updateItem.command = {
+        command: 'aiSocialScientist.updateExtensionSkills',
+        title: localize('projectStructure.extensionSkillsUpdate')
+      };
+      items.push(updateItem);
+
       const skillsDir = path.join(this.context.extensionPath, 'skills');
       if (!fs.existsSync(skillsDir)) {
-        return [];
+        return items;
       }
       const skillDirs = fs.readdirSync(skillsDir).filter(name => {
         const skillPath = path.join(skillsDir, name);
@@ -660,7 +678,7 @@ export class ProjectStructureProvider implements vscode.TreeDataProvider<Project
         return fs.existsSync(skillPath) && fs.statSync(skillPath).isDirectory() && fs.existsSync(skillMdPath);
       });
 
-      return skillDirs.map(dirName => {
+      skillDirs.forEach(dirName => {
         const skillPath = path.join(skillsDir, dirName);
         const skillMdPath = path.join(skillPath, 'SKILL.md');
         const item = new ProjectItem(
@@ -671,8 +689,10 @@ export class ProjectStructureProvider implements vscode.TreeDataProvider<Project
         );
         item.contextValue = 'extensionSkillItem';
         (item as any).skillDirPath = skillPath;
-        return item;
+        items.push(item);
       });
+
+      return items;
     }
 
     // 扩展自带 Skill Item 展开时显示目录内容
@@ -968,6 +988,28 @@ export class ProjectStructureProvider implements vscode.TreeDataProvider<Project
         ));
       }
 
+      // 查找datasets目录，如果存在，创建一个"数据集"节点
+      const datasetsDir = path.join(workspacePath, 'datasets');
+      if (fs.existsSync(datasetsDir)) {
+        // 统计本地数据集数量（每个含 metadata.json 的子目录视为一个数据集）
+        const datasetCount = fs.readdirSync(datasetsDir)
+          .filter(name => {
+            const subDir = path.join(datasetsDir, name);
+            return fs.statSync(subDir).isDirectory() &&
+              fs.existsSync(path.join(subDir, 'metadata.json'));
+          }).length;
+
+        const label = datasetCount > 0
+          ? `${localize('projectStructure.datasets')} (${datasetCount})`
+          : localize('projectStructure.datasets');
+        items.push(new ProjectItem(
+          label,
+          vscode.TreeItemCollapsibleState.Collapsed,
+          'datasets',
+          undefined
+        ));
+      }
+
       // 查找custom目录，如果存在，创建一个"自定义模块"节点
       const customDir = path.join(workspacePath, 'custom');
       if (fs.existsSync(customDir)) {
@@ -1155,6 +1197,98 @@ export class ProjectStructureProvider implements vscode.TreeDataProvider<Project
               fullPath  // 存储目录路径，用于获取子节点
             ));
           }
+        }
+      }
+
+      return items;
+    }
+
+    // Datasets节点（数据集）的子节点：显示每个本地数据集
+    if (element.type === 'datasets') {
+      const workspaceFolder = vscode.workspace.workspaceFolders?.[0];
+      if (!workspaceFolder) {
+        return [];
+      }
+      const datasetsDir = path.join(workspaceFolder.uri.fsPath, 'datasets');
+      if (!fs.existsSync(datasetsDir)) {
+        return [];
+      }
+
+      const items: ProjectItem[] = [];
+      const entries = fs.readdirSync(datasetsDir);
+
+      for (const entry of entries) {
+        const fullPath = path.join(datasetsDir, entry);
+        if (!fs.statSync(fullPath).isDirectory()) { continue; }
+
+        const metadataPath = path.join(fullPath, 'metadata.json');
+        if (!fs.existsSync(metadataPath)) { continue; }
+
+        // 读取 metadata.json 获取友好名称
+        let displayName = entry;
+        let description = '';
+        try {
+          const metadata = JSON.parse(fs.readFileSync(metadataPath, 'utf-8'));
+          if (metadata.name) { displayName = metadata.name; }
+          if (metadata.description) { description = metadata.description; }
+          if (metadata.version) { displayName += ` (${metadata.version})`; }
+        } catch {
+          // metadata 解析失败，使用目录名
+        }
+
+        // 如果有 README.md，点击可预览
+        const readmePath = path.join(fullPath, 'README.md');
+
+        const item = new ProjectItem(
+          displayName,
+          vscode.TreeItemCollapsibleState.Collapsed,
+          'datasetItem',
+          fs.existsSync(readmePath) ? readmePath : undefined
+        );
+        item.tooltip = description || entry;
+        (item as any).datasetDirPath = fullPath;
+        items.push(item);
+      }
+
+      return items;
+    }
+
+    // DatasetItem展开时显示目录内容
+    if (element.type === 'datasetItem') {
+      const datasetDirPath = (element as any).datasetDirPath;
+      if (!datasetDirPath || !fs.existsSync(datasetDirPath) || !fs.statSync(datasetDirPath).isDirectory()) {
+        return [];
+      }
+
+      const items: ProjectItem[] = [];
+      const entries = fs.readdirSync(datasetDirPath);
+
+      for (const entry of entries) {
+        const fullPath = path.join(datasetDirPath, entry);
+        const stat = fs.statSync(fullPath);
+
+        if (stat.isFile()) {
+          const fileItem = new ProjectItem(
+            entry,
+            vscode.TreeItemCollapsibleState.None,
+            'file',
+            fullPath
+          );
+          if (entry.toLowerCase().endsWith('.md')) {
+            fileItem.command = {
+              command: 'markdown.showPreview',
+              title: 'Open Preview',
+              arguments: [vscode.Uri.file(fullPath)]
+            };
+          }
+          items.push(fileItem);
+        } else if (stat.isDirectory()) {
+          items.push(new ProjectItem(
+            entry,
+            vscode.TreeItemCollapsibleState.Collapsed,
+            'file',
+            fullPath
+          ));
         }
       }
 
@@ -1956,6 +2090,7 @@ export class ProjectStructureProvider implements vscode.TreeDataProvider<Project
     const requiredDirs = [
       'papers',
       'user_data',
+      'datasets',
       'custom',
       'custom/agents',
       'custom/envs',
@@ -2214,6 +2349,29 @@ export class ProjectStructureProvider implements vscode.TreeDataProvider<Project
       }
     } catch {
       this.agentSkillsCache = [];
+    }
+  }
+
+  /**
+   * Update extension-bundled skills by re-syncing to workspace .claude/skills/
+   */
+  async updateExtensionSkills(): Promise<void> {
+    const workspaceFolder = vscode.workspace.workspaceFolders?.[0];
+    if (!workspaceFolder) {
+      vscode.window.showErrorMessage(localize('projectStructure.noWorkspace'));
+      return;
+    }
+
+    const result = this.workspaceManager.syncClaudeCodeResources();
+    if (result.success) {
+      vscode.window.showInformationMessage(
+        localize('projectStructure.extensionSkillsUpdateSuccess', String(result.created.length))
+      );
+      this.refresh();
+    } else {
+      vscode.window.showErrorMessage(
+        localize('projectStructure.extensionSkillsUpdateFailed', result.message)
+      );
     }
   }
 
