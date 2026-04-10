@@ -245,6 +245,7 @@ export class BackendManager {
     // EasyPaper (for generate_paper tool)
     if (envConfig.easypaperApiUrl) {env.EASYPAPER_API_URL = envConfig.easypaperApiUrl;}
     if (envConfig.literatureSearchApiUrl) {env.LITERATURE_SEARCH_API_URL = envConfig.literatureSearchApiUrl;}
+    if (envConfig.literatureSearchApiKey) {env.LITERATURE_SEARCH_API_KEY = envConfig.literatureSearchApiKey;}
 
     return {
       pythonPath,

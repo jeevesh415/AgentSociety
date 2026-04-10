@@ -348,13 +348,21 @@ class Config:
 
     LITERATURE_SEARCH_API_URL: str = (
         os.getenv("LITERATURE_SEARCH_API_URL", "").strip()
-        or "http://localhost:8002/api/v1/search"
+        or "http://localhost:8008/api/search"
     )
     """
     Base URL for the literature search service.
 
     Environment variable: LITERATURE_SEARCH_API_URL
-    Default: "http://localhost:8002/api/v1/search"
+    Default: "http://localhost:8008/api/search"
+    """
+
+    LITERATURE_SEARCH_API_KEY: str = os.getenv("LITERATURE_SEARCH_API_KEY", "").strip()
+    """
+    API key for the literature search service authentication.
+
+    Environment variable: LITERATURE_SEARCH_API_KEY
+    Default: "" (empty, must be set for authenticated requests)
     """
 
     WEB_SEARCH_API_URL: str = os.getenv("WEB_SEARCH_API_URL", "").strip()
@@ -668,6 +676,14 @@ class Config:
         return (
             os.getenv("LITERATURE_SEARCH_API_URL", "").strip()
             or cls.LITERATURE_SEARCH_API_URL
+        )
+
+    @classmethod
+    def get_literature_search_api_key(cls) -> str:
+        """Get literature search API key, preferring the latest environment value."""
+        return (
+            os.getenv("LITERATURE_SEARCH_API_KEY", "").strip()
+            or cls.LITERATURE_SEARCH_API_KEY
         )
 
     @classmethod

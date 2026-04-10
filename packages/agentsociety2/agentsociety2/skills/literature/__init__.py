@@ -19,8 +19,6 @@ from agentsociety2.skills.literature.search import (
 )
 from agentsociety2.skills.literature.core import (
     search_literature,
-    filter_relevant_literature,
-    format_literature_info,
     is_chinese_text,
 )
 
@@ -38,7 +36,5 @@ __all__ = [
     "load_literature_index",
     # Core
     "search_literature",
-    "filter_relevant_literature",
-    "format_literature_info",
     "is_chinese_text",
 ]

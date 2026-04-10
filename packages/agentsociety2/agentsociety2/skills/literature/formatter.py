@@ -44,14 +44,44 @@ def format_article_as_markdown(article: Dict[str, Any], query: str) -> str:
     lines.append(f"**Saved At:** {datetime.now().isoformat()}")
     lines.append("")
 
+    if article.get("year"):
+        lines.append(f"**Year:** {article['year']}")
+        lines.append("")
     if article.get("journal"):
         lines.append(f"**Journal:** {article['journal']}")
         lines.append("")
-    if article.get("doi"):
-        lines.append(f"**DOI:** {article['doi']}")
+
+    # 处理 DOI 和 URL
+    doi = article.get("doi", "")
+    url = article.get("url", "")
+    source = article.get("source", "")
+
+    if doi:
+        doi_url = f"https://doi.org/{doi}" if not doi.startswith("http") else doi
+        lines.append(f"**DOI:** [{doi}]({doi_url})")
+        lines.append("")
+    if url and not doi:
+        lines.append(f"**URL:** [Open Link]({url})")
+        lines.append("")
+
+    if source:
+        source_name = article.get("source_name", source)
+        # 为外部数据源添加提示
+        if source in ["arxiv", "crossref", "openalex"]:
+            lines.append(f"**Source:** {source_name} (external)")
+        else:
+            lines.append(f"**Source:** {source_name}")
         lines.append("")
     if article.get("avg_similarity") is not None:
-        lines.append(f"**Similarity Score:** {article['avg_similarity']:.3f}")
+        lines.append(f"**Score:** {article['avg_similarity']:.3f}")
+        lines.append("")
+
+    if article.get("authors"):
+        authors = article["authors"]
+        if isinstance(authors, list):
+            lines.append(f"**Authors:** {', '.join(authors)}")
+        else:
+            lines.append(f"**Authors:** {authors}")
         lines.append("")
 
     if article.get("abstract"):
@@ -60,8 +90,21 @@ def format_article_as_markdown(article: Dict[str, Any], query: str) -> str:
         lines.append(article["abstract"])
         lines.append("")
 
+    # Add chunks if available
+    chunks = article.get("chunks", [])
+    if chunks:
+        lines.append("## Relevant Content")
+        lines.append("")
+        for i, chunk in enumerate(chunks[:3], 1):
+            content = chunk.get("content", "")
+            similarity = chunk.get("similarity", 0)
+            lines.append(f"### Chunk {i} (similarity: {similarity:.3f})")
+            lines.append("")
+            lines.append(content[:1000] + "..." if len(content) > 1000 else content)
+            lines.append("")
+
     # Add other fields
-    exclude_fields = {"title", "journal", "doi", "abstract", "avg_similarity"}
+    exclude_fields = {"title", "journal", "doi", "abstract", "avg_similarity", "year", "url", "source", "source_name", "authors", "chunks"}
     first_extra = True
     for key, value in article.items():
         if key not in exclude_fields and value is not None:
