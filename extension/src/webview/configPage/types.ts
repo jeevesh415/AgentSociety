@@ -48,6 +48,7 @@ export interface ConfigValues {
   easypaperVlmApiKey: string;
   // Literature Search (optional, for search_literature tool)
   literatureSearchApiUrl: string;
+  literatureSearchApiKey: string;
 }
 
 export interface WorkspaceInfo {

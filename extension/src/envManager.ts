@@ -70,6 +70,7 @@ export interface EnvConfig {
 
   // Literature Search
   literatureSearchApiUrl?: string;
+  literatureSearchApiKey?: string;
 }
 
 /**
@@ -107,6 +108,7 @@ const ENV_KEY_MAP: Record<keyof EnvConfig, string> = {
   easypaperVlmModel: 'EASYPAPER_VLM_MODEL',
   easypaperVlmApiKey: 'EASYPAPER_VLM_API_KEY',
   literatureSearchApiUrl: 'LITERATURE_SEARCH_API_URL',
+  literatureSearchApiKey: 'LITERATURE_SEARCH_API_KEY',
 };
 
 /**
@@ -127,7 +129,7 @@ export const DEFAULT_ENV_CONFIG: Partial<EnvConfig> = {
   miroflowDefaultAgent: 'mirothinker_v1.5_keep5_max200',
   easypaperLlmModel: 'qwen3-next-80b-a3b-instruct',
   easypaperVlmModel: 'qwen3-vl-235b-a22b-thinking',
-  literatureSearchApiUrl: 'http://localhost:8002/api/v1/search',
+  literatureSearchApiUrl: 'http://localhost:8008/api/search',
 };
 
 export class EnvManager {
@@ -387,7 +389,9 @@ EASYPAPER_VLM_API_KEY=
 
 # ========== Literature Search / 文献搜索 ==========
 # Literature search API URL / 文献搜索 API 地址
-LITERATURE_SEARCH_API_URL=http://localhost:8002/api/v1/search
+LITERATURE_SEARCH_API_URL=http://localhost:8008/api/search
+# Literature search API Key / 文献搜索 API 密钥
+LITERATURE_SEARCH_API_KEY=lit-your-api-key-here
 `;
   }
 

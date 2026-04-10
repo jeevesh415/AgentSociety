@@ -8,7 +8,7 @@ from __future__ import annotations
 import json
 from datetime import datetime
 from pathlib import Path
-from typing import Dict, Any, List, Optional
+from typing import Dict, Any, List, Literal, Optional
 from litellm import AllMessageValues
 
 from agentsociety2.skills.literature.models import LiteratureEntry, LiteratureIndex
@@ -27,8 +27,11 @@ async def search_literature_and_save(
     query: str,
     workspace_path: Path,
     router: Optional[Any] = None,
-    top_k: Optional[int] = None,
-    enable_multi_query: bool = True,
+    limit: Optional[int] = None,
+    year_from: Optional[int] = None,
+    year_to: Optional[int] = None,
+    sources: Optional[List[Literal["local", "arxiv", "crossref", "openalex"]]] = None,
+    enable_multi_query: bool = False,
 ) -> Dict[str, Any]:
     """Search for literature and save results to workspace
 
@@ -36,8 +39,11 @@ async def search_literature_and_save(
         query: Search query (supports Chinese, will be translated to English)
         workspace_path: Path to workspace directory
         router: Optional litellm router (will create if not provided)
-        top_k: Number of articles to return
-        enable_multi_query: Whether to enable multi-query mode
+        limit: Number of articles to return (default: 10)
+        year_from: Filter by publication year (start)
+        year_to: Filter by publication year (end)
+        sources: Data sources to search (default: all sources)
+        enable_multi_query: Enable multi-query mode to split complex queries into subtopics
 
     Returns:
         Dictionary with search results and saved file information
@@ -49,10 +55,17 @@ async def search_literature_and_save(
     call_kwargs: Dict[str, Any] = {
         "query": query,
         "router": router,
-        "enable_multi_query": enable_multi_query,
     }
-    if top_k is not None:
-        call_kwargs["top_k"] = top_k
+    if limit is not None:
+        call_kwargs["limit"] = limit
+    if year_from is not None:
+        call_kwargs["year_from"] = year_from
+    if year_to is not None:
+        call_kwargs["year_to"] = year_to
+    if sources is not None:
+        call_kwargs["sources"] = sources
+    if enable_multi_query:
+        call_kwargs["enable_multi_query"] = True
 
     result = await search_literature(**call_kwargs)
 
@@ -115,12 +128,14 @@ async def generate_summary(
             journal = article.get("journal", "")
             abstract = article.get("abstract", "")
             doi = article.get("doi", "")
+            year = article.get("year")
 
             article_info = f"{idx}. {title}"
+            if year:
+                article_info += f" ({year})"
             if journal:
-                article_info += f" ({journal})"
+                article_info += f" - {journal}"
             if abstract:
-                # Limit abstract length
                 abstract_preview = (
                     abstract[:300] + "..." if len(abstract) > 300 else abstract
                 )
@@ -313,18 +328,30 @@ def format_search_results(articles: list, total: int, query: str) -> str:
     ]
     for idx, article in enumerate(articles[:5], 1):  # Show first 5 articles
         title = article.get("title", "Unknown Title")
-        journal = article.get("journal", "Unknown Journal")
+        journal = article.get("journal", "")
         abstract = article.get("abstract", "")
         doi = article.get("doi", "")
-        avg_sim = article.get("avg_similarity", 0)
+        url = article.get("url", "")
+        year = article.get("year")
+        avg_sim = article.get("avg_similarity") or 0
+        source = article.get("source", "")
 
         content_parts.append(f"{idx}. {title}")
+        if year:
+            content_parts.append(f"   Year: {year}")
         if journal:
             content_parts.append(f"   Journal: {journal}")
+        if source:
+            content_parts.append(f"   Source: {source}")
         if doi:
-            content_parts.append(f"   DOI: {doi}")
+            # DOI 链接格式
+            doi_url = f"https://doi.org/{doi}" if not doi.startswith("http") else doi
+            content_parts.append(f"   DOI: [{doi}]({doi_url})")
+        if url and not doi:
+            # 直接 URL 链接
+            content_parts.append(f"   URL: {url}")
         if avg_sim > 0:
-            content_parts.append(f"   Similarity: {avg_sim:.3f}")
+            content_parts.append(f"   Score: {avg_sim:.3f}")
         if abstract:
             abstract_preview = (
                 abstract[:200] + "..." if len(abstract) > 200 else abstract
