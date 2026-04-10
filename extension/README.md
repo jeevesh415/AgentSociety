@@ -48,11 +48,11 @@ npm install
 ### 2. 编译插件
 
 ```bash
-npm run compile          # 编译 TypeScript 扩展代码
-npm run build-webview   # 构建 React webview
+npm run build        # 生产构建（打包扩展和 webview）
+npm run compile      # 开发构建
 ```
 
-或者使用预发布命令（会自动执行两者）：
+或者使用预发布命令：
 ```bash
 npm run vscode:prepublish
 ```
@@ -73,31 +73,36 @@ touch .env
 编辑 `.env` 文件，添加以下配置：
 
 ```env
-# LLM配置（必需）
+# 默认 LLM 配置（必需）
 AGENTSOCIETY_LLM_API_KEY=your_api_key
 AGENTSOCIETY_LLM_API_BASE=https://cloud.infini-ai.com/maas/v1
-AGENTSOCIETY_LLM_MODEL=qwen2.5-14b-instruct
+AGENTSOCIETY_LLM_MODEL=qwen3-next-80b-a3b-instruct
 
-# 代码生成LLM配置（可选，会回退到AGENTSOCIETY_LLM_*）
+# 代码生成 LLM 配置（可选，未设置时回退到 AGENTSOCIETY_LLM_*）
 AGENTSOCIETY_CODER_LLM_API_KEY=your_coder_api_key
 AGENTSOCIETY_CODER_LLM_API_BASE=https://cloud.infini-ai.com/maas/v1
-AGENTSOCIETY_CODER_LLM_MODEL=qwen2.5-72b-instruct
+AGENTSOCIETY_CODER_LLM_MODEL=glm-5
 
-# 高频操作LLM配置（可选）
+# 高频操作 LLM 配置（可选）
 AGENTSOCIETY_NANO_LLM_API_KEY=your_nano_api_key
 AGENTSOCIETY_NANO_LLM_API_BASE=https://cloud.infini-ai.com/maas/v1
-AGENTSOCIETY_NANO_LLM_MODEL=qwen2.5-7b-instruct
+AGENTSOCIETY_NANO_LLM_MODEL=qwen3-next-80b-a3b-instruct
 
-# Embedding模型配置（可选）
+# 数据分析 LLM 配置（可选，用于数据分析、洞察生成、报告撰写）
+AGENTSOCIETY_ANALYSIS_LLM_API_KEY=your_analysis_api_key
+AGENTSOCIETY_ANALYSIS_LLM_API_BASE=https://cloud.infini-ai.com/maas/v1
+AGENTSOCIETY_ANALYSIS_LLM_MODEL=glm-5
+
+# Embedding 模型配置（可选）
 AGENTSOCIETY_EMBEDDING_API_KEY=your_embedding_api_key
 AGENTSOCIETY_EMBEDDING_API_BASE=https://cloud.infini-ai.com/maas/v1
-AGENTSOCIETY_EMBEDDING_MODEL=text-embedding-ada-002
+AGENTSOCIETY_EMBEDDING_MODEL=bge-m3
 
 # 后端服务配置
 BACKEND_HOST=0.0.0.0
 BACKEND_PORT=8001
 
-# 文献检索API（必需）
+# 文献检索 API（统一学术文献检索服务）
 LITERATURE_SEARCH_API_URL=http://localhost:8008/api/search
 LITERATURE_SEARCH_API_KEY=lit-your-api-key-here
 ```
@@ -189,16 +194,10 @@ workspace/
 
 ## 开发模式
 
-开发时需要同时运行两个 watch 模式：
+开发时运行 watch 模式：
 
-**终端 1 - 编译扩展代码：**
 ```bash
 npm run watch
-```
-
-**终端 2 - 构建 webview：**
-```bash
-npm run watch-webview
 ```
 
 ## 项目结构
@@ -207,19 +206,19 @@ npm run watch-webview
 extension/
 ├── src/                          # 源代码目录
 │   ├── extension.ts              # 主入口文件
-│   ├── projectStructureProvider.ts  # 项目结构树视图提供者
-│   ├── chatWebviewProvider.ts    # 聊天界面提供者
-│   ├── simSettingsEditorProvider.ts  # SIM设置编辑器提供者
+│   ├── projectStructureProvider.ts  # 项目结构树视图
 │   ├── apiClient.ts              # API客户端
+│   ├── services/                 # 服务模块
 │   └── webview/                  # React Webview 组件
-│       └── chat/                 # 聊天界面 React 组件
-│           ├── index.tsx         # React 入口文件
-│           ├── ChatApp.tsx       # 主应用组件（使用 Ant Design X）
-│           ├── Header.tsx         # 头部组件
-│           └── types.ts          # TypeScript 类型定义
+│       ├── components/           # 共享组件
+│       ├── configPage/           # 配置页面
+│       ├── replay/               # 实验回放
+│       ├── simSettings/          # SIM设置编辑器
+│       └── ...
+├── skills/                       # Agent Skills
 ├── package.json                  # 插件配置文件
 ├── tsconfig.json                 # TypeScript配置
-├── webpack.config.js            # Webpack 构建配置（用于 Webview）
+├── webpack.config.js             # Webpack 构建配置
 └── README.md                     # 项目说明文档
 ```
 
