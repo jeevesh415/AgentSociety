@@ -124,6 +124,14 @@ export class WorkspaceManager {
         this.log(`Created: ${userDataDir}`);
       }
 
+      // Create datasets directory for downloaded datasets
+      const datasetsDir = path.join(workspacePath, 'datasets');
+      if (!fs.existsSync(datasetsDir)) {
+        fs.mkdirSync(datasetsDir, { recursive: true });
+        filesCreated.push('datasets/');
+        this.log(`Created: ${datasetsDir}`);
+      }
+
       // Initialize custom modules using agentsociety2 CLI
       reportProgress('正在初始化自定义模块...');
 
@@ -208,7 +216,7 @@ export class WorkspaceManager {
 
       reportProgress('正在同步 Claude Code 资源...');
 
-      const syncResult = this.syncClaudeCodeResources(workspacePath);
+      const syncResult = this.syncClaudeCodeResources();
       if (!syncResult.success) {
         this.log(`Failed to sync Claude Code resources: ${syncResult.message}`);
         return {
@@ -329,9 +337,18 @@ export class WorkspaceManager {
    * `extension/skills/` for UI browsing, but Claude Code discovers them from
    * the workspace-local `.claude/skills/` directory.
    */
-  private syncClaudeCodeResources(
-    workspacePath: string
+  public syncClaudeCodeResources(
+    workspacePath?: string
   ): { success: boolean; message: string; created: string[] } {
+    workspacePath = workspacePath || this.getWorkspacePath() || '';
+    if (!workspacePath) {
+      return {
+        success: false,
+        message: 'No workspace folder open',
+        created: [],
+      };
+    }
+
     if (!fs.existsSync(this.skillsSourcePath) || !fs.statSync(this.skillsSourcePath).isDirectory()) {
       return {
         success: false,
@@ -619,22 +636,28 @@ Follow this sequence for social science research:
    └─> agentsociety-literature-search
    └─> agentsociety-web-research
 
-3. Generate Hypothesis
+3. Dataset Exploration (optional but recommended)
+   └─> agentsociety-use-dataset (list → search → readme → download)
+
+4. Generate Hypothesis
    └─> agentsociety-hypothesis add
 
-4. Initialize Experiment
+5. Initialize Experiment
    └─> agentsociety-experiment-config (validate → prepare → info → run → check)
 
-5. Run Experiment
+6. Run Experiment
    └─> agentsociety-run-experiment start
 
-6. Analyze Results
+7. Analyze Results
    └─> agentsociety-analysis
 
-7. Generate Report
+8. Generate Report
    └─> agentsociety-synthesize
 
-8. Refine Hypothesis/Experiment
+9. Share Dataset (optional)
+   └─> agentsociety-create-dataset (init → validate → pack → upload)
+
+10. Refine Hypothesis/Experiment
    └─> Repeat from step 3 with new insights
 \`\`\`
 
@@ -654,6 +677,11 @@ Follow this sequence for social science research:
 │   ├── literature_index.json  # Literature catalog
 │   └── literature/            # Individual article summaries
 ├── user_data/            # User data storage for custom datasets
+├── datasets/             # Downloaded datasets from the platform
+│   └── {dataset_id}/     # Each dataset has its own directory
+│       ├── metadata.json # Dataset metadata (name, version, category, etc.)
+│       ├── README.md     # Dataset description and usage guide
+│       └── data/         # Actual data files
 ├── custom/               # Custom Agent and Environment modules
 │   ├── agents/               # Custom agent definitions
 │   │   └── examples/         # Example agents (reference only)
@@ -691,6 +719,7 @@ Follow this sequence for social science research:
 
 - **custom/** - Create your custom Agent and Environment modules here. See \`custom/README.md\` for development guide.
 - **user_data/** - Store your custom datasets and data files here for experiment configuration.
+- **datasets/** - Downloaded datasets from the AgentSociety platform. Managed by \`agentsociety-use-dataset\`.
 - **.agentsociety/** - Internal workspace state, managed by the system.
 
 ---
@@ -733,6 +762,8 @@ When interacting with users:
 | \`agentsociety-run-experiment\` | Execute simulations | \`start\`, \`status\`, \`stop\` |
 | \`agentsociety-analysis\` | Analyze results | \`--hypothesis-id 1 --experiment-id 1\` |
 | \`agentsociety-synthesize\` | Create reports | Bilingual synthesis |
+| \`agentsociety-use-dataset\` | Browse & download datasets | \`list\`, \`search\`, \`download\` |
+| \`agentsociety-create-dataset\` | Create & share datasets | \`init\`, \`validate\`, \`upload\` |
 
 ---
 
