@@ -357,11 +357,10 @@
     }
   },
   "scripts": {
-    "vscode:prepublish": "npm run compile && npm run build-webview",
-    "compile": "tsc -p ./",
-    "watch": "tsc -watch -p ./",
-    "build-webview": "webpack --mode production",
-    "watch-webview": "webpack --mode development --watch",
+    "vscode:prepublish": "npm run build",
+    "compile": "webpack --mode development",
+    "watch": "webpack --mode development --watch",
+    "build": "rm -rf out && webpack --mode production",
     "pretest": "npm run compile && npm run lint",
     "lint": "eslint src",
     "test": "node ./out/test/runTest.js"

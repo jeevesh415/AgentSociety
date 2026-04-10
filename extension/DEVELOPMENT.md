@@ -32,27 +32,19 @@ npm install
 ### 编译项目
 
 ```bash
-npm run compile          # 编译 TypeScript 扩展代码
-npm run build-webview   # 构建 React webview
+npm run build        # 生产构建（打包扩展和 webview）
+npm run compile      # 开发构建
 ```
 
-或者使用预发布命令（会自动执行两者）：
+或者使用预发布命令：
 ```bash
 npm run vscode:prepublish
 ```
 
 ### 监听模式（开发时使用）
 
-开发时需要同时运行两个 watch 模式：
-
-**终端 1 - 编译扩展代码：**
 ```bash
-npm run watch
-```
-
-**终端 2 - 构建 webview：**
-```bash
-npm run watch-webview
+npm run watch        # 监听模式构建
 ```
 
 ## 调试
@@ -68,35 +60,24 @@ extension/
 ├── src/                          # 源代码目录
 │   ├── extension.ts              # 主入口文件
 │   ├── projectStructureProvider.ts  # 项目结构树视图提供者
-│   ├── chatWebviewProvider.ts    # 聊天界面提供者
-│   ├── simSettingsEditorProvider.ts  # SIM设置编辑器提供者
-│   ├── prefillParamsViewProvider.ts  # Prefill参数视图提供者
 │   ├── apiClient.ts              # API客户端
-│   ├── paperWatcher.ts           # 论文文件监听器
-│   ├── dragAndDropController.ts  # 拖放控制器
-│   ├── i18n.ts                   # 国际化支持
+│   ├── services/                 # 服务模块
+│   │   ├── backendManager.ts     # 后端管理
+│   │   ├── backendService.ts     # 后端服务
+│   │   └── ...
 │   └── webview/                  # React Webview 组件
-│       ├── chat/                 # 聊天界面 React 组件
-│       │   ├── index.tsx         # React 入口文件
-│       │   ├── ChatApp.tsx       # 主应用组件（使用 Ant Design X）
-│       │   ├── Header.tsx         # 头部组件
-│       │   ├── types.ts          # TypeScript 类型定义
-│       │   └── index.html        # HTML模板
 │       ├── components/           # 共享组件
-│       │   └── MarkdownRenderer.tsx
-│       ├── prefillParams/        # Prefill参数界面
+│       ├── configPage/           # 配置页面
+│       ├── initConfig/           # 初始化配置
+│       ├── prefillParams/        # 预填充参数界面
+│       ├── replay/               # 实验回放界面
 │       ├── simSettings/          # SIM设置界面
 │       └── i18n/                 # 国际化资源
-│           ├── index.ts
-│           └── locales/
-│               ├── en-US.json
-│               └── zh-CN.json
+├── skills/                       # Agent Skills
 ├── out/                          # 编译输出目录（自动生成）
-│   └── webview/                  # Webview 构建输出
-│       └── chat.js               # 构建后的 React 应用
 ├── package.json                  # 插件配置文件
 ├── tsconfig.json                 # TypeScript配置
-├── webpack.config.js            # Webpack 构建配置（用于 Webview）
+├── webpack.config.js             # Webpack 构建配置
 └── README.md                     # 项目说明文档
 ```
 
@@ -171,50 +152,88 @@ uv run python -m agentsociety2.backend.run
 在 `packages/agentsociety2/.env` 文件中配置：
 
 ```env
-# LLM配置（必需）
+# 默认 LLM 配置（必需）
 AGENTSOCIETY_LLM_API_KEY=your_api_key
 AGENTSOCIETY_LLM_API_BASE=https://cloud.infini-ai.com/maas/v1
-AGENTSOCIETY_LLM_MODEL=qwen2.5-14b-instruct
+AGENTSOCIETY_LLM_MODEL=qwen3-next-80b-a3b-instruct
 
-# 代码生成LLM配置（可选）
+# 代码生成 LLM 配置（可选，未设置时回退到 AGENTSOCIETY_LLM_*）
 AGENTSOCIETY_CODER_LLM_API_KEY=your_coder_api_key
 AGENTSOCIETY_CODER_LLM_API_BASE=https://cloud.infini-ai.com/maas/v1
-AGENTSOCIETY_CODER_LLM_MODEL=qwen2.5-72b-instruct
+AGENTSOCIETY_CODER_LLM_MODEL=glm-5
 
-# 高频操作LLM配置（可选）
+# 高频操作 LLM 配置（可选）
 AGENTSOCIETY_NANO_LLM_API_KEY=your_nano_api_key
 AGENTSOCIETY_NANO_LLM_API_BASE=https://cloud.infini-ai.com/maas/v1
-AGENTSOCIETY_NANO_LLM_MODEL=qwen2.5-7b-instruct
+AGENTSOCIETY_NANO_LLM_MODEL=qwen3-next-80b-a3b-instruct
 
-# Embedding模型配置（可选）
+# 数据分析 LLM 配置（可选，用于数据分析、洞察生成、报告撰写）
+AGENTSOCIETY_ANALYSIS_LLM_API_KEY=your_analysis_api_key
+AGENTSOCIETY_ANALYSIS_LLM_API_BASE=https://cloud.infini-ai.com/maas/v1
+AGENTSOCIETY_ANALYSIS_LLM_MODEL=glm-5
+
+# Embedding 模型配置（可选）
 AGENTSOCIETY_EMBEDDING_API_KEY=your_embedding_api_key
 AGENTSOCIETY_EMBEDDING_API_BASE=https://cloud.infini-ai.com/maas/v1
-AGENTSOCIETY_EMBEDDING_MODEL=text-embedding-ada-002
+AGENTSOCIETY_EMBEDDING_MODEL=bge-m3
 
 # 后端服务配置
 BACKEND_HOST=0.0.0.0
 BACKEND_PORT=8001
-BACKEND_LOG_LEVEL=info
 
-# 文献检索API（必需）
-LITERATURE_SEARCH_API_URL=http://172.17.0.1:8002/api/v1/search
+# 文献检索 API（统一学术文献检索服务）
+LITERATURE_SEARCH_API_URL=http://localhost:8008/api/search
+LITERATURE_SEARCH_API_KEY=lit-your-api-key-here
 ```
 
 **重要提示**：
 - `LITERATURE_SEARCH_API_URL` 必须指向文献检索服务的地址
-- 默认值 `http://172.17.0.1:8002/api/v1/search` 适用于Docker环境
-- 如果文献检索服务运行在本地，可以使用 `http://localhost:8002/api/v1/search`
+- `LITERATURE_SEARCH_API_KEY` 用于认证，请替换为实际的 API Key
 
 ### 后端API端点
 
+#### 基础接口
 - **GET `/health`** - 健康检查
 - **GET `/docs`** - API文档（Swagger UI）
-- **GET `/api/v1/agent-skills/list`** - 列出所有 Agent Skills
-- **POST `/api/v1/agent-skills/enable`** - 启用 Skill
-- **POST `/api/v1/agent-skills/disable`** - 禁用 Skill
-- **POST `/api/v1/agent-skills/import`** - 导入 Skill
-- **GET `/api/v1/modules/list`** - 列出可用模块
-- **GET `/api/v1/prefill-params`** - 获取预填充参数
+
+#### Agent Skills 接口 (`/api/v1/agent-skills`)
+- **GET `/list`** - 列出所有 Agent Skills
+- **POST `/enable`** - 启用 Skill
+- **POST `/disable`** - 禁用 Skill
+- **POST `/scan`** - 扫描自定义 Skill
+- **POST `/import`** - 从路径导入 Skill
+- **POST `/create`** - 创建新 Skill
+- **POST `/upload`** - 上传 zip 包导入 Skill
+- **POST `/reload`** - 热重载 Skill
+- **POST `/remove`** - 移除自定义 Skill
+- **GET `/{name}/info`** - 获取 Skill 详情
+
+#### 模块接口 (`/api/v1/modules`)
+- **GET `/agent_classes`** - 获取所有 Agent 类
+- **GET `/env_module_classes`** - 获取所有环境模块类
+- **GET `/all`** - 获取所有模块（一次性返回）
+
+#### 预填充参数接口 (`/api/v1/prefill-params`)
+- **GET `/`** - 获取全局预填充参数
+- **GET `/{class_kind}/{class_name}`** - 获取特定类的预填充参数
+
+#### 实验数据接口 (`/api/v1/experiments`)
+- **GET `/{hypothesis_id}/{experiment_id}/info`** - 获取实验信息
+- **GET `/{hypothesis_id}/{experiment_id}/artifacts`** - 获取产出文件列表
+- **GET `/{hypothesis_id}/{experiment_id}/artifacts/{artifact_name}`** - 获取产出文件内容
+
+#### 回放数据接口 (`/api/v1/replay`)
+- **GET `/{hypothesis_id}/{experiment_id}/info`** - 获取实验基本信息
+- **GET `/{hypothesis_id}/{experiment_id}/timeline`** - 获取时间线数据
+- **GET `/{hypothesis_id}/{experiment_id}/agents`** - 获取所有 Agent 列表
+- **GET `/{hypothesis_id}/{experiment_id}/agent/{agent_id}`** - 获取 Agent 详情
+
+#### 自定义模块接口 (`/api/v1/custom`)
+- **POST `/scan`** - 扫描自定义模块
+- **POST `/clean`** - 清理自定义模块配置
+- **POST `/test`** - 测试自定义模块
+- **GET `/list`** - 列出已注册的自定义模块
+- **GET `/status`** - 获取自定义模块状态
 
 ### Claude Code Skills
 
@@ -227,6 +246,11 @@ LITERATURE_SEARCH_API_URL=http://172.17.0.1:8002/api/v1/search
 - **agentsociety-analysis** - 数据分析
 - **agentsociety-synthesize** - 结果综合
 - **agentsociety-generate-paper** - 论文生成
+- **agentsociety-scan-modules** - 扫描模块
+- **agentsociety-create-env-module** - 创建环境模块
+- **agentsociety-create-dataset** - 创建数据集
+- **agentsociety-use-dataset** - 使用数据集
+- **agentsociety-web-research** - 网络研究
 
 ## React Webview 开发
 
