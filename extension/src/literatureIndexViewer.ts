@@ -97,6 +97,14 @@ export class LiteratureIndexViewer {
           if (message.url) {
             vscode.env.openExternal(vscode.Uri.parse(message.url));
           }
+        } else if (message.command === 'copyAtReference') {
+          // 复制 @文件 引用格式到剪贴板
+          if (message.filePath) {
+            const atReference = `@${message.filePath}`;
+            vscode.env.clipboard.writeText(atReference);
+            const isZh = vscode.env.language.startsWith('zh');
+            vscode.window.showInformationMessage(isZh ? `已复制: ${atReference}` : `Copied: ${atReference}`);
+          }
         }
       },
       undefined,
@@ -367,6 +375,38 @@ export class LiteratureIndexViewer {
     .doi-link:hover {
       text-decoration: underline;
     }
+    .batch-actions {
+      display: flex;
+      gap: 8px;
+      margin-bottom: 16px;
+      padding: 10px 12px;
+      background-color: var(--vscode-input-background);
+      border-radius: 6px;
+      align-items: center;
+    }
+    .batch-btn {
+      padding: 6px 12px;
+      background-color: var(--vscode-button-secondaryBackground);
+      color: var(--vscode-button-secondaryForeground);
+      border: 1px solid var(--vscode-button-border);
+      border-radius: 4px;
+      cursor: pointer;
+      font-size: 12px;
+    }
+    .batch-btn:hover {
+      background-color: var(--vscode-button-secondaryHoverBackground);
+    }
+    .batch-btn.primary {
+      background-color: var(--vscode-button-background);
+      color: var(--vscode-button-foreground);
+      border: none;
+    }
+    .batch-btn.primary:hover {
+      background-color: var(--vscode-button-hoverBackground);
+    }
+    .select-all-checkbox {
+      margin-right: 8px;
+    }
   </style>
 </head>
 <body>
@@ -391,6 +431,13 @@ export class LiteratureIndexViewer {
     </select>
   </div>
 
+  <div class="batch-actions">
+    <input type="checkbox" id="selectAll" class="select-all-checkbox" />
+    <label for="selectAll" style="font-size: 12px; margin-right: 12px;">${isChinese ? '全选' : 'Select All'}</label>
+    <button class="batch-btn primary" id="copySelectedBtn">📋 ${isChinese ? '复制选中引用' : 'Copy Selected'}</button>
+    <button class="batch-btn" id="exportBtn">📥 ${isChinese ? '导出列表' : 'Export'}</button>
+  </div>
+
   <div id="entries"></div>
 
   <script>
@@ -411,6 +458,7 @@ export class LiteratureIndexViewer {
         const div = document.createElement('div');
         div.className = 'entry';
         div.dataset.index = index;
+        div.setAttribute('data-filepath', entry.file_path || '');
 
         const title = entry.title || (isChinese ? '未命名文献' : 'Untitled');
         const year = entry.year || '';
@@ -454,6 +502,7 @@ export class LiteratureIndexViewer {
 
         div.innerHTML = \`
           <div class="entry-header">
+            <input type="checkbox" class="entry-checkbox" data-filepath="\${filePath}" data-title="\${title.replace(/"/g, '&quot;')}" style="margin-right: 10px;" />
             <div class="entry-title" onclick="openFile('\${filePath}')">\${title}</div>
             \${year ? \`<span class="entry-year">\${year}</span>\` : ''}
           </div>
@@ -469,6 +518,7 @@ export class LiteratureIndexViewer {
             <button class="action-btn primary" onclick="openFile('\${filePath}')">
               📖 \${isChinese ? '打开全文' : 'Open'}
             </button>
+            \${filePath ? \`<button class="action-btn" onclick="copyAtReference('\${filePath}')">📋 \${isChinese ? '复制引用' : 'Copy Ref'}</button>\` : ''}
             \${doi || articleId ? \`<button class="action-btn" onclick="openUrl('https://doi.org/\${doi || articleId}')">🔗 DOI</button>\` : ''}
             \${url ? \`<button class="action-btn" onclick="openUrl('\${url}')">🌐 \${isChinese ? '网页' : 'Web'}</button>\` : ''}
           </div>
@@ -509,6 +559,16 @@ export class LiteratureIndexViewer {
         const vscode = acquireVsCodeApi();
         vscode.postMessage({
           command: 'openFile',
+          filePath: filePath
+        });
+      }
+    }
+
+    function copyAtReference(filePath) {
+      if (filePath) {
+        const vscode = acquireVsCodeApi();
+        vscode.postMessage({
+          command: 'copyAtReference',
           filePath: filePath
         });
       }
@@ -557,6 +617,103 @@ export class LiteratureIndexViewer {
 
     // 初始渲染（应用当前排序设置）
     applySort(entries);
+
+    // 全选功能
+    document.getElementById('selectAll').addEventListener('change', function() {
+      var checkboxes = document.querySelectorAll('.entry-checkbox');
+      checkboxes.forEach(function(cb) {
+        cb.checked = document.getElementById('selectAll').checked;
+      });
+    });
+
+    // 复制选中引用
+    document.getElementById('copySelectedBtn').addEventListener('click', function() {
+      var checkboxes = document.querySelectorAll('.entry-checkbox:checked');
+      if (checkboxes.length === 0) {
+        alert(isChinese ? '请先选择文献' : 'Please select articles first');
+        return;
+      }
+      var references = [];
+      checkboxes.forEach(function(cb) {
+        var fp = cb.getAttribute('data-filepath');
+        if (fp) {
+          references.push('@' + fp);
+        }
+      });
+      navigator.clipboard.writeText(references.join('\\n')).then(function() {
+        alert(isChinese ? '已复制 ' + references.length + ' 条引用' : 'Copied ' + references.length + ' references');
+      }).catch(function() {
+        alert(isChinese ? '复制失败' : 'Copy failed');
+      });
+    });
+
+    // 导出列表
+    document.getElementById('exportBtn').addEventListener('click', function() {
+      var checkboxes = document.querySelectorAll('.entry-checkbox:checked');
+      var selectedEntries = checkboxes.length > 0 ? 
+        Array.from(checkboxes).map(function(cb) {
+          return entries.find(function(e) { return e.file_path === cb.getAttribute('data-filepath'); });
+        }).filter(Boolean) : 
+        entries;
+      
+      var csvContent = 'Title,Authors,Year,Journal,DOI,File Path\\n';
+      selectedEntries.forEach(function(e) {
+        var title = (e.title || '').replace(/"/g, '""');
+        var authors = (e.authors || []).join('; ').replace(/"/g, '""');
+        var year = e.year || '';
+        var journal = (e.journal || '').replace(/"/g, '""');
+        var doi = e.doi || '';
+        var fp = e.file_path || '';
+        csvContent += '"' + title + '","' + authors + '","' + year + '","' + journal + '","' + doi + '","' + fp + '"\\n';
+      });
+      
+      var blob = new Blob([csvContent], { type: 'text/csv;charset=utf-8;' });
+      var url = URL.createObjectURL(blob);
+      var a = document.createElement('a');
+      a.href = url;
+      a.download = 'literature_export.csv';
+      a.click();
+      URL.revokeObjectURL(url);
+    });
+
+    // 键盘快捷键支持
+    document.addEventListener('keydown', function(e) {
+      // Ctrl/Cmd + F: 聚焦搜索框
+      if ((e.ctrlKey || e.metaKey) && e.key === 'f') {
+        e.preventDefault();
+        document.getElementById('searchInput').focus();
+      }
+      // Ctrl/Cmd + A: 全选
+      if ((e.ctrlKey || e.metaKey) && e.key === 'a' && document.activeElement.tagName !== 'INPUT') {
+        e.preventDefault();
+        document.getElementById('selectAll').checked = true;
+        document.querySelectorAll('.entry-checkbox').forEach(function(cb) {
+          cb.checked = true;
+        });
+      }
+      // Escape: 清除搜索
+      if (e.key === 'Escape') {
+        document.getElementById('searchInput').value = '';
+        applySort(entries);
+      }
+    });
+
+    // 入口项双击复制引用
+    document.addEventListener('dblclick', function(e) {
+      var entry = e.target.closest('.entry');
+      if (entry) {
+        var filePath = entry.getAttribute('data-filepath');
+        if (filePath) {
+          navigator.clipboard.writeText('@' + filePath).then(function() {
+            var notification = document.createElement('div');
+            notification.style.cssText = 'position:fixed;top:20px;right:20px;background:#52c41a;color:#fff;padding:8px 16px;border-radius:4px;z-index:9999;animation:fadeIn 0.3s;';
+            notification.textContent = isChinese ? '已复制引用' : 'Reference copied';
+            document.body.appendChild(notification);
+            setTimeout(function() { notification.remove(); }, 2000);
+          });
+        }
+      }
+    });
   </script>
 </body>
 </html>`;

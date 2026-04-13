@@ -195,8 +195,37 @@
     }
   },
   "configPage": {
-    "title": "AI Social Scientist 配置向导",
+    "title": "AI Social Scientist 配置",
+    "subtitle": "配置您的 AgentSociety 工作区环境",
     "description": "按步骤配置您的环境，每一步都可以单独保存",
+    "advancedConfig": "高级配置（可选）",
+    "resetDefaults": "恢复默认值",
+    "saveAndStart": "保存并启动",
+    "starting": "启动中...",
+    "validationSuccess": "验证成功",
+    "validationFailed": "验证失败",
+    "analysis": {
+      "title": "数据分析 LLM",
+      "hint": "用于数据分析、洞察生成、报告撰写",
+      "apiKey": "API 密钥",
+      "apiKeyPlaceholder": "留空使用默认",
+      "apiBase": "API URL",
+      "apiBasePlaceholder": "留空使用默认",
+      "model": "模型",
+      "modelPlaceholder": "建议使用较强模型"
+    },
+    "python": {
+      "title": "Python 环境",
+      "hint": "Python 运行环境配置",
+      "path": "Python 路径",
+      "pathPlaceholder": "python3 或留空自动检测"
+    },
+    "literature": {
+      "title": "文献检索服务",
+      "hint": "统一学术文献检索服务",
+      "validateConfig": "验证配置",
+      "validateSuccess": "验证成功"
+    },
     "steps": {
       "llm": {
         "title": "LLM 配置",
@@ -325,4 +354,3 @@
     }
   }
 }
-
