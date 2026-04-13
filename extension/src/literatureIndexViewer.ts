@@ -97,6 +97,14 @@ export class LiteratureIndexViewer {
           if (message.url) {
             vscode.env.openExternal(vscode.Uri.parse(message.url));
           }
+        } else if (message.command === 'copyAtReference') {
+          // 复制 @文件 引用格式到剪贴板
+          if (message.filePath) {
+            const atReference = `@${message.filePath}`;
+            vscode.env.clipboard.writeText(atReference);
+            const isZh = vscode.env.language.startsWith('zh');
+            vscode.window.showInformationMessage(isZh ? `已复制: ${atReference}` : `Copied: ${atReference}`);
+          }
         }
       },
       undefined,
@@ -469,6 +477,7 @@ export class LiteratureIndexViewer {
             <button class="action-btn primary" onclick="openFile('\${filePath}')">
               📖 \${isChinese ? '打开全文' : 'Open'}
             </button>
+            \${filePath ? \`<button class="action-btn" onclick="copyAtReference('\${filePath}')">📋 \${isChinese ? '复制引用' : 'Copy Ref'}</button>\` : ''}
             \${doi || articleId ? \`<button class="action-btn" onclick="openUrl('https://doi.org/\${doi || articleId}')">🔗 DOI</button>\` : ''}
             \${url ? \`<button class="action-btn" onclick="openUrl('\${url}')">🌐 \${isChinese ? '网页' : 'Web'}</button>\` : ''}
           </div>
@@ -509,6 +518,16 @@ export class LiteratureIndexViewer {
         const vscode = acquireVsCodeApi();
         vscode.postMessage({
           command: 'openFile',
+          filePath: filePath
+        });
+      }
+    }
+
+    function copyAtReference(filePath) {
+      if (filePath) {
+        const vscode = acquireVsCodeApi();
+        vscode.postMessage({
+          command: 'copyAtReference',
           filePath: filePath
         });
       }

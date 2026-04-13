@@ -1048,6 +1048,45 @@ export function activate(context: vscode.ExtensionContext) {
     }
   );
 
+  // 复制文件路径命令
+  const copyFilePathCommand = vscode.commands.registerCommand(
+    'aiSocialScientist.copyFilePath',
+    async (item: any) => {
+      const filePath = item?.filePath;
+      if (!filePath) {
+        vscode.window.showErrorMessage('无法获取文件路径');
+        return;
+      }
+
+      try {
+        await vscode.env.clipboard.writeText(filePath);
+        vscode.window.showInformationMessage(`已复制路径: ${filePath}`);
+      } catch (error: any) {
+        vscode.window.showErrorMessage(`复制失败: ${error.message || error}`);
+      }
+    }
+  );
+
+  // 复制 @引用 格式命令
+  const copyAtReferenceCommand = vscode.commands.registerCommand(
+    'aiSocialScientist.copyAtReference',
+    async (item: any) => {
+      const filePath = item?.filePath;
+      if (!filePath) {
+        vscode.window.showErrorMessage('无法获取文件路径');
+        return;
+      }
+
+      try {
+        const atReference = `@${filePath}`;
+        await vscode.env.clipboard.writeText(atReference);
+        vscode.window.showInformationMessage(`已复制引用: ${atReference}`);
+      } catch (error: any) {
+        vscode.window.showErrorMessage(`复制失败: ${error.message || error}`);
+      }
+    }
+  );
+
   // Register all commands
   context.subscriptions.push(
     initProjectCommand,
@@ -1080,6 +1119,8 @@ export function activate(context: vscode.ExtensionContext) {
     viewLiteratureIndexCommand,
     viewStepsYamlCommand,
     viewExperimentResultsCommand,
+    copyFilePathCommand,
+    copyAtReferenceCommand,
     mineruStatusMenuCommand,
     mineruRecheckCommand,
     mineruDownloadModelsCommand,

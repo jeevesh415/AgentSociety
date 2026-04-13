@@ -203,6 +203,16 @@
         "command": "aiSocialScientist.showMinerULogs",
         "title": "AI Social Scientist: Show MinerU Logs",
         "icon": "$(output)"
+      },
+      {
+        "command": "aiSocialScientist.copyFilePath",
+        "title": "AI Social Scientist: Copy File Path",
+        "icon": "$(copy)"
+      },
+      {
+        "command": "aiSocialScientist.copyAtReference",
+        "title": "AI Social Scientist: Copy @Reference",
+        "icon": "$(quote)"
       }
     ],
     "menus": {
@@ -282,6 +292,16 @@
           "command": "aiSocialScientist.viewExperimentResults",
           "when": "view == projectStructureView && viewItem =~ /experimentResults/",
           "group": "1_actions"
+        },
+        {
+          "command": "aiSocialScientist.copyFilePath",
+          "when": "view == projectStructureView && (viewItem == paper || viewItem == file || viewItem =~ /json/ || viewItem =~ /markdown/)",
+          "group": "0_copy@1"
+        },
+        {
+          "command": "aiSocialScientist.copyAtReference",
+          "when": "view == projectStructureView && (viewItem == paper || viewItem == file || viewItem =~ /json/ || viewItem =~ /markdown/)",
+          "group": "0_copy@2"
         }
       ]
     },
