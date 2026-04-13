@@ -61,6 +61,13 @@ extension/
 │   ├── extension.ts              # 主入口文件
 │   ├── projectStructureProvider.ts  # 项目结构树视图提供者
 │   ├── apiClient.ts              # API客户端
+│   ├── i18n.ts                   # 国际化字符串
+│   ├── jsonViewer.ts             # JSON 可视化查看器
+│   ├── yamlViewer.ts             # YAML 可视化查看器
+│   ├── stepsViewer.ts            # 步骤时间线查看器
+│   ├── pidStatusViewer.ts        # 实验状态监控查看器
+│   ├── literatureIndexViewer.ts  # 文献索引查看器
+│   ├── experimentResultsViewer.ts # 实验结果查看器
 │   ├── services/                 # 服务模块
 │   │   ├── backendManager.ts     # 后端管理
 │   │   ├── backendService.ts     # 后端服务
@@ -95,8 +102,42 @@ extension/
   - 支持拖放操作
   - 上下文菜单操作
   - 自动刷新
+  - 实验状态概览显示
 
-### 2. AI 聊天界面 (Chat Webview)
+### 2. 可视化文件查看器
+
+插件提供多种文件类型的可视化查看功能：
+
+#### JSON Viewer (`src/jsonViewer.ts`)
+- 语法高亮显示
+- 折叠/展开对象和数组
+- 搜索功能
+- 复制内容、复制路径
+
+#### YAML Viewer (`src/yamlViewer.ts`)
+- 语法高亮显示
+- 复制内容
+- 转换为 JSON
+
+#### Steps Viewer (`src/stepsViewer.ts`)
+- 时间线视图显示实验步骤
+- 编辑和保存功能
+- 状态指示器
+
+#### PID Status Viewer (`src/pidStatusViewer.ts`)
+- 实验运行状态监控
+- 自动刷新（运行中的实验）
+- 状态图标（完成/运行/失败/暂停）
+- 详细信息展示
+
+#### Literature Index Viewer (`src/literatureIndexViewer.ts`)
+- 文献列表展示
+- 搜索和过滤
+- 批量操作
+- 复制 @引用格式
+- 键盘快捷键支持
+
+### 3. AI 聊天界面 (Chat Webview)
 
 - **文件**: `src/chatWebviewProvider.ts` (Webview Provider)
 - **React 组件**: `src/webview/chat/` (使用 React + Ant Design X V2)

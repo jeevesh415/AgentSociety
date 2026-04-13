@@ -40,6 +40,8 @@ import { LiteratureIndexViewer } from './literatureIndexViewer';
 import { StepsViewer } from './stepsViewer';
 import { ExperimentResultsViewer } from './experimentResultsViewer';
 import { PidStatusViewer } from './pidStatusViewer';
+import { JsonViewer } from './jsonViewer';
+import { YamlViewer } from './yamlViewer';
 import { hasConfiguredLlmApiKey, migrateLegacySettingsToEnv } from './runtimeConfig';
 
 // 全局后端服务管理器实例（管理 FastAPI 后端进程的启动、停止、重启）
@@ -211,7 +213,7 @@ export function activate(context: vscode.ExtensionContext) {
       // 对于目录，不应该使用此命令删除（目录删除需要特殊处理）
       if (isDirectory) {
         vscode.window.showWarningMessage(
-          `"${fileName}" 是一个目录，请使用专门的删除命令或手动删除。`
+          localize('extension.isDirectory', fileName)
         );
         return;
       }
@@ -825,7 +827,7 @@ export function activate(context: vscode.ExtensionContext) {
       // 获取 skill 名称
       const skillName = item.skillName;
       if (!skillName) {
-        vscode.window.showErrorMessage('无法获取 Skill 名称');
+        vscode.window.showErrorMessage(localize('extension.skill.noName'));
         return;
       }
 
@@ -849,7 +851,7 @@ export function activate(context: vscode.ExtensionContext) {
           projectStructureProvider.refresh();
         }
       } catch (error: any) {
-        vscode.window.showErrorMessage(`删除 Skill 失败: ${error.message || error}`);
+        vscode.window.showErrorMessage(localize('extension.skill.deleteFailed', error.message || error));
       }
     }
   );
@@ -870,7 +872,7 @@ export function activate(context: vscode.ExtensionContext) {
       // 获取 skill 目录路径
       const skillDirPath = item.skillDirPath || item.filePath;
       if (!skillDirPath) {
-        vscode.window.showErrorMessage('无法获取 Skill 目录路径');
+        vscode.window.showErrorMessage(localize('extension.skill.noDirPath'));
         return;
       }
 
@@ -890,7 +892,7 @@ export function activate(context: vscode.ExtensionContext) {
     'aiSocialScientist.formatJsonFile',
     async (item: any) => {
       if (!item || !item.filePath) {
-        vscode.window.showErrorMessage('无法获取文件路径');
+        vscode.window.showErrorMessage(localize('extension.noFilePath'));
         return;
       }
 
@@ -923,7 +925,7 @@ export function activate(context: vscode.ExtensionContext) {
     'aiSocialScientist.viewLiteratureIndex',
     async (item: any) => {
       if (!item || !item.filePath) {
-        vscode.window.showErrorMessage('无法获取文献索引文件路径');
+        vscode.window.showErrorMessage(localize('extension.noLiteratureIndexPath'));
         return;
       }
 
@@ -1073,7 +1075,7 @@ export function activate(context: vscode.ExtensionContext) {
     async (item: any) => {
       const filePath = item?.filePath;
       if (!filePath) {
-        vscode.window.showErrorMessage('无法获取文件路径');
+        vscode.window.showErrorMessage(localize('extension.noFilePath'));
         return;
       }
 
@@ -1092,7 +1094,7 @@ export function activate(context: vscode.ExtensionContext) {
     async (item: any) => {
       const filePath = item?.filePath;
       if (!filePath) {
-        vscode.window.showErrorMessage('无法获取文件路径');
+        vscode.window.showErrorMessage(localize('extension.noFilePath'));
         return;
       }
 
@@ -1103,6 +1105,66 @@ export function activate(context: vscode.ExtensionContext) {
       } catch (error: any) {
         vscode.window.showErrorMessage(`复制失败: ${error.message || error}`);
       }
+    }
+  );
+
+  // JSON 文件可视化命令
+  const viewJsonFileCommand = vscode.commands.registerCommand(
+    'aiSocialScientist.viewJsonFile',
+    async (filePathOrItem: string | any) => {
+      const filePath = typeof filePathOrItem === 'string' ? filePathOrItem : filePathOrItem?.filePath;
+      if (!filePath || !fs.existsSync(filePath)) {
+        vscode.window.showErrorMessage(localize('extension.noFilePath'));
+        return;
+      }
+      await JsonViewer.show(filePath);
+    }
+  );
+
+  // YAML 文件可视化命令
+  const viewYamlFileCommand = vscode.commands.registerCommand(
+    'aiSocialScientist.viewYamlFile',
+    async (filePathOrItem: string | any) => {
+      const filePath = typeof filePathOrItem === 'string' ? filePathOrItem : filePathOrItem?.filePath;
+      if (!filePath || !fs.existsSync(filePath)) {
+        vscode.window.showErrorMessage(localize('extension.noFilePath'));
+        return;
+      }
+      await YamlViewer.show(filePath);
+    }
+  );
+
+  // 在文件管理器中打开命令
+  const openInExplorerCommand = vscode.commands.registerCommand(
+    'aiSocialScientist.openInExplorer',
+    async (item: any) => {
+      const filePath = item?.filePath;
+      if (!filePath) {
+        vscode.window.showErrorMessage(localize('extension.noFilePath'));
+        return;
+      }
+
+      // 如果是文件，打开其所在目录
+      const targetPath = fs.existsSync(filePath) && fs.statSync(filePath).isFile()
+        ? path.dirname(filePath)
+        : filePath;
+
+      await vscode.commands.executeCommand('revealFileInOS', vscode.Uri.file(targetPath));
+    }
+  );
+
+  // 复制文件名命令
+  const copyFileNameCommand = vscode.commands.registerCommand(
+    'aiSocialScientist.copyFileName',
+    async (item: any) => {
+      const filePath = item?.filePath;
+      if (!filePath) {
+        vscode.window.showErrorMessage(localize('extension.noFilePath'));
+        return;
+      }
+      const fileName = path.basename(filePath);
+      await vscode.env.clipboard.writeText(fileName);
+      vscode.window.showInformationMessage(`已复制文件名: ${fileName}`);
     }
   );
 
@@ -1139,6 +1201,10 @@ export function activate(context: vscode.ExtensionContext) {
     viewStepsYamlCommand,
     viewExperimentResultsCommand,
     viewPidStatusCommand,
+    viewJsonFileCommand,
+    viewYamlFileCommand,
+    openInExplorerCommand,
+    copyFileNameCommand,
     copyFilePathCommand,
     copyAtReferenceCommand,
     mineruStatusMenuCommand,
