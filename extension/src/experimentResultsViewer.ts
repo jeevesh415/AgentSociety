@@ -22,7 +22,24 @@ export class ExperimentResultsViewer {
       return;
     }
 
+    // 从文件路径提取实验信息
+    const pathParts = filePath.split(/[/\\]/);
+    const experimentIndex = pathParts.findIndex(p => p.startsWith('experiment_'));
+    const hypothesisIndex = pathParts.findIndex(p => p.startsWith('hypothesis_'));
+
+    let title = vscode.env.language.startsWith('zh') ? '实验结果可视化' : 'Experiment Results';
+    if (experimentIndex !== -1) {
+      const expMatch = pathParts[experimentIndex].match(/experiment_(\d+)/);
+      const hypMatch = hypothesisIndex !== -1 ? pathParts[hypothesisIndex].match(/hypothesis_(\d+)/) : null;
+      if (hypMatch && expMatch) {
+        title = vscode.env.language.startsWith('zh')
+          ? `H${hypMatch[1]}-E${expMatch[1]} 实验结果`
+          : `H${hypMatch[1]}-E${expMatch[1]} Results`;
+      }
+    }
+
     if (this.currentPanel) {
+      this.currentPanel.title = title;
       this.currentPanel.reveal(vscode.ViewColumn.One);
       this.updateWebview(this.currentPanel, data, filePath);
       return;
@@ -30,7 +47,7 @@ export class ExperimentResultsViewer {
 
     const panel = vscode.window.createWebviewPanel(
       'experimentResultsViewer',
-      '实验结果可视化',
+      title,
       vscode.ViewColumn.One,
       { enableScripts: true, retainContextWhenHidden: true }
     );

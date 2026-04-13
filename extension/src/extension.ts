@@ -39,6 +39,7 @@ import { AIChatInvoker } from './aiChatInvoker';
 import { LiteratureIndexViewer } from './literatureIndexViewer';
 import { StepsViewer } from './stepsViewer';
 import { ExperimentResultsViewer } from './experimentResultsViewer';
+import { PidStatusViewer } from './pidStatusViewer';
 import { hasConfiguredLlmApiKey, migrateLegacySettingsToEnv } from './runtimeConfig';
 
 // 全局后端服务管理器实例（管理 FastAPI 后端进程的启动、停止、重启）
@@ -1048,6 +1049,24 @@ export function activate(context: vscode.ExtensionContext) {
     }
   );
 
+  // PID状态可视化命令
+  const viewPidStatusCommand = vscode.commands.registerCommand(
+    'aiSocialScientist.viewPidStatus',
+    async (item: any) => {
+      const filePath = item?.filePath;
+      if (!filePath || !fs.existsSync(filePath)) {
+        vscode.window.showErrorMessage('pid.json 文件不存在');
+        return;
+      }
+
+      try {
+        await PidStatusViewer.createOrShow(filePath);
+      } catch (error: any) {
+        vscode.window.showErrorMessage(`打开实验状态可视化失败: ${error.message || error}`);
+      }
+    }
+  );
+
   // 复制文件路径命令
   const copyFilePathCommand = vscode.commands.registerCommand(
     'aiSocialScientist.copyFilePath',
@@ -1119,6 +1138,7 @@ export function activate(context: vscode.ExtensionContext) {
     viewLiteratureIndexCommand,
     viewStepsYamlCommand,
     viewExperimentResultsCommand,
+    viewPidStatusCommand,
     copyFilePathCommand,
     copyAtReferenceCommand,
     mineruStatusMenuCommand,
