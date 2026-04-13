@@ -1,9 +1,5 @@
 /**
- * Steps YAML 预览器 - 以时间线方式显示 steps.yaml
- *
- * 关联文件：
- * - @extension/src/extension.ts - 注册命令
- * - @extension/src/projectStructureProvider.ts - steps.yaml 节点
+ * Steps YAML 预览器 - 以时间线方式显示 steps.yaml，支持编辑
  */
 
 import * as vscode from 'vscode';
@@ -38,9 +34,9 @@ interface StepsConfig {
 
 export class StepsViewer {
   private static currentPanel: vscode.WebviewPanel | undefined;
+  private static currentFilePath: string | undefined;
 
   public static async show(context: vscode.ExtensionContext, filePath: string): Promise<void> {
-    // 读取 YAML 文件
     let data: StepsConfig;
     try {
       const content = fs.readFileSync(filePath, 'utf-8');
@@ -50,14 +46,14 @@ export class StepsViewer {
       return;
     }
 
-    // 如果已有面板，复用它
+    this.currentFilePath = filePath;
+
     if (this.currentPanel) {
       this.currentPanel.reveal(vscode.ViewColumn.One);
-      this.updateWebview(this.currentPanel, data, filePath);
+      this.updateWebview(this.currentPanel, data, filePath, context);
       return;
     }
 
-    // 创建新的 webview 面板
     const panel = vscode.window.createWebviewPanel(
       'stepsViewer',
       '实验步骤预览',
@@ -70,24 +66,35 @@ export class StepsViewer {
 
     this.currentPanel = panel;
 
-    // 处理面板关闭
-    panel.onDidDispose(() => {
-      this.currentPanel = undefined;
+    panel.webview.onDidReceiveMessage(async (message) => {
+      if (message.command === 'save' && this.currentFilePath) {
+        try {
+          fs.writeFileSync(this.currentFilePath, message.content, 'utf-8');
+          vscode.window.showInformationMessage('步骤配置已保存');
+          panel.webview.postMessage({ command: 'saved' });
+        } catch (e: any) {
+          vscode.window.showErrorMessage(`保存失败: ${e.message}`);
+        }
+      }
     });
 
-    // 更新内容
-    this.updateWebview(panel, data, filePath);
+    panel.onDidDispose(() => {
+      this.currentPanel = undefined;
+      this.currentFilePath = undefined;
+    });
+
+    this.updateWebview(panel, data, filePath, context);
   }
 
   private static updateWebview(
     panel: vscode.WebviewPanel,
     data: StepsConfig,
-    filePath: string
+    filePath: string,
+    context: vscode.ExtensionContext
   ): void {
     const steps = data.steps || [];
     const isChinese = vscode.env.language.startsWith('zh');
 
-    // 统计各类型步骤数量
     const runCount = steps.filter(s => s.type === 'run').length;
     const askCount = steps.filter(s => s.type === 'ask').length;
     const interveneCount = steps.filter(s => s.type === 'intervene').length;
@@ -329,6 +336,7 @@ export class StepsViewer {
   <div class="header">
     <h1>📋 ${isChinese ? '实验步骤预览' : 'Steps Preview'}</h1>
     <div style="display: flex; align-items: center; gap: 16px;">
+      <button class="copy-btn" id="editBtn" style="background: var(--vscode-button-secondaryBackground);">✏️ ${isChinese ? '编辑' : 'Edit'}</button>
       <button class="copy-btn" id="copyBtn">📋 ${isChinese ? '复制配置' : 'Copy Config'}</button>
       <div class="stats">
       <span class="stat-badge run">▶ Run × ${runCount}</span>
@@ -346,10 +354,65 @@ export class StepsViewer {
   ` : ''}
 
   <div class="timeline" id="timeline"></div>
+  
+  <div id="editor" style="display: none; margin-top: 24px;">
+    <textarea id="yamlEditor" style="width: 100%; min-height: 300px; padding: 12px; background: var(--vscode-input-background); border: 1px solid var(--vscode-input-border); border-radius: 6px; color: var(--vscode-input-foreground); font-family: var(--vscode-editor-font-family); font-size: 13px; resize: vertical;"></textarea>
+    <div style="margin-top: 12px; display: flex; gap: 8px;">
+      <button class="copy-btn" id="saveBtn">💾 ${isChinese ? '保存' : 'Save'}</button>
+      <button class="copy-btn" id="cancelBtn" style="background: var(--vscode-button-secondaryBackground);">${isChinese ? '取消' : 'Cancel'}</button>
+    </div>
+  </div>
 
   <script>
     const steps = ${JSON.stringify(steps)};
+    const startT = ${JSON.stringify(data.start_t || '')};
     const isChinese = ${isChinese ? 'true' : 'false'};
+    const vscode = acquireVsCodeApi();
+    
+    let isEditing = false;
+    
+    function toggleEditor() {
+      const editor = document.getElementById('editor');
+      const timeline = document.getElementById('timeline');
+      isEditing = !isEditing;
+      
+      if (isEditing) {
+        editor.style.display = 'block';
+        timeline.style.display = 'none';
+        const yamlLines = ['start_t: ' + (startT || ''), 'steps:'];
+        steps.forEach(function(s) {
+          if (s.type === 'run') {
+            yamlLines.push('  - type: run');
+            yamlLines.push('    num_steps: ' + (s.num_steps || 1));
+            yamlLines.push('    tick: ' + (s.tick || 60));
+          } else if (s.type === 'ask') {
+            yamlLines.push('  - type: ask');
+            yamlLines.push('    question: "' + (s.question || '') + '"');
+          } else if (s.type === 'intervene') {
+            yamlLines.push('  - type: intervene');
+            yamlLines.push('    target: ' + (s.target || ''));
+            yamlLines.push('    action: ' + (s.action || ''));
+          }
+        });
+        document.getElementById('yamlEditor').value = yamlLines.join('\\n');
+        document.getElementById('editBtn').textContent = '👁️ ' + (isChinese ? '预览' : 'Preview');
+      } else {
+        editor.style.display = 'none';
+        timeline.style.display = 'block';
+        document.getElementById('editBtn').textContent = '✏️ ' + (isChinese ? '编辑' : 'Edit');
+      }
+    }
+    
+    document.getElementById('editBtn').addEventListener('click', toggleEditor);
+    
+    document.getElementById('saveBtn').addEventListener('click', function() {
+      const content = document.getElementById('yamlEditor').value;
+      vscode.postMessage({ command: 'save', content: content });
+    });
+    
+    document.getElementById('cancelBtn').addEventListener('click', function() {
+      toggleEditor();
+    });
 
     function renderSteps() {
       const container = document.getElementById('timeline');

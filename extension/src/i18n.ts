@@ -36,6 +36,14 @@ const translations: Record<string, Record<string, string>> = {
     'extension.deleteLiterature.cancelButton': '取消',
     'extension.deleteLiterature.failed': '删除失败: {0}',
 
+    // extension.ts - common errors
+    'extension.isDirectory': '"{0}" 是一个目录，请使用专门的删除命令或手动删除。',
+    'extension.noFilePath': '无法获取文件路径',
+    'extension.noLiteratureIndexPath': '无法获取文献索引文件路径',
+    'extension.skill.noName': '无法获取 Skill 名称',
+    'extension.skill.noDirPath': '无法获取 Skill 目录路径',
+    'extension.skill.deleteFailed': '删除 Skill 失败: {0}',
+
     // extension.ts - renameLiterature
     'extension.renameLiterature.noFile': '无法重命名：未选择有效的文件',
     'extension.renameLiterature.noWorkspace': '未找到工作区文件夹',
@@ -295,6 +303,14 @@ const translations: Record<string, Record<string, string>> = {
     'extension.deleteLiterature.confirmButton': 'Delete',
     'extension.deleteLiterature.cancelButton': 'Cancel',
     'extension.deleteLiterature.failed': 'Delete failed: {0}',
+
+    // extension.ts - common errors
+    'extension.isDirectory': '"{0}" is a directory. Please use the dedicated delete command or delete manually.',
+    'extension.noFilePath': 'Cannot get file path',
+    'extension.noLiteratureIndexPath': 'Cannot get literature index file path',
+    'extension.skill.noName': 'Cannot get Skill name',
+    'extension.skill.noDirPath': 'Cannot get Skill directory path',
+    'extension.skill.deleteFailed': 'Failed to delete Skill: {0}',
 
     // extension.ts - renameLiterature
     'extension.renameLiterature.noFile': 'Cannot rename: No valid file selected',
