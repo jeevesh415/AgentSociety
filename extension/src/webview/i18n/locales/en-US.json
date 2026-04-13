@@ -195,8 +195,37 @@
     }
   },
   "configPage": {
-    "title": "AI Social Scientist Configuration Wizard",
+    "title": "AI Social Scientist Configuration",
+    "subtitle": "Configure your AgentSociety workspace environment",
     "description": "Configure your environment step by step, each step can be saved individually",
+    "advancedConfig": "Advanced Configuration (optional)",
+    "resetDefaults": "Reset to Defaults",
+    "saveAndStart": "Save and Start",
+    "starting": "Starting...",
+    "validationSuccess": "Validation Successful",
+    "validationFailed": "Validation Failed",
+    "analysis": {
+      "title": "Data Analysis LLM",
+      "hint": "For data analysis, insight generation, and report writing",
+      "apiKey": "API Key",
+      "apiKeyPlaceholder": "Leave empty to use default",
+      "apiBase": "API URL",
+      "apiBasePlaceholder": "Leave empty to use default",
+      "model": "Model",
+      "modelPlaceholder": "Recommended: use a stronger model"
+    },
+    "python": {
+      "title": "Python Environment",
+      "hint": "Python runtime environment configuration",
+      "path": "Python Path",
+      "pathPlaceholder": "python3 or leave empty for auto-detection"
+    },
+    "literature": {
+      "title": "Literature Search Service",
+      "hint": "Unified academic literature search service",
+      "validateConfig": "Validate Configuration",
+      "validateSuccess": "Validation Successful"
+    },
     "steps": {
       "llm": {
         "title": "LLM Configuration",
@@ -325,4 +354,3 @@
     }
   }
 }
-
