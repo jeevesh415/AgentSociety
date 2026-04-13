@@ -311,15 +311,30 @@ export class StepsViewer {
       padding: 48px;
       color: var(--vscode-descriptionForeground);
     }
+    .copy-btn {
+      padding: 6px 12px;
+      background-color: var(--vscode-button-background);
+      color: var(--vscode-button-foreground);
+      border: none;
+      border-radius: 4px;
+      cursor: pointer;
+      font-size: 12px;
+    }
+    .copy-btn:hover {
+      background-color: var(--vscode-button-hoverBackground);
+    }
   </style>
 </head>
 <body>
   <div class="header">
     <h1>📋 ${isChinese ? '实验步骤预览' : 'Steps Preview'}</h1>
-    <div class="stats">
+    <div style="display: flex; align-items: center; gap: 16px;">
+      <button class="copy-btn" id="copyBtn">📋 ${isChinese ? '复制配置' : 'Copy Config'}</button>
+      <div class="stats">
       <span class="stat-badge run">▶ Run × ${runCount}</span>
       <span class="stat-badge ask">❓ Ask × ${askCount}</span>
       <span class="stat-badge intervene">✋ Intervene × ${interveneCount}</span>
+      </div>
     </div>
   </div>
 
@@ -412,6 +427,34 @@ export class StepsViewer {
         container.appendChild(div);
       });
     }
+
+    // 复制步骤配置
+    document.getElementById('copyBtn').addEventListener('click', function() {
+      const yamlLines = ['start_t: ' + (data.start_t || ''), 'steps:'];
+      steps.forEach(function(s) {
+        if (s.type === 'run') {
+          yamlLines.push('  - type: run');
+          yamlLines.push('    num_steps: ' + (s.num_steps || 1));
+          yamlLines.push('    tick: ' + (s.tick || 60));
+        } else if (s.type === 'ask') {
+          yamlLines.push('  - type: ask');
+          yamlLines.push('    question: "' + (s.question || '') + '"');
+        } else if (s.type === 'intervene') {
+          yamlLines.push('  - type: intervene');
+          yamlLines.push('    target: ' + (s.target || ''));
+          yamlLines.push('    action: ' + (s.action || ''));
+        }
+      });
+      const yamlContent = yamlLines.join('\\n');
+      navigator.clipboard.writeText(yamlContent).then(function() {
+        const btn = document.getElementById('copyBtn');
+        const originalText = btn.textContent;
+        btn.textContent = '✓ ' + (isChinese ? '已复制' : 'Copied');
+        setTimeout(function() { btn.textContent = originalText; }, 2000);
+      }).catch(function() {
+        alert(isChinese ? '复制失败' : 'Copy failed');
+      });
+    });
 
     renderSteps();
   </script>

@@ -169,10 +169,10 @@ export class ProjectItem extends vscode.TreeItem {
     // 当用户点击这个节点时，会执行相应的命令打开文件
     if (filePath) {
       if (type === 'reportHtml' || (ext === 'html' && (type === 'presentationExperiment' || type === 'synthesis'))) {
-        // HTML 报告文件使用 Live Preview 预览
+        // HTML 报告文件使用默认浏览器打开（不依赖 Live Preview 扩展）
         this.command = {
           command: 'livePreview.start.preview.atFile',
-          title: 'Open with Live Preview',
+          title: 'Open HTML Report',
           arguments: [vscode.Uri.file(filePath)]
         };
       } else if (type === 'reportMd' && isMarkdown) {

@@ -107,10 +107,15 @@ export class ExperimentResultsViewer {
     .tab-content { display: none; }
     .tab-content.active { display: block; }
     .json-viewer { background-color: var(--vscode-input-background); border-radius: 6px; padding: 12px; font-family: var(--vscode-editor-font-family); font-size: 11px; max-height: 400px; overflow: auto; white-space: pre-wrap; word-break: break-all; }
+    .copy-btn { padding: 8px 16px; background-color: var(--vscode-button-background); color: var(--vscode-button-foreground); border: none; border-radius: 4px; cursor: pointer; font-size: 13px; }
+    .copy-btn:hover { background-color: var(--vscode-button-hoverBackground); }
   </style>
 </head>
 <body>
-  <div class="header"><h1>📊 ${isChinese ? '实验结果可视化' : 'Experiment Results'}</h1></div>
+  <div class="header" style="display: flex; justify-content: space-between; align-items: center;">
+    <h1>📊 ${isChinese ? '实验结果可视化' : 'Experiment Results'}</h1>
+    <button class="copy-btn" id="copyBtn">📋 ${isChinese ? '复制数据' : 'Copy Data'}</button>
+  </div>
   <div class="summary-cards" id="summaryCards"></div>
   <div class="section">
     <h2>📈 ${isChinese ? '数据可视化' : 'Data Visualization'}</h2>
@@ -293,6 +298,19 @@ export class ExperimentResultsViewer {
 
     // 渲染 JSON
     document.getElementById('jsonViewer').textContent = JSON.stringify(data, null, 2);
+
+    // 复制数据功能
+    document.getElementById('copyBtn').addEventListener('click', function() {
+      var jsonStr = JSON.stringify(data, null, 2);
+      navigator.clipboard.writeText(jsonStr).then(function() {
+        var btn = document.getElementById('copyBtn');
+        var originalText = btn.textContent;
+        btn.textContent = '✓ ' + (isChinese ? '已复制' : 'Copied');
+        setTimeout(function() { btn.textContent = originalText; }, 2000);
+      }).catch(function() {
+        alert(isChinese ? '复制失败' : 'Copy failed');
+      });
+    });
 
     // 初始化
     renderSummary();
