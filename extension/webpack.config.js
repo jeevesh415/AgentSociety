@@ -31,6 +31,9 @@ module.exports = [
   {
     target: 'web',
     mode: 'production',
+    performance: {
+      hints: false, // webview 是本地按需加载，大小不影响性能
+    },
     entry: {
       simSettings: './src/webview/simSettings/index.tsx',
       prefillParams: './src/webview/prefillParams/index.tsx',

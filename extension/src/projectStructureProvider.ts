@@ -54,7 +54,7 @@ export class ProjectItem extends vscode.TreeItem {
   constructor(
     public readonly label: string,
     public readonly collapsibleState: vscode.TreeItemCollapsibleState,
-    public readonly type: 'initWorkspace' | 'configureEnv' | 'fixWorkspace' | 'aiChat' | 'topic' | 'hypothesis' | 'experiment' | 'paper' | 'file' | 'papers' | 'userdata' | 'prefillParams' | 'prefillParamsGroup' | 'prefillParamsEnv' | 'prefillParamsAgent' | 'settings' | 'custom' | 'customScan' | 'customTest' | 'customClean' | 'customAgentItem' | 'customEnvItem' | 'customAgentsGroup' | 'customEnvsGroup' | 'customWorkspace' | 'presentation' | 'presentationHypothesis' | 'presentationExperiment' | 'synthesis' | 'reportHtml' | 'reportMd' | 'agentSkillsGroup' | 'agentSkillItem' | 'agentSkillScan' | 'agentSkillImport' | 'agentSkillBuiltinGroup' | 'agentSkillCustomGroup' | 'agentSkillEnvGroup' | 'extensionSkillsGroup' | 'extensionSkillUpdate' | 'extensionSkillItem' | 'skillFile' | 'datasets' | 'datasetItem',
+    public readonly type: 'initWorkspace' | 'configureEnv' | 'fixWorkspace' | 'aiChat' | 'topic' | 'hypothesis' | 'experiment' | 'paper' | 'file' | 'papers' | 'userdata' | 'prefillParams' | 'prefillParamsGroup' | 'prefillParamsEnv' | 'prefillParamsAgent' | 'settings' | 'custom' | 'customScan' | 'customTest' | 'customClean' | 'customAgentItem' | 'customEnvItem' | 'customAgentsGroup' | 'customEnvsGroup' | 'customWorkspace' | 'presentation' | 'presentationHypothesis' | 'presentationExperiment' | 'synthesis' | 'reportHtml' | 'reportMd' | 'agentSkillsGroup' | 'agentSkillItem' | 'agentSkillScan' | 'agentSkillImport' | 'agentSkillBuiltinGroup' | 'agentSkillCustomGroup' | 'agentSkillEnvGroup' | 'extensionSkillsGroup' | 'extensionSkillUpdate' | 'extensionSkillItem' | 'skillFile' | 'datasets' | 'datasetItem' | 'paperPdfGroup' | 'paperMdGroup' | 'paperJsonGroup' | 'pidJson' | 'experimentInitGroup' | 'experimentRunGroup' | 'projectStats',
     public readonly filePath?: string
   ) {
     // 调用父类构造函数，初始化树节点
@@ -82,10 +82,13 @@ export class ProjectItem extends vscode.TreeItem {
     // 例如：当contextValue为'hypothesis'时，可以显示特定的右键菜单项
     // 对于 markdown 文件，添加 'markdown' 标识以便在右键菜单中显示特定选项
     // 对于 JSON 文件，添加 'json' 标识
+    // 对于 YAML 文件，添加 'yaml' 标识
     if (isMarkdown) {
       this.contextValue = `${type} markdown`;
     } else if (isJson) {
       this.contextValue = `${type} json`;
+    } else if (isYaml) {
+      this.contextValue = `${type} yaml`;
     } else {
       this.contextValue = type;
     }
@@ -100,7 +103,7 @@ export class ProjectItem extends vscode.TreeItem {
       'topic': 'book',           // 书籍图标，表示研究话题
       'hypothesis': 'lightbulb',  // 灯泡图标，表示假设
       'experiment': 'beaker',     // 烧杯图标，表示实验
-      'papers': 'library',        // 图书馆图标，表示文献库
+      'papers': 'file-directory', // 文献库
       'userdata': 'database',     // 数据库图标，表示用户数据
       'datasets': 'database',     // 数据集根目录图标
       'datasetItem': 'folder',    // 单个数据集图标
@@ -108,31 +111,38 @@ export class ProjectItem extends vscode.TreeItem {
       'prefillParamsGroup': 'folder', // 文件夹图标，表示预填充参数组
       'prefillParamsEnv': 'symbol-namespace', // 命名空间图标，表示环境模块预置参数
       'prefillParamsAgent': 'symbol-interface', // 接口图标，表示智能体类预置参数
-      'settings': 'settings-gear', // 齿轮设置图标，表示配置设置
+      'settings': 'gear', // 齿轮设置图标，表示配置设置
       'custom': 'extensions', // 自定义模块根图标
-      'customWorkspace': 'extensions', // custom/ 目录节点图标
-      'customScan': 'refresh', // 扫描图标
-      'customTest': 'play', // 测试图标
+      'customWorkspace': 'folder', // custom/ 目录节点图标
+      'customScan': 'search', // 搜索图标，扫描
+      'customTest': 'debug-start', // 播放图标，测试
       'customAgentItem': 'symbol-class', // 自定义Agent图标
       'customEnvItem': 'symbol-namespace', // 自定义环境模块图标
       'customAgentsGroup': 'folder', // Agents组图标
       'customEnvsGroup': 'folder', // Envs组图标
-      'presentation': 'symbol-folder', // 分析报告根图标
+      'presentation': 'folder', // 分析报告根图标
       'presentationHypothesis': 'folder', // 假设文件夹
       'presentationExperiment': 'folder', // 实验文件夹
-      'synthesis': 'symbol-misc', // 综合报告图标
-      'reportHtml': 'browser', // HTML 报告图标
-      'reportMd': 'file-code', // Markdown 报告图标
-      'agentSkillsGroup': 'extensions', // Agent Skills 组图标
+      'synthesis': 'file-text', // 综合报告图标
+      'reportHtml': 'file-code', // HTML 报告图标
+      'reportMd': 'file-text', // Markdown 报告图标
+      'agentSkillsGroup': 'puzzle', // Agent Skills 组图标
       'agentSkillItem': 'puzzle-piece', // 单个 Skill 图标
-      'agentSkillScan': 'refresh', // 扫描 Skills 图标
-      'agentSkillImport': 'cloud-download', // 导入 Skill 图标
+      'agentSkillScan': 'search', // 搜索/扫描图标
+      'agentSkillImport': 'arrow-down', // 导入图标
       'agentSkillBuiltinGroup': 'package', // 内置 Skills 组图标
-      'agentSkillCustomGroup': 'tools', // 自定义 Skills 组图标
-      'agentSkillEnvGroup': 'server-environment', // 环境 Skills 组图标
+      'agentSkillCustomGroup': 'folder', // 自定义 Skills 组图标
+      'agentSkillEnvGroup': 'folder', // 环境 Skills 组图标
       'extensionSkillsGroup': 'package', // 扩展自带 Skills
       'extensionSkillUpdate': 'sync', // 更新 Skills 按钮
-      'extensionSkillItem': 'puzzle', // 扩展自带 Skill
+      'extensionSkillItem': 'puzzle-piece', // 扩展自带 Skill
+      'paperPdfGroup': 'file-directory', // PDF 文献组
+      'paperMdGroup': 'file-directory', // Markdown 笔记组
+      'paperJsonGroup': 'file-directory', // JSON 文件组
+      'pidJson': 'info', // 进程状态图标
+      'experimentInitGroup': 'folder', // 实验配置文件组
+      'experimentRunGroup': 'folder', // 实验运行结果组
+      'projectStats': 'graph', // 项目统计概览
     };
 
     // 对于 paper 和 file 类型，根据文件扩展名设置图标
@@ -169,10 +179,10 @@ export class ProjectItem extends vscode.TreeItem {
     // 当用户点击这个节点时，会执行相应的命令打开文件
     if (filePath) {
       if (type === 'reportHtml' || (ext === 'html' && (type === 'presentationExperiment' || type === 'synthesis'))) {
-        // HTML 报告文件使用 Live Preview 预览
+        // HTML 报告文件使用默认浏览器打开（不依赖 Live Preview 扩展）
         this.command = {
           command: 'livePreview.start.preview.atFile',
-          title: 'Open with Live Preview',
+          title: 'Open HTML Report',
           arguments: [vscode.Uri.file(filePath)]
         };
       } else if (type === 'reportMd' && isMarkdown) {
@@ -190,11 +200,34 @@ export class ProjectItem extends vscode.TreeItem {
           arguments: [vscode.Uri.file(filePath)]  // 传递文件URI作为参数
         };
       } else if (isJson) {
-        // JSON 文件：使用格式化方式打开，便于阅读
+        // JSON 文件：检查是否有专门的自定义编辑器
+        const fileName = path.basename(filePath);
+        const parentDir = path.basename(path.dirname(filePath));
+        const hasCustomEditor =
+          fileName === 'SIM_SETTINGS.json' ||
+          (fileName === 'init_config.json' && parentDir === 'init');
+
+        if (hasCustomEditor) {
+          // 有自定义编辑器的文件：让 VSCode 自动选择
+          this.command = {
+            command: 'vscode.open',
+            title: 'Open File',
+            arguments: [vscode.Uri.file(filePath)]
+          };
+        } else {
+          // 其他 JSON 文件：使用通用可视化查看器
+          this.command = {
+            command: 'aiSocialScientist.viewJsonFile',
+            title: 'View JSON',
+            arguments: [filePath]
+          };
+        }
+      } else if (isYaml) {
+        // YAML 文件：使用通用可视化查看器
         this.command = {
-          command: 'vscode.open',
-          title: 'Open JSON File',
-          arguments: [vscode.Uri.file(filePath)]
+          command: 'aiSocialScientist.viewYamlFile',
+          title: 'View YAML',
+          arguments: [filePath]
         };
       } else {
         // 其他文件使用默认打开方式
@@ -498,6 +531,7 @@ export class ProjectStructureProvider implements vscode.TreeDataProvider<Project
     }
 
     const workspacePath = workspaceFolder.uri.fsPath;
+    const isChinese = vscode.env.language === 'zh-CN' || vscode.env.language.startsWith('zh');
 
     // 检查工作区状态
     const topicFile = path.join(workspacePath, 'TOPIC.md');
@@ -616,21 +650,38 @@ export class ProjectStructureProvider implements vscode.TreeDataProvider<Project
         items.push(fixItem);
       }
 
+      // 添加项目状态概览（统计信息）
+      const statsOverview = this.getProjectStats(workspacePath, isChinese);
+      if (statsOverview) {
+        const statsItem = new ProjectItem(
+          statsOverview,
+          vscode.TreeItemCollapsibleState.None,
+          'projectStats',
+          undefined
+        );
+        statsItem.tooltip = isChinese ? '项目进度概览' : 'Project Progress Overview';
+        items.push(statsItem);
+      }
+
       // 添加 Agent Skills 管理节点
-      items.push(new ProjectItem(
-        localize('projectStructure.agentSkills') || 'Agent Skills',
+      const agentSkillsItem = new ProjectItem(
+        isChinese ? 'Agent Skills' : 'Agent Skills',
         vscode.TreeItemCollapsibleState.Collapsed,
         'agentSkillsGroup',
         undefined
-      ));
+      );
+      agentSkillsItem.tooltip = isChinese ? '管理 Agent 技能模块' : 'Manage Agent skill modules';
+      items.push(agentSkillsItem);
 
-      // 添加 AgentSociety（扩展自带）Skills（只读展示）
-      items.push(new ProjectItem(
-        localize('projectStructure.extensionSkills') || 'AgentSociety Skills',
+      // 添加 AgentSociety（扩展自带）Skills
+      const extSkillsItem = new ProjectItem(
+        isChinese ? '内置 Skills' : 'Built-in Skills',
         vscode.TreeItemCollapsibleState.Collapsed,
         'extensionSkillsGroup',
         undefined
-      ));
+      );
+      extSkillsItem.tooltip = isChinese ? 'AgentSociety 扩展自带的技能' : 'Skills bundled with AgentSociety extension';
+      items.push(extSkillsItem);
 
       // 添加环境与智能体组节点（直接点击打开管理页面）
       items.push(new ProjectItem(
@@ -727,10 +778,11 @@ export class ProjectStructureProvider implements vscode.TreeDataProvider<Project
     // Agent Skills 组的子节点
     if (element.type === 'agentSkillsGroup') {
       const items: ProjectItem[] = [];
+      const isChinese = vscode.env.language.startsWith('zh');
 
-      // 操作按钮组
+      // 操作按钮行
       const scanItem = new ProjectItem(
-        localize('projectStructure.agentSkillsScan'),
+        isChinese ? '扫描 Skills' : 'Scan Skills',
         vscode.TreeItemCollapsibleState.None,
         'agentSkillScan',
         undefined
@@ -739,10 +791,11 @@ export class ProjectStructureProvider implements vscode.TreeDataProvider<Project
         command: 'aiSocialScientist.scanAgentSkills',
         title: 'Scan Agent Skills'
       };
+      scanItem.description = '';
       items.push(scanItem);
 
       const importItem = new ProjectItem(
-        localize('projectStructure.agentSkillsImport'),
+        isChinese ? '导入 Skill' : 'Import Skill',
         vscode.TreeItemCollapsibleState.None,
         'agentSkillImport',
         undefined
@@ -751,6 +804,7 @@ export class ProjectStructureProvider implements vscode.TreeDataProvider<Project
         command: 'aiSocialScientist.importAgentSkill',
         title: 'Import Agent Skill'
       };
+      importItem.description = '';
       items.push(importItem);
 
       // 分离 builtin / custom / env skills
@@ -760,41 +814,53 @@ export class ProjectStructureProvider implements vscode.TreeDataProvider<Project
 
       // Builtin Skills 分组
       if (builtinSkills.length > 0) {
+        const enabledCount = builtinSkills.filter(s => s.enabled).length;
         const builtinGroup = new ProjectItem(
-          `${localize('projectStructure.agentSkillsBuiltin')} (${builtinSkills.length})`,
+          `${isChinese ? '内置 Skills' : 'Built-in'} (${enabledCount}/${builtinSkills.length})`,
           vscode.TreeItemCollapsibleState.Collapsed,
           'agentSkillBuiltinGroup',
           undefined
         );
+        builtinGroup.tooltip = isChinese
+          ? `内置 Skills: ${enabledCount} 个已启用`
+          : `Built-in Skills: ${enabledCount} enabled`;
         items.push(builtinGroup);
       }
 
       // Custom Skills 分组
       if (customSkills.length > 0) {
+        const enabledCount = customSkills.filter(s => s.enabled).length;
         const customGroup = new ProjectItem(
-          `${localize('projectStructure.agentSkillsCustom')} (${customSkills.length})`,
+          `${isChinese ? '自定义 Skills' : 'Custom'} (${enabledCount}/${customSkills.length})`,
           vscode.TreeItemCollapsibleState.Collapsed,
           'agentSkillCustomGroup',
           undefined
         );
+        customGroup.tooltip = isChinese
+          ? `自定义 Skills: ${enabledCount} 个已启用`
+          : `Custom Skills: ${enabledCount} enabled`;
         items.push(customGroup);
       }
 
       // Environment Skills 分组
       if (envSkills.length > 0) {
+        const enabledCount = envSkills.filter(s => s.enabled).length;
         const envGroup = new ProjectItem(
-          `${localize('projectStructure.agentSkillsEnv') || 'Environment'} (${envSkills.length})`,
+          `${isChinese ? '环境 Skills' : 'Environment'} (${enabledCount}/${envSkills.length})`,
           vscode.TreeItemCollapsibleState.Collapsed,
           'agentSkillEnvGroup',
           undefined
         );
+        envGroup.tooltip = isChinese
+          ? `环境 Skills: ${enabledCount} 个已启用`
+          : `Environment Skills: ${enabledCount} enabled`;
         items.push(envGroup);
       }
 
       // 如果没有任何 skill，显示提示
       if (this.agentSkillsCache.length === 0) {
         const emptyItem = new ProjectItem(
-          localize('projectStructure.agentSkillsEmpty'),
+          isChinese ? '点击扫描以发现 Skills' : 'Click Scan to discover Skills',
           vscode.TreeItemCollapsibleState.None,
           'agentSkillScan',
           undefined
@@ -952,15 +1018,54 @@ export class ProjectStructureProvider implements vscode.TreeDataProvider<Project
           const dirName = path.basename(dir);  // 如hypothesis_12345
           // 提取数字部分，转换为友好的显示名称（如"假设 12345"）
           const match = dirName.match(/^hypothesis_(\d+)$/);
+
+          // 统计实验数量和完成数量
+          const experimentDirs = this.findDirectories(dir, /^experiment_\d+$/);
+          const totalExperiments = experimentDirs.length;
+          let completedExperiments = 0;
+          let runningExperiments = 0;
+
+          for (const expDir of experimentDirs) {
+            const pidFile = path.join(expDir, 'run', 'pid.json');
+            if (fs.existsSync(pidFile)) {
+              try {
+                const pidContent = fs.readFileSync(pidFile, 'utf-8');
+                const pidData = JSON.parse(pidContent);
+                if (pidData.status === 'completed') {
+                  completedExperiments++;
+                } else if (pidData.status === 'running') {
+                  runningExperiments++;
+                }
+              } catch { }
+            }
+          }
+
+          // 构建状态描述
+          let statusDesc = '';
+          if (totalExperiments > 0) {
+            statusDesc = ` (${completedExperiments}/${totalExperiments})`;
+          }
+
           const displayName = match
-            ? `${localize('projectStructure.hypothesis')} ${match[1]}`
+            ? `${localize('projectStructure.hypothesis')} ${match[1]}${statusDesc}`
             : dirName;  // 如果格式不匹配，使用原目录名
-          items.push(new ProjectItem(
+
+          const item = new ProjectItem(
             displayName,  // 显示为"假设 12345"或"Hypothesis 12345"
             vscode.TreeItemCollapsibleState.Collapsed,  // 可展开
             'hypothesis',
             fs.existsSync(hypothesisFile) ? hypothesisFile : undefined  // 如果存在HYPOTHESIS.md，点击可打开
-          ));
+          );
+
+          // 设置 tooltip 显示详细状态
+          if (totalExperiments > 0) {
+            item.tooltip = `${localize('projectStructure.experiments')}: ${totalExperiments}\n${localize('projectStructure.completed')}: ${completedExperiments}`;
+            if (runningExperiments > 0) {
+              item.tooltip += `\n${localize('projectStructure.running')}: ${runningExperiments}`;
+            }
+          }
+
+          items.push(item);
         }
       }
 
@@ -1047,7 +1152,7 @@ export class ProjectStructureProvider implements vscode.TreeDataProvider<Project
       return items;
     }
 
-    // Papers节点（文献库）的子节点：显示所有文件和子目录
+    // Papers节点（文献库）的子节点：按类型分组显示
     if (element.type === 'papers') {
       const workspaceFolder = vscode.workspace.workspaceFolders?.[0];
       if (!workspaceFolder) {
@@ -1058,46 +1163,31 @@ export class ProjectStructureProvider implements vscode.TreeDataProvider<Project
       const items: ProjectItem[] = [];
 
       if (fs.existsSync(papersDir)) {
-        // 读取目录，忽略mineru_output文件夹
         const entries = fs.readdirSync(papersDir).filter(entry => entry !== 'mineru_output');
+
+        // 按类型分类文件
+        const pdfFiles: { name: string; path: string }[] = [];
+        const mdFiles: { name: string; path: string }[] = [];
+        const jsonFiles: { name: string; path: string }[] = [];
+        const otherFiles: { name: string; path: string }[] = [];
+        const directories: { name: string; path: string; count: number }[] = [];
 
         for (const entry of entries) {
           const fullPath = path.join(papersDir, entry);
           const stat = fs.statSync(fullPath);
 
           if (stat.isFile()) {
-            // 如果是文件，创建文件节点
-            const fileItem = new ProjectItem(
-              entry,  // 文件名作为标签
-              vscode.TreeItemCollapsibleState.None,  // 文件没有子节点
-              'paper',
-              fullPath  // 完整文件路径
-            );
-
-            // 如果是 literature_index.json，设置特殊的 tooltip 和命令
-            if (entry === 'literature_index.json') {
-              try {
-                const content = fs.readFileSync(fullPath, 'utf-8');
-                const data = JSON.parse(content);
-                const count = data.entries?.length || 0;
-                fileItem.tooltip = `${localize('projectStructure.literatureIndex')} (${count} ${localize('projectStructure.articles')})`;
-                fileItem.description = `(${count} ${localize('projectStructure.articles')})`;
-                // 设置特殊的 contextValue 以便显示专用菜单
-                fileItem.contextValue = 'paper json literatureIndex';
-                // 设置点击命令为文献索引预览
-                fileItem.command = {
-                  command: 'aiSocialScientist.viewLiteratureIndex',
-                  title: 'View Literature Index',
-                  arguments: [{ filePath: fullPath }]
-                };
-              } catch {
-                // 解析失败时使用默认 tooltip
-              }
+            const ext = entry.toLowerCase().split('.').pop() || '';
+            if (ext === 'pdf') {
+              pdfFiles.push({ name: entry, path: fullPath });
+            } else if (ext === 'md') {
+              mdFiles.push({ name: entry, path: fullPath });
+            } else if (ext === 'json') {
+              jsonFiles.push({ name: entry, path: fullPath });
+            } else {
+              otherFiles.push({ name: entry, path: fullPath });
             }
-
-            items.push(fileItem);
           } else if (stat.isDirectory()) {
-            // 如果是目录，计算目录内的文件数量
             let fileCount = 0;
             try {
               const subEntries = fs.readdirSync(fullPath).filter((sub: string) => sub !== 'mineru_output');
@@ -1105,20 +1195,88 @@ export class ProjectStructureProvider implements vscode.TreeDataProvider<Project
                 const subPath = path.join(fullPath, sub);
                 return fs.statSync(subPath).isFile();
               }).length;
-            } catch {
-              // 忽略错误
-            }
-
-            // 创建可展开的目录节点，显示文件数量
-            const dirItem = new ProjectItem(
-              fileCount > 0 ? `${entry} (${fileCount})` : entry,
-              vscode.TreeItemCollapsibleState.Collapsed,  // 可展开
-              'paper',  // 使用paper类型表示文献库子项
-              fullPath  // 存储目录路径，用于获取子节点
-            );
-            dirItem.tooltip = `${entry} - ${fileCount} ${localize('projectStructure.files')}`;
-            items.push(dirItem);
+            } catch { }
+            directories.push({ name: entry, path: fullPath, count: fileCount });
           }
+        }
+
+        // 文献索引文件（特殊处理，置顶显示）
+        const literatureIndexFile = jsonFiles.find(f => f.name === 'literature_index.json');
+        if (literatureIndexFile) {
+          try {
+            const content = fs.readFileSync(literatureIndexFile.path, 'utf-8');
+            const data = JSON.parse(content);
+            const count = data.entries?.length || 0;
+            const fileItem = new ProjectItem(
+              localize('projectStructure.literatureIndex'),
+              vscode.TreeItemCollapsibleState.None,
+              'paper',
+              literatureIndexFile.path
+            );
+            fileItem.tooltip = `${localize('projectStructure.literatureIndex')} (${count} ${localize('projectStructure.articles')})`;
+            fileItem.description = `(${count} ${localize('projectStructure.articles')})`;
+            fileItem.contextValue = 'paper json literatureIndex';
+            fileItem.command = {
+              command: 'aiSocialScientist.viewLiteratureIndex',
+              title: 'View Literature Index',
+              arguments: [{ filePath: literatureIndexFile.path }]
+            };
+            items.push(fileItem);
+          } catch { }
+        }
+
+        // PDF 文献组
+        if (pdfFiles.length > 0) {
+          const pdfGroup = new ProjectItem(
+            `${localize('projectStructure.pdfFiles')} (${pdfFiles.length})`,
+            vscode.TreeItemCollapsibleState.Collapsed,
+            'paperPdfGroup',
+            papersDir
+          );
+          (pdfGroup as any).fileList = pdfFiles;
+          items.push(pdfGroup);
+        }
+
+        // Markdown 笔记组
+        if (mdFiles.length > 0) {
+          const mdGroup = new ProjectItem(
+            `${localize('projectStructure.mdFiles')} (${mdFiles.length})`,
+            vscode.TreeItemCollapsibleState.Collapsed,
+            'paperMdGroup',
+            papersDir
+          );
+          (mdGroup as any).fileList = mdFiles;
+          items.push(mdGroup);
+        }
+
+        // 其他 JSON 文件组
+        const otherJsonFiles = jsonFiles.filter(f => f.name !== 'literature_index.json');
+        if (otherJsonFiles.length > 0) {
+          const jsonGroup = new ProjectItem(
+            `${localize('projectStructure.jsonFiles')} (${otherJsonFiles.length})`,
+            vscode.TreeItemCollapsibleState.Collapsed,
+            'paperJsonGroup',
+            papersDir
+          );
+          (jsonGroup as any).fileList = otherJsonFiles;
+          items.push(jsonGroup);
+        }
+
+        // 其他文件
+        for (const file of otherFiles) {
+          items.push(new ProjectItem(file.name, vscode.TreeItemCollapsibleState.None, 'paper', file.path));
+        }
+
+        // 子目录
+        for (const dir of directories) {
+          const dirItem = new ProjectItem(
+            dir.count > 0 ? `${dir.name} (${dir.count})` : dir.name,
+            vscode.TreeItemCollapsibleState.Collapsed,
+            'paper',
+            dir.path
+          );
+          dirItem.tooltip = `${dir.name} - ${dir.count} ${localize('projectStructure.files')}`;
+          items.push(dirItem);
         }
       }
 
@@ -1159,6 +1317,28 @@ export class ProjectStructureProvider implements vscode.TreeDataProvider<Project
 
         return items;
       }
+    }
+
+    // 处理文献分组节点（PDF/MD/JSON）
+    if ((element.type === 'paperPdfGroup' || element.type === 'paperMdGroup' || element.type === 'paperJsonGroup') && (element as any).fileList) {
+      const fileList: { name: string; path: string }[] = (element as any).fileList;
+      const items: ProjectItem[] = [];
+
+      for (const file of fileList) {
+        items.push(new ProjectItem(
+          file.name,
+          vscode.TreeItemCollapsibleState.None,
+          'paper',
+          file.path
+        ));
+      }
+
+      return items;
+    }
+
+    // 处理 pid.json 可视化
+    if (element.type === 'pidJson' && element.filePath) {
+      return []; // pid.json 没有子节点，点击打开可视化面板
     }
 
     // UserData节点（用户数据）的子节点：显示所有文件
@@ -1394,8 +1574,34 @@ export class ProjectStructureProvider implements vscode.TreeDataProvider<Project
         // 提取数字部分，转换为友好的显示名称（如"实验 123"）
         const match = dirName.match(/^experiment_(\d+)$/);
         const experimentId = match ? match[1] : undefined;
+
+        // 检查实验状态（通过pid.json）
+        let statusBadge = '';
+        let statusTooltip = '';
+        const pidFile = path.join(dir, 'run', 'pid.json');
+        if (fs.existsSync(pidFile)) {
+          try {
+            const pidContent = fs.readFileSync(pidFile, 'utf-8');
+            const pidData = JSON.parse(pidContent);
+            const status = pidData.status || 'unknown';
+            if (status === 'completed') {
+              statusBadge = ' ✅';
+              statusTooltip = localize('projectStructure.statusCompleted');
+            } else if (status === 'running') {
+              statusBadge = ' 🔄';
+              statusTooltip = localize('projectStructure.statusRunning');
+            } else if (status === 'failed') {
+              statusBadge = ' ❌';
+              statusTooltip = localize('projectStructure.statusFailed');
+            } else {
+              statusBadge = ' ⏸️';
+              statusTooltip = localize('projectStructure.statusPaused');
+            }
+          } catch { }
+        }
+
         const displayName = match
-          ? `${localize('projectStructure.experiment')} ${match[1]}`
+          ? `${localize('projectStructure.experiment')} ${match[1]}${statusBadge}`
           : dirName;  // 如果格式不匹配，使用原目录名
         const item = new ProjectItem(
           displayName,  // 显示为"实验 123"或"Experiment 123"
@@ -1403,6 +1609,9 @@ export class ProjectStructureProvider implements vscode.TreeDataProvider<Project
           'experiment',
           fs.existsSync(experimentFile) ? experimentFile : undefined
         );
+        if (statusTooltip) {
+          item.tooltip = statusTooltip;
+        }
         // Set hypothesis and experiment IDs for replay command
         item.hypothesisId = hypothesisId;
         item.experimentId = experimentId;
@@ -1429,84 +1638,168 @@ export class ProjectStructureProvider implements vscode.TreeDataProvider<Project
       const experimentDir = path.dirname(element.filePath || '');
       const items: ProjectItem[] = [];
 
-      // 检查init目录（直接包含配置文件：config_params.py, init_config.json, steps.yaml）
+      // 检查init目录（配置文件分组）
       const initDir = path.join(experimentDir, 'init');
       if (fs.existsSync(initDir)) {
-        // 读取init目录下的所有文件
-        const initFiles = fs.readdirSync(initDir);
-        for (const file of initFiles) {
+        const initFiles = fs.readdirSync(initDir).filter(file => {
           const filePath = path.join(initDir, file);
-          const stat = fs.statSync(filePath);
-          if (stat.isFile()) {
-            const fileItem = new ProjectItem(
-              `Init: ${file}`,  // 添加"Init:"前缀以便区分
-              vscode.TreeItemCollapsibleState.None,
-              'file',
-              filePath
-            );
+          return fs.statSync(filePath).isFile();
+        });
 
-            // 为 steps.yaml 设置特殊的 contextValue 和点击命令
-            if (file === 'steps.yaml') {
-              fileItem.contextValue = 'yaml stepsYaml';
-              fileItem.command = {
-                command: 'aiSocialScientist.viewStepsYaml',
-                title: 'View Steps Timeline',
-                arguments: [{ filePath: filePath }]
-              };
-            }
-
-            items.push(fileItem);
-          }
+        if (initFiles.length > 0) {
+          // 创建配置文件分组节点
+          const configGroup = new ProjectItem(
+            isChinese ? '📁 配置文件' : '📁 Configuration',
+            vscode.TreeItemCollapsibleState.Collapsed,
+            'experimentInitGroup',
+            undefined  // 不传递路径，通过 element 的其他属性获取
+          );
+          (configGroup as any).initDir = initDir;
+          (configGroup as any).hypothesisId = element.hypothesisId;
+          (configGroup as any).experimentId = element.experimentId;
+          items.push(configGroup);
         }
       }
 
-      // 检查run目录下的sqlite.db文件
+      // 检查run目录（运行结果分组）
       const runDir = path.join(experimentDir, 'run');
       if (fs.existsSync(runDir)) {
-        const dbFile = path.join(runDir, 'sqlite.db');
-        if (fs.existsSync(dbFile)) {
-          const item = new ProjectItem(
-            localize('projectStructure.resultsDatabase'),  // 数据库文件的显示名称
+        const runFiles = fs.readdirSync(runDir);
+        const hasRunContent = runFiles.some(file => {
+          const filePath = path.join(runDir, file);
+          return fs.statSync(filePath).isFile();
+        });
+
+        if (hasRunContent) {
+          // 创建运行结果分组节点
+          const runGroup = new ProjectItem(
+            isChinese ? '📊 运行结果' : '📊 Run Results',
+            vscode.TreeItemCollapsibleState.Collapsed,
+            'experimentRunGroup',
+            undefined  // 不传递路径
+          );
+          (runGroup as any).runDir = runDir;
+          (runGroup as any).hypothesisId = element.hypothesisId;
+          (runGroup as any).experimentId = element.experimentId;
+          items.push(runGroup);
+        }
+      }
+
+      return items;
+    }
+
+    // 实验配置文件分组
+    if (element.type === 'experimentInitGroup') {
+      const initDir = (element as any).initDir;
+      if (!initDir || !fs.existsSync(initDir)) {
+        return [];
+      }
+      const items: ProjectItem[] = [];
+      const initFiles = fs.readdirSync(initDir);
+
+      for (const file of initFiles) {
+        const filePath = path.join(initDir, file);
+        const stat = fs.statSync(filePath);
+        if (stat.isFile()) {
+          const fileItem = new ProjectItem(
+            file,
             vscode.TreeItemCollapsibleState.None,
             'file',
-            dbFile
+            filePath
           );
 
-          // 如果父节点包含 hypothesisId 和 experimentId，设置打开回放的命令
-          if (element.hypothesisId && element.experimentId) {
-            item.command = {
-              command: 'aiSocialScientist.openReplay',
-              title: localize('projectStructure.openReplay'),
-              arguments: [{
-                hypothesisId: element.hypothesisId,
-                experimentId: element.experimentId,
-                filePath: dbFile
-              }]
+          if (file === 'steps.yaml') {
+            fileItem.contextValue = 'yaml stepsYaml';
+            fileItem.command = {
+              command: 'aiSocialScientist.viewStepsYaml',
+              title: 'View Steps Timeline',
+              arguments: [{ filePath: filePath }]
             };
-            item.contextValue = 'replayableDatabase';
-            // item.iconPath = new to.ThemeIcon('play-circle'); // Optional: change icon
           }
 
-          items.push(item);
+          items.push(fileItem);
+        }
+      }
+      return items;
+    }
+
+    // 实验运行结果分组
+    if (element.type === 'experimentRunGroup') {
+      const runDir = (element as any).runDir;
+      if (!runDir || !fs.existsSync(runDir)) {
+        return [];
+      }
+      const items: ProjectItem[] = [];
+
+      // sqlite.db
+      const dbFile = path.join(runDir, 'sqlite.db');
+      if (fs.existsSync(dbFile)) {
+        const item = new ProjectItem(
+          localize('projectStructure.resultsDatabase'),
+          vscode.TreeItemCollapsibleState.None,
+          'file',
+          dbFile
+        );
+
+        if (element.hypothesisId && element.experimentId) {
+          item.command = {
+            command: 'aiSocialScientist.openReplay',
+            title: localize('projectStructure.openReplay'),
+            arguments: [{
+              hypothesisId: element.hypothesisId,
+              experimentId: element.experimentId,
+              filePath: dbFile
+            }]
+          };
+          item.contextValue = 'replayableDatabase';
         }
 
-        // 检查 experiment_results.json 文件
-        const resultsFile = path.join(runDir, 'experiment_results.json');
-        if (fs.existsSync(resultsFile)) {
-          const resultsItem = new ProjectItem(
-            '📊 实验结果',
+        items.push(item);
+      }
+
+      // experiment_results.json
+      const resultsFile = path.join(runDir, 'experiment_results.json');
+      if (fs.existsSync(resultsFile)) {
+        const resultsItem = new ProjectItem(
+          isChinese ? '📊 实验结果' : '📊 Experiment Results',
+          vscode.TreeItemCollapsibleState.None,
+          'file',
+          resultsFile
+        );
+        resultsItem.contextValue = 'json experimentResults';
+        resultsItem.command = {
+          command: 'aiSocialScientist.viewExperimentResults',
+          title: 'View Experiment Results',
+          arguments: [{ filePath: resultsFile }]
+        };
+        items.push(resultsItem);
+      }
+
+      // pid.json
+      const pidFile = path.join(runDir, 'pid.json');
+      if (fs.existsSync(pidFile)) {
+        try {
+          const pidContent = fs.readFileSync(pidFile, 'utf-8');
+          const pidData = JSON.parse(pidContent);
+          const status = pidData.status || 'unknown';
+          const statusEmoji = status === 'completed' ? '✅' : status === 'running' ? '🔄' : status === 'failed' ? '❌' : '⏸️';
+
+          const pidItem = new ProjectItem(
+            `${statusEmoji} ${localize('projectStructure.experimentStatus')}: ${status}`,
             vscode.TreeItemCollapsibleState.None,
-            'file',
-            resultsFile
+            'pidJson',
+            pidFile
           );
-          resultsItem.contextValue = 'json experimentResults';
-          resultsItem.command = {
-            command: 'aiSocialScientist.viewExperimentResults',
-            title: 'View Experiment Results',
-            arguments: [{ filePath: resultsFile }]
+          pidItem.tooltip = `${localize('projectStructure.experimentStatus')}: ${status}\nPID: ${pidData.pid || 'N/A'}\n${localize('projectStructure.startTime')}: ${pidData.start_time || 'N/A'}\n${localize('projectStructure.endTime')}: ${pidData.end_time || 'N/A'}`;
+          pidItem.description = pidData.experiment_id || '';
+          pidItem.contextValue = 'pidJson';
+          pidItem.command = {
+            command: 'aiSocialScientist.viewPidStatus',
+            title: 'View PID Status',
+            arguments: [{ filePath: pidFile }]
           };
-          items.push(resultsItem);
-        }
+          items.push(pidItem);
+        } catch { }
       }
 
       return items;
@@ -1532,8 +1825,22 @@ export class ProjectStructureProvider implements vscode.TreeDataProvider<Project
           if (stat.isDirectory() && entry.startsWith('hypothesis_')) {
             // 提取假设ID，转换为友好显示名称
             const match = entry.match(/^hypothesis_(\d+)$/);
+
+            // 统计报告数量
+            let reportCount = 0;
+            const expDirs = this.findDirectories(fullPath, /^experiment_\d+$/);
+            for (const expDir of expDirs) {
+              const reportHtml = path.join(expDir, 'report.html');
+              const reportZhHtml = path.join(expDir, 'report_zh.html');
+              const reportEnHtml = path.join(expDir, 'report_en.html');
+              if (fs.existsSync(reportHtml) || fs.existsSync(reportZhHtml) || fs.existsSync(reportEnHtml)) {
+                reportCount++;
+              }
+            }
+
+            const countSuffix = reportCount > 0 ? ` (${reportCount})` : '';
             const displayName = match
-              ? `${localize('projectStructure.hypothesis')} ${match[1]}`
+              ? `${localize('projectStructure.hypothesis')} ${match[1]}${countSuffix}`
               : entry;
             items.push(new ProjectItem(
               displayName,
@@ -1888,6 +2195,67 @@ export class ProjectStructureProvider implements vscode.TreeDataProvider<Project
 
     // 其他类型的节点没有子节点
     return [];
+  }
+
+  /**
+   * 获取项目统计概览
+   */
+  private getProjectStats(workspacePath: string, isChinese: boolean): string {
+    let totalExperiments = 0;
+    let completedExperiments = 0;
+    let runningExperiments = 0;
+
+    // 统计所有假设下的实验
+    const hypothesisDirs = this.findDirectories(workspacePath, /^hypothesis_\d+$/);
+    for (const hypDir of hypothesisDirs) {
+      const experimentDirs = this.findDirectories(hypDir, /^experiment_\d+$/);
+      totalExperiments += experimentDirs.length;
+
+      for (const expDir of experimentDirs) {
+        const pidFile = path.join(expDir, 'run', 'pid.json');
+        if (fs.existsSync(pidFile)) {
+          try {
+            const pidContent = fs.readFileSync(pidFile, 'utf-8');
+            const pidData = JSON.parse(pidContent);
+            if (pidData.status === 'completed') {
+              completedExperiments++;
+            } else if (pidData.status === 'running') {
+              runningExperiments++;
+            }
+          } catch { }
+        }
+      }
+    }
+
+    if (totalExperiments === 0) {
+      return '';
+    }
+
+    // 统计文献数量
+    const papersDir = path.join(workspacePath, 'papers');
+    let literatureCount = 0;
+    if (fs.existsSync(papersDir)) {
+      const indexPath = path.join(papersDir, 'literature_index.json');
+      if (fs.existsSync(indexPath)) {
+        try {
+          const content = fs.readFileSync(indexPath, 'utf-8');
+          const data = JSON.parse(content);
+          literatureCount = data.entries?.length || 0;
+        } catch { }
+      }
+    }
+
+    // 构建概览字符串
+    const parts: string[] = [];
+    if (runningExperiments > 0) {
+      parts.push(isChinese ? `🔄 运行中: ${runningExperiments}` : `🔄 Running: ${runningExperiments}`);
+    }
+    parts.push(isChinese ? `✅ 完成: ${completedExperiments}/${totalExperiments}` : `✅ Completed: ${completedExperiments}/${totalExperiments}`);
+    if (literatureCount > 0) {
+      parts.push(isChinese ? `📚 文献: ${literatureCount}` : `📚 Papers: ${literatureCount}`);
+    }
+
+    return `📊 ${parts.join(' | ')}`;
   }
 
   /**
@@ -2281,11 +2649,16 @@ export class ProjectStructureProvider implements vscode.TreeDataProvider<Project
     isBuiltin: boolean
   ): ProjectItem[] {
     const items: ProjectItem[] = [];
+    const isChinese = vscode.env.language.startsWith('zh');
 
     for (const skill of skills) {
-      // 构建显示标签：启用状态 + 名称
-      const statusIcon = skill.enabled ? '✓' : '○';
-      const label = `${statusIcon} ${skill.name}`;
+      // 构建显示标签：名称 + 状态徽章
+      let label = skill.name;
+
+      // 添加状态标识
+      if (skill.enabled) {
+        label = `${skill.name} ✓`;  // 启用状态显示在后面
+      }
 
       // 检查是否有 SKILL.md
       const skillMdPath = skill.has_skill_md ? path.join(skill.path, 'SKILL.md') : undefined;
@@ -2300,17 +2673,26 @@ export class ProjectStructureProvider implements vscode.TreeDataProvider<Project
         label,
         collapsibleState,
         'agentSkillItem',
-        skillMdPath  // 只传递 SKILL.md 路径，不传递目录路径
+        skillMdPath
       );
 
       // 设置 tooltip：显示详细信息
       const statusText = skill.enabled
-        ? (localize('projectStructure.skillEnabled') || '已启用')
-        : (localize('projectStructure.skillDisabled') || '已禁用');
-      item.tooltip = `${skill.name}\n${skill.description || ''}\n${statusText}`;
+        ? (isChinese ? '✅ 已启用' : '✅ Enabled')
+        : (isChinese ? '⏸️ 已禁用' : '⏸️ Disabled');
 
-      // 设置 contextValue：区分启用/禁用状态，以及 builtin/custom
-      // 格式：agentSkillItem enabled builtin 或 agentSkillItem disabled custom
+      let tooltip = `${skill.name}\n\n${skill.description || (isChinese ? '暂无描述' : 'No description')}\n\n${statusText}`;
+      if (skill.requires && skill.requires.length > 0) {
+        tooltip += `\n\n${isChinese ? '依赖' : 'Requires'}: ${skill.requires.join(', ')}`;
+      }
+      item.tooltip = tooltip;
+
+      // 设置 description：显示简短状态
+      item.description = skill.enabled
+        ? (isChinese ? '启用' : 'on')
+        : (isChinese ? '禁用' : 'off');
+
+      // 设置 contextValue
       const sourceTag = isBuiltin ? 'builtin' : 'custom';
       item.contextValue = skill.enabled
         ? `agentSkillItem enabled ${sourceTag}`
@@ -2330,10 +2712,15 @@ export class ProjectStructureProvider implements vscode.TreeDataProvider<Project
         };
       }
 
-      item.description = skill.description || '';
-
       items.push(item);
     }
+
+    // 按名称排序
+    items.sort((a, b) => {
+      const aName = a.label?.toString() || '';
+      const bName = b.label?.toString() || '';
+      return aName.localeCompare(bName);
+    });
 
     return items;
   }

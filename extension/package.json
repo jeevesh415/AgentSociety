@@ -125,11 +125,6 @@
         "icon": "$(play)"
       },
       {
-        "command": "aiSocialScientist.cleanCustomModules",
-        "title": "AI Social Scientist: Clean Custom Modules",
-        "icon": "$(trash)"
-      },
-      {
         "command": "aiSocialScientist.listCustomModules",
         "title": "AI Social Scientist: List Custom Modules",
         "icon": "$(list-tree)"
@@ -203,6 +198,36 @@
         "command": "aiSocialScientist.showMinerULogs",
         "title": "AI Social Scientist: Show MinerU Logs",
         "icon": "$(output)"
+      },
+      {
+        "command": "aiSocialScientist.copyFilePath",
+        "title": "AI Social Scientist: Copy File Path",
+        "icon": "$(copy)"
+      },
+      {
+        "command": "aiSocialScientist.copyAtReference",
+        "title": "AI Social Scientist: Copy @Reference",
+        "icon": "$(quote)"
+      },
+      {
+        "command": "aiSocialScientist.viewJsonFile",
+        "title": "AI Social Scientist: View JSON",
+        "icon": "$(json)"
+      },
+      {
+        "command": "aiSocialScientist.viewYamlFile",
+        "title": "AI Social Scientist: View YAML",
+        "icon": "$(file-code)"
+      },
+      {
+        "command": "aiSocialScientist.openInExplorer",
+        "title": "AI Social Scientist: Open in Explorer",
+        "icon": "$(folder)"
+      },
+      {
+        "command": "aiSocialScientist.copyFileName",
+        "title": "AI Social Scientist: Copy File Name",
+        "icon": "$(symbol-text)"
       }
     ],
     "menus": {
@@ -282,6 +307,36 @@
           "command": "aiSocialScientist.viewExperimentResults",
           "when": "view == projectStructureView && viewItem =~ /experimentResults/",
           "group": "1_actions"
+        },
+        {
+          "command": "aiSocialScientist.viewJsonFile",
+          "when": "view == projectStructureView && viewItem =~ /json/",
+          "group": "1_view"
+        },
+        {
+          "command": "aiSocialScientist.viewYamlFile",
+          "when": "view == projectStructureView && viewItem =~ /yaml/",
+          "group": "1_view"
+        },
+        {
+          "command": "aiSocialScientist.openInExplorer",
+          "when": "view == projectStructureView && (viewItem == paper || viewItem == file || viewItem =~ /json/ || viewItem =~ /markdown/ || viewItem =~ /yaml/)",
+          "group": "3_system"
+        },
+        {
+          "command": "aiSocialScientist.copyFileName",
+          "when": "view == projectStructureView && (viewItem == paper || viewItem == file || viewItem =~ /json/ || viewItem =~ /markdown/)",
+          "group": "0_copy@3"
+        },
+        {
+          "command": "aiSocialScientist.copyFilePath",
+          "when": "view == projectStructureView && (viewItem == paper || viewItem == file || viewItem =~ /json/ || viewItem =~ /markdown/)",
+          "group": "0_copy@1"
+        },
+        {
+          "command": "aiSocialScientist.copyAtReference",
+          "when": "view == projectStructureView && (viewItem == paper || viewItem == file || viewItem =~ /json/ || viewItem =~ /markdown/)",
+          "group": "0_copy@2"
         }
       ]
     },

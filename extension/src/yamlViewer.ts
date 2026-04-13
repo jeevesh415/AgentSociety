@@ -1,0 +1,189 @@
+/**
+ * YAML 文件可视化查看器
+ */
+
+import * as vscode from 'vscode';
+import * as fs from 'fs';
+import * as yaml from 'js-yaml';
+
+export class YamlViewer {
+  private static currentPanel: vscode.WebviewPanel | undefined;
+
+  public static async show(filePath: string, title?: string): Promise<void> {
+    let data: any = {};
+    let error: string | null = null;
+    
+    try {
+      const content = fs.readFileSync(filePath, 'utf-8');
+      data = yaml.load(content);
+    } catch (e: any) {
+      error = e.message;
+    }
+
+    const fileName = filePath.split(/[/\\]/).pop() || 'YAML';
+    const panelTitle = title || fileName;
+
+    if (this.currentPanel) {
+      this.currentPanel.title = panelTitle;
+      this.currentPanel.reveal(vscode.ViewColumn.One);
+      this.updateWebview(this.currentPanel, data, error, filePath);
+      return;
+    }
+
+    const panel = vscode.window.createWebviewPanel(
+      'yamlViewer',
+      panelTitle,
+      vscode.ViewColumn.One,
+      { enableScripts: true, retainContextWhenHidden: true }
+    );
+
+    this.currentPanel = panel;
+    panel.onDidDispose(() => { this.currentPanel = undefined; });
+    this.updateWebview(panel, data, error, filePath);
+  }
+
+  private static updateWebview(
+    panel: vscode.WebviewPanel,
+    data: any,
+    error: string | null,
+    filePath: string
+  ): void {
+    const isChinese = vscode.env.language.startsWith('zh');
+    panel.webview.html = this.getHtml(data, error, filePath, isChinese);
+  }
+
+  private static getHtml(data: any, error: string | null, filePath: string, isChinese: boolean): string {
+    const labels = {
+      title: isChinese ? 'YAML 查看器' : 'YAML Viewer',
+      error: isChinese ? '解析错误' : 'Parse Error',
+      copy: isChinese ? '复制 YAML' : 'Copy YAML',
+      copyJson: isChinese ? '复制为 JSON' : 'Copy as JSON',
+      path: isChinese ? '文件路径' : 'File Path',
+    };
+
+    const yamlStr = error ? '' : yaml.dump(data, { indent: 2, lineWidth: -1 });
+
+    return `<!DOCTYPE html>
+<html lang="${isChinese ? 'zh-CN' : 'en'}">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>${labels.title}</title>
+  <style>
+    * { margin: 0; padding: 0; box-sizing: border-box; }
+    body {
+      font-family: var(--vscode-font-family);
+      background-color: var(--vscode-editor-background);
+      color: var(--vscode-editor-foreground);
+      padding: 16px;
+    }
+    .header {
+      display: flex;
+      justify-content: space-between;
+      align-items: center;
+      margin-bottom: 16px;
+      padding-bottom: 12px;
+      border-bottom: 1px solid var(--vscode-panel-border);
+    }
+    .header h1 { font-size: 18px; }
+    .header-actions { display: flex; gap: 8px; }
+    .btn {
+      padding: 6px 12px;
+      background: var(--vscode-button-secondaryBackground);
+      color: var(--vscode-button-secondaryForeground);
+      border: none;
+      border-radius: 4px;
+      cursor: pointer;
+      font-size: 12px;
+    }
+    .btn:hover { background: var(--vscode-button-secondaryHoverBackground); }
+    .btn.primary { background: var(--vscode-button-background); color: var(--vscode-button-foreground); }
+    .meta {
+      margin-bottom: 12px;
+      font-size: 12px;
+      color: var(--vscode-descriptionForeground);
+    }
+    .yaml-container {
+      background: var(--vscode-editor-background);
+      border: 1px solid var(--vscode-panel-border);
+      border-radius: 6px;
+      overflow: auto;
+      max-height: calc(100vh - 160px);
+    }
+    .yaml-content {
+      padding: 12px;
+      font-family: var(--vscode-editor-font-family);
+      font-size: 13px;
+      white-space: pre;
+    }
+    .yaml-key { color: #9cdcfe; }
+    .yaml-value { color: #ce9178; }
+    .yaml-number { color: #b5cea8; }
+    .yaml-bool { color: #569cd6; }
+    .yaml-comment { color: #6a9955; }
+    .error-box {
+      padding: 16px;
+      background: rgba(255, 77, 79, 0.1);
+      border: 1px solid #ff4d4f;
+      border-radius: 6px;
+      color: #ff4d4f;
+    }
+  </style>
+</head>
+<body>
+  <div class="header">
+    <h1>📄 ${labels.title}</h1>
+    <div class="header-actions">
+      <button class="btn" id="copyJsonBtn">${labels.copyJson}</button>
+      <button class="btn primary" id="copyBtn">${labels.copy}</button>
+    </div>
+  </div>
+  
+  <div class="meta">${labels.path}: ${filePath}</div>
+  
+  ${error ? `
+    <div class="error-box">
+      <strong>${labels.error}:</strong> ${error}
+    </div>
+  ` : `
+    <div class="yaml-container">
+      <pre class="yaml-content" id="yamlContent"></pre>
+    </div>
+  `}
+
+  <script>
+    const yamlData = ${error ? 'null' : JSON.stringify(data)};
+    const yamlStr = ${error ? '""' : JSON.stringify(yamlStr)};
+    const isChinese = ${isChinese ? 'true' : 'false'};
+    
+    function highlightYaml(str) {
+      return str
+        .replace(/^(\s*)([a-zA-Z_][a-zA-Z0-9_]*)(:)/gm, '$1<span class="yaml-key">$2</span>$3')
+        .replace(/:\s*"([^"]*)"/g, ': <span class="yaml-value">"$1"</span>')
+        .replace(/:\s*(\\d+)/g, ': <span class="yaml-number">$1</span>')
+        .replace(/:\s*(true|false)/g, ': <span class="yaml-bool">$1</span>')
+        .replace(/(#.*)$/gm, '<span class="yaml-comment">$1</span>');
+    }
+    
+    if (yamlStr) {
+      document.getElementById('yamlContent').innerHTML = highlightYaml(yamlStr);
+    }
+    
+    document.getElementById('copyBtn').addEventListener('click', function() {
+      navigator.clipboard.writeText(yamlStr).then(() => {
+        this.textContent = isChinese ? '已复制' : 'Copied';
+        setTimeout(() => { this.textContent = '${labels.copy}'; }, 2000);
+      });
+    });
+    
+    document.getElementById('copyJsonBtn').addEventListener('click', function() {
+      navigator.clipboard.writeText(JSON.stringify(yamlData, null, 2)).then(() => {
+        this.textContent = isChinese ? '已复制' : 'Copied';
+        setTimeout(() => { this.textContent = '${labels.copyJson}'; }, 2000);
+      });
+    });
+  </script>
+</body>
+</html>`;
+  }
+}
