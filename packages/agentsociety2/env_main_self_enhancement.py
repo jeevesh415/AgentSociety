@@ -4,6 +4,8 @@
 Self-Enhancement (SE) Experiment - Main Entry Point
 Run SE experiment using agentsociety2 framework with profile txt files
 """
+# ruff: noqa: E402
+
 import asyncio
 import json
 import logging
@@ -11,7 +13,7 @@ import os
 import re
 import glob
 from datetime import datetime
-from typing import Dict, List, Optional
+from typing import Dict
 import pandas as pd
 from dotenv import load_dotenv
 
@@ -57,7 +59,7 @@ def get_participant_id_from_filename(filename: str) -> int:
 
 def create_default_profile(agent_id: int) -> str:
     """Create default profile summary for an agent when profile file is not available"""
-    return f"""## Profile Summary
+    return """## Profile Summary
 
 This participant is a typical individual with average personality traits and characteristics. 
 They demonstrate moderate levels of extraversion, agreeableness, conscientiousness, neuroticism, and openness. 
@@ -283,7 +285,7 @@ async def main(
     
     if not os.path.exists(profiles_dir):
         logger.warning(f"  [WARNING] Profile directory does not exist: {profiles_dir}")
-        logger.info(f"  [INFO] Will use default agent profiles")
+        logger.info("  [INFO] Will use default agent profiles")
         use_default_profiles = True
     else:
         logger.info(f"  [OK] Profile directory: {profiles_dir}")
@@ -297,12 +299,12 @@ async def main(
             )
         except Exception as e:
             logger.warning(f"  [WARNING] Failed to load profile files: {e}")
-            logger.info(f"  [INFO] Will use default agent profiles")
+            logger.info("  [INFO] Will use default agent profiles")
             use_default_profiles = True
     
     # If no profiles loaded, create default profiles
     if use_default_profiles or not profiles:
-        logger.info(f"  [INFO] Creating default agent profiles")
+        logger.info("  [INFO] Creating default agent profiles")
         if participant_ids:
             target_agent_count = len(participant_ids)
             agent_ids = participant_ids
@@ -330,7 +332,7 @@ async def main(
     
     # Show sample profile summary
     if profiles:
-        logger.info(f"  [OK] Profile Summary sample (first 200 characters):")
+        logger.info("  [OK] Profile Summary sample (first 200 characters):")
         sample_summary = profiles[0]["profile_text"][:200]
         logger.info(f"    {sample_summary}...")
 
@@ -380,7 +382,7 @@ async def main(
     await society.run(num_steps=TOTAL_STEPS, tick=TIME_STEP_SECONDS)
 
     # ==================== Extract Results ====================
-    logger.info(f"\n[Extracting Results]")
+    logger.info("\n[Extracting Results]")
     
     # Get all rankings from environment
     results = se_env.get_results()
@@ -419,7 +421,7 @@ async def main(
     # ==================== Compare with Real Data ====================
     comparison = {}
     if not real_data.empty:
-        logger.info(f"\n[Comparison with Real Data]")
+        logger.info("\n[Comparison with Real Data]")
         comparison = compare_with_real_data(results, real_data, logger)
     
     if comparison:
@@ -438,7 +440,7 @@ async def main(
                 logger.info(f"    - Correlation coefficient: {comp.get('correlation', 0):.2f}")
 
     # ==================== Save Results ====================
-    logger.info(f"\n[Saving Results]")
+    logger.info("\n[Saving Results]")
     
     # Create output directory if it doesn't exist
     output_dir = "se_experiment_results"
@@ -509,7 +511,7 @@ async def main(
     logger.info(f"  [OK] CSV results saved to: {csv_file}")
     
     # Print summary statistics
-    logger.info(f"\n[Statistics]")
+    logger.info("\n[Statistics]")
     all_percentiles = []
     for rankings in results.values():
         all_percentiles.extend(rankings.values())
@@ -562,4 +564,3 @@ if __name__ == "__main__":
         num_steps=20,
         tick_seconds=150,
     ))
-

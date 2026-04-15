@@ -39,6 +39,11 @@ from typing import Any, Optional, Sequence
 from agentsociety2.env import RouterBase
 from agentsociety2.agent import AgentBase
 from agentsociety2.society.helper import AgentSocietyHelper
+from agentsociety2.society.questionnaire import (
+    Questionnaire,
+    QuestionnaireResponse,
+    QuestionnaireRunner,
+)
 from agentsociety2.storage import ColumnDef, ReplayDatasetSpec, ReplayWriter, TableSchema
 from agentsociety2.storage.replay_metadata import (
     AGENT_PROFILE_DATASET_CAPABILITY,
@@ -119,6 +124,7 @@ class AgentSociety:
         self._enable_replay = enable_replay
         self._replay_writer: Optional[ReplayWriter] = replay_writer
         self._agent_profiles_persisted = False
+        self._questionnaire_runner = QuestionnaireRunner()
 
         self._helper = AgentSocietyHelper(
             env_router=self._env_router,
@@ -279,6 +285,20 @@ class AgentSociety:
         :returns: 执行结果/反馈文本。
         """
         return await self._helper.intervene(instruction)
+
+    async def run_questionnaire(
+        self,
+        questionnaire: Questionnaire,
+        target_agent_ids: list[int] | None = None,
+    ) -> QuestionnaireResponse:
+        """向目标 agents 发放问卷并返回结构化结果。"""
+        return await self._questionnaire_runner.run(
+            questionnaire,
+            self._agents,
+            t=self._t,
+            step_count=self._step_count,
+            target_agent_ids=target_agent_ids,
+        )
 
     # ---- Dump & Load ----
     async def dump(self) -> dict:

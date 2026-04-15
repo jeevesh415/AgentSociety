@@ -15,7 +15,7 @@ const HISTORY_PAGE_SIZE = 20;
 
 function formatValue(value: any): React.ReactNode {
   if (value === null || value === undefined) {
-    return <span style={{ color: '#909399' }}>-</span>;
+    return <span style={{ color: 'var(--as-muted-text)' }}>-</span>;
   }
   if (typeof value === 'object') {
     return (
@@ -38,7 +38,7 @@ const DatasetRowCard: React.FC<{
   if (!row) {
     return (
       <div className="left-info-history-card" style={{ marginTop: '8px' }}>
-        <div className="left-info-history-inner" style={{ color: '#909399' }}>
+        <div className="left-info-history-inner" style={{ color: 'var(--as-muted-text)' }}>
           No current row at this step
         </div>
       </div>
@@ -50,19 +50,19 @@ const DatasetRowCard: React.FC<{
   return (
     <div className="left-info-history-card" style={{ marginTop: '8px' }}>
       <div className="left-info-history-inner">
-        <div style={{ fontWeight: 600, color: '#1677ff', marginBottom: '8px' }}>
+        <div style={{ fontWeight: 600, color: 'var(--as-accent-text)', marginBottom: '8px' }}>
           {dataset.title || dataset.dataset_id}
         </div>
-        <div style={{ fontSize: '11px', color: '#909399', marginBottom: '8px' }}>
+        <div style={{ fontSize: '11px', color: 'var(--as-muted-text)', marginBottom: '8px' }}>
           {dataset.module_name} / {dataset.dataset_id}
         </div>
         <Flex vertical gap={8}>
           {entries.map(([key, value]) => (
             <div key={key}>
-              <div style={{ fontSize: '11px', color: '#909399', marginBottom: '2px' }}>
+              <div style={{ fontSize: '11px', color: 'var(--as-muted-text)', marginBottom: '2px' }}>
                 {getColumnLabel(dataset.columns, key)}
               </div>
-              <div style={{ color: '#303133' }}>{formatValue(value)}</div>
+              <div style={{ color: 'var(--as-strong-text)' }}>{formatValue(value)}</div>
             </div>
           ))}
         </Flex>
@@ -176,9 +176,9 @@ export const AgentDetailPanel: React.FC = () => {
         <>
           <Flex wrap justify="left" style={{ width: '100%', marginTop: '8px' }}>
             <Flex className="left-info-block" justify="space-between">
-              <span style={{ fontWeight: 400, color: '#909399' }}>Name:&nbsp;&nbsp;</span>
+              <span style={{ fontWeight: 400, color: 'var(--as-muted-text)' }}>Name:&nbsp;&nbsp;</span>
               <Tooltip title={<span>ID = {profile.id}</span>}>
-                <span style={{ fontWeight: 600, color: '#007AFF' }}>{profile.name}</span>
+                <span style={{ fontWeight: 600, color: 'var(--as-accent-text)' }}>{profile.name}</span>
               </Tooltip>
             </Flex>
             {profileEntries.map(([key, value]) => (
@@ -187,8 +187,8 @@ export const AgentDetailPanel: React.FC = () => {
                 justify="space-between"
                 key={key}
               >
-                <span style={{ fontWeight: 400, color: '#909399' }}>{key}:&nbsp;&nbsp;</span>
-                <div style={{ fontWeight: 600, color: '#007AFF', maxWidth: '72%', overflow: 'hidden' }}>
+                <span style={{ fontWeight: 400, color: 'var(--as-muted-text)' }}>{key}:&nbsp;&nbsp;</span>
+                <div style={{ fontWeight: 600, color: 'var(--as-accent-text)', maxWidth: '72%', overflow: 'hidden' }}>
                   {formatValue(value)}
                 </div>
               </Flex>
@@ -242,10 +242,10 @@ export const AgentDetailPanel: React.FC = () => {
                 <div className="left-info-history-inner" style={{ width: '100%' }}>
                   <Flex align="center" justify="space-between" style={{ marginBottom: '8px' }}>
                     <div>
-                      <div style={{ fontWeight: 600, color: '#1677ff' }}>
+                      <div style={{ fontWeight: 600, color: 'var(--as-accent-text)' }}>
                         {historyDataset.title || historyDataset.dataset_id}
                       </div>
-                      <div style={{ fontSize: '11px', color: '#909399', marginTop: '4px' }}>
+                      <div style={{ fontSize: '11px', color: 'var(--as-muted-text)', marginTop: '4px' }}>
                         {historyDataset.module_name} / {historyDataset.dataset_id}
                       </div>
                     </div>
@@ -259,12 +259,12 @@ export const AgentDetailPanel: React.FC = () => {
                   </Flex>
 
                   {historyDataset.description ? (
-                    <div style={{ fontSize: '12px', color: '#606266', marginBottom: '8px' }}>
+                    <div style={{ fontSize: '12px', color: 'var(--vscode-descriptionForeground)', marginBottom: '8px' }}>
                       {historyDataset.description}
                     </div>
                   ) : null}
 
-                  <div style={{ fontSize: '11px', color: '#909399' }}>
+                  <div style={{ fontSize: '11px', color: 'var(--as-muted-text)' }}>
                     Agent {selectedAgentId} · {currentStepNumber !== null ? `Rows up to step ${currentStepNumber}` : 'All rows'}
                   </div>
                 </div>
@@ -302,7 +302,7 @@ export const AgentDetailPanel: React.FC = () => {
                         return isCurrentStep
                           ? {
                             style: {
-                              background: 'rgba(0, 122, 255, 0.10)',
+                              background: 'var(--vscode-list-activeSelectionBackground)',
                             },
                           }
                           : {};
@@ -316,7 +316,7 @@ export const AgentDetailPanel: React.FC = () => {
                         Refresh
                       </Button>
                       <Flex align="center" gap={12}>
-                        <span style={{ fontSize: '11px', color: '#909399' }}>
+                        <span style={{ fontSize: '11px', color: 'var(--as-muted-text)' }}>
                           Showing raw rows filtered by `agent_id = {selectedAgentId}`{currentStepNumber !== null ? ` and step <= ${currentStepNumber}` : ''}
                         </span>
                         <Pagination
@@ -340,7 +340,7 @@ export const AgentDetailPanel: React.FC = () => {
           </Modal>
         </>
       ) : (
-        <div className="left-info-empty" style={{ marginTop: '20px', color: '#909399' }}>
+        <div className="left-info-empty" style={{ marginTop: '20px', color: 'var(--as-muted-text)' }}>
           Select an agent from the scene
         </div>
       )}

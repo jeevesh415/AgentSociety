@@ -4,7 +4,6 @@ Two-Tier ReAct Router Implementation
 """
 
 import json
-import re
 from typing import Tuple, Dict, Any, List
 from litellm import AllMessageValues
 
@@ -114,8 +113,6 @@ class TwoTierReActRouter(RouterBase):
         step_count = 0
         used_modules = set()
         execution_log: List[Dict[str, Any]] = []  # 记录执行历史
-        # status 表示用户的指令在环境模块中是否被有效地完成了，还是需要等待一段时间后由用户主动检测指令的完成性
-        status = "success"
         error = None
 
         while step_count < self.max_steps:
@@ -537,5 +534,4 @@ Answer:"""
             result = tool_func(module, **args)
 
         return result
-
 

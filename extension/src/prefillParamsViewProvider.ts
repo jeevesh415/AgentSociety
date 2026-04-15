@@ -262,6 +262,9 @@ export class PrefillParamsViewProvider {
         padding: 0;
       }
       body {
+        font-family: var(--vscode-font-family, -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif);
+        background: var(--vscode-editor-background);
+        color: var(--vscode-editor-foreground);
         height: 100vh;
         overflow: hidden;
       }

@@ -7,10 +7,7 @@ Custom agents can then be used with AgentSociety for coordinated experiments.
 
 import asyncio
 from datetime import datetime
-from typing import Optional
 from agentsociety2.agent import AgentBase
-from agentsociety2.env import RouterBase
-from agentsociety2.env.router_base import TokenUsageStats
 from agentsociety2.env import CodeGenRouter
 from agentsociety2.contrib.env import SimpleSocialSpace
 from agentsociety2.society import AgentSociety
@@ -70,13 +67,12 @@ class RecursiveAgent(AgentBase):
         breakdown = await super().ask(breakdown_prompt, readonly=True)
 
         # Process sub-questions recursively
-        import json
         import json_repair
 
         try:
             parsed = json_repair.loads(breakdown)
             sub_questions = parsed.get("sub_questions", [])
-        except:
+        except Exception:
             sub_questions = []
 
         if not sub_questions:

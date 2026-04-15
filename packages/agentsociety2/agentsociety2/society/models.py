@@ -13,6 +13,8 @@ __all__ = [
     "RunStep",
     "AskStep",
     "InterveneStep",
+    "QuestionItem",
+    "QuestionnaireStep",
     "StepUnion",
     "StepsConfig",
 ]
@@ -80,7 +82,46 @@ class InterveneStep(BaseModel):
     instruction: str = Field(..., min_length=1, description="干预指令")
 
 
-StepUnion = Union[RunStep, AskStep, InterveneStep]
+class QuestionItem(BaseModel):
+    """单道问卷题目配置。"""
+
+    id: str = Field(..., min_length=1, description="题目唯一标识")
+    prompt: str = Field(..., min_length=1, description="题目提示文本")
+    response_type: Literal["text", "integer", "float", "choice", "json"] = Field(
+        "text",
+        description="回答类型",
+    )
+    choices: List[str] = Field(default_factory=list, description="choice 题型可选项")
+
+    @field_validator("choices")
+    @classmethod
+    def validate_choices(cls, value: List[str]) -> List[str]:
+        cleaned = [str(item).strip() for item in value if str(item).strip()]
+        return cleaned
+
+    @field_validator("choices")
+    @classmethod
+    def validate_choice_question(cls, value: List[str], info) -> List[str]:
+        if info.data.get("response_type") == "choice" and not value:
+            raise ValueError("choices are required when response_type='choice'")
+        return value
+
+
+class QuestionnaireStep(BaseModel):
+    """问卷步骤。"""
+
+    type: Literal["questionnaire"] = Field("questionnaire", description="步骤类型")
+    questionnaire_id: str = Field(..., min_length=1, description="问卷唯一标识")
+    title: str | None = Field(None, description="问卷标题")
+    description: str | None = Field(None, description="问卷说明")
+    target_agent_ids: List[int] | None = Field(
+        None,
+        description="目标 Agent ID 列表；为空时发给全部 Agent",
+    )
+    questions: List[QuestionItem] = Field(..., min_length=1, description="题目列表")
+
+
+StepUnion = Union[RunStep, AskStep, InterveneStep, QuestionnaireStep]
 
 
 class StepsConfig(BaseModel):

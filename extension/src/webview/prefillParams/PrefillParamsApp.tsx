@@ -1,10 +1,11 @@
 import * as React from 'react';
-import { Input, Card, Typography, Spin, Alert, Empty, Space, Badge, Tabs, Tag, Button } from 'antd';
+import { ConfigProvider, Input, Card, Typography, Spin, Alert, Empty, Space, Badge, Tabs, Tag, Button } from 'antd';
 import { SearchOutlined, ReloadOutlined, PlayCircleOutlined, CheckCircleOutlined, CloseCircleOutlined, LoadingOutlined } from '@ant-design/icons';
 import { useTranslation } from 'react-i18next';
 import type { VSCodeAPI, ClassInfo, AvailableClasses, PrefillParams } from './types';
 import { MarkdownRenderer } from '../components/MarkdownRenderer';
 import { JsonViewer } from '../components/JsonViewer';
+import { useVscodeTheme } from '../theme';
 import '../i18n';
 
 const { Title, Text, Paragraph } = Typography;
@@ -25,6 +26,7 @@ type TestStatus = 'idle' | 'testing' | 'success' | 'error';
 
 export const PrefillParamsApp: React.FC<PrefillParamsAppProps> = ({ vscode }) => {
   const { t } = useTranslation();
+  const { isDark, palette, themeConfig } = useVscodeTheme();
   const [loading, setLoading] = React.useState<boolean>(true);
   const [error, setError] = React.useState<string | null>(null);
   const [classes, setClasses] = React.useState<ClassItem[]>([]);
@@ -32,28 +34,10 @@ export const PrefillParamsApp: React.FC<PrefillParamsAppProps> = ({ vscode }) =>
   const [selectedClass, setSelectedClass] = React.useState<ClassItem | null>(null);
   const [searchText, setSearchText] = React.useState<string>('');
   const [activeTab, setActiveTab] = React.useState<'env_module' | 'agent'>('env_module');
-  const [isDark, setIsDark] = React.useState<boolean>(false);
 
   // 为每个模块维护测试状态，key 为 `${kind}-${type}`
   const [testStatuses, setTestStatuses] = React.useState<Record<string, TestStatus>>({});
   const [testResults, setTestResults] = React.useState<Record<string, string>>({});
-
-  // 检测暗色主题
-  React.useEffect(() => {
-    const checkDarkMode = () => {
-      setIsDark(
-        document.body.classList.contains('vscode-dark') ||
-        document.body.classList.contains('vscode-high-contrast')
-      );
-    };
-    checkDarkMode();
-    const observer = new MutationObserver(checkDarkMode);
-    observer.observe(document.body, {
-      attributes: true,
-      attributeFilter: ['class'],
-    });
-    return () => observer.disconnect();
-  }, []);
 
   // 组件挂载时请求数据
   React.useEffect(() => {
@@ -190,11 +174,11 @@ export const PrefillParamsApp: React.FC<PrefillParamsAppProps> = ({ vscode }) =>
   const getTestIcon = (status: TestStatus) => {
     switch (status) {
       case 'testing':
-        return <LoadingOutlined style={{ color: '#1890ff' }} />;
+        return <LoadingOutlined style={{ color: palette.buttonBackground }} />;
       case 'success':
-        return <CheckCircleOutlined style={{ color: '#52c41a' }} />;
+        return <CheckCircleOutlined style={{ color: palette.successForeground }} />;
       case 'error':
-        return <CloseCircleOutlined style={{ color: '#ff4d4f' }} />;
+        return <CloseCircleOutlined style={{ color: palette.errorForeground }} />;
       default:
         return null;
     }
@@ -202,31 +186,50 @@ export const PrefillParamsApp: React.FC<PrefillParamsAppProps> = ({ vscode }) =>
 
   if (loading) {
     return (
-      <div style={{ padding: '20px', textAlign: 'center' }}>
-        <Spin size="large" />
-        <div style={{ marginTop: '16px' }}>
-          <Text>{t('prefillParams.loading')}</Text>
+      <ConfigProvider theme={themeConfig}>
+        <div
+          style={{
+            padding: '20px',
+            textAlign: 'center',
+            minHeight: '100vh',
+            backgroundColor: palette.editorBackground,
+            color: palette.editorForeground,
+          }}
+        >
+          <Spin size="large" />
+          <div style={{ marginTop: '16px' }}>
+            <Text>{t('prefillParams.loading')}</Text>
+          </div>
         </div>
-      </div>
+      </ConfigProvider>
     );
   }
 
   if (error) {
     return (
-      <div style={{ padding: '20px' }}>
-        <Alert
-          message={t('prefillParams.error')}
-          description={error}
-          type="error"
-          showIcon
-          action={
-            <ReloadOutlined
-              onClick={handleRefresh}
-              style={{ cursor: 'pointer', fontSize: '16px' }}
-            />
-          }
-        />
-      </div>
+      <ConfigProvider theme={themeConfig}>
+        <div
+          style={{
+            padding: '20px',
+            minHeight: '100vh',
+            backgroundColor: palette.editorBackground,
+            color: palette.editorForeground,
+          }}
+        >
+          <Alert
+            message={t('prefillParams.error')}
+            description={error}
+            type="error"
+            showIcon
+            action={
+              <ReloadOutlined
+                onClick={handleRefresh}
+                style={{ cursor: 'pointer', fontSize: '16px' }}
+              />
+            }
+          />
+        </div>
+      </ConfigProvider>
     );
   }
 
@@ -234,8 +237,24 @@ export const PrefillParamsApp: React.FC<PrefillParamsAppProps> = ({ vscode }) =>
   const builtinCount = classes.length - customCount;
 
   return (
-    <div style={{ height: '100vh', display: 'flex', flexDirection: 'column' }}>
-      <div style={{ padding: '12px', borderBottom: '1px solid #d9d9d9', flexShrink: 0 }}>
+    <ConfigProvider theme={themeConfig}>
+      <div
+        style={{
+          height: '100vh',
+          display: 'flex',
+          flexDirection: 'column',
+          backgroundColor: palette.editorBackground,
+          color: palette.editorForeground,
+        }}
+      >
+      <div
+        style={{
+          padding: '12px',
+          borderBottom: `1px solid ${palette.panelBorder}`,
+          flexShrink: 0,
+          backgroundColor: palette.editorBackground,
+        }}
+      >
         <Space style={{ width: '100%' }} direction="vertical" size="small">
           <Space style={{ width: '100%', justifyContent: 'space-between' }}>
             <Title level={5} style={{ margin: 0 }}>
@@ -248,7 +267,14 @@ export const PrefillParamsApp: React.FC<PrefillParamsAppProps> = ({ vscode }) =>
             />
           </Space>
 
-          <Space style={{ width: '100%', justifyContent: 'space-between', fontSize: '12px', color: '#888' }}>
+          <Space
+            style={{
+              width: '100%',
+              justifyContent: 'space-between',
+              fontSize: '12px',
+              color: palette.descriptionForeground,
+            }}
+          >
             <Space split={<span>|</span>}>
               <span>{t('prefillParams.classInfo.builtin')}: {builtinCount}</span>
               <span>{t('prefillParams.classInfo.custom')}: {customCount}</span>
@@ -287,8 +313,8 @@ export const PrefillParamsApp: React.FC<PrefillParamsAppProps> = ({ vscode }) =>
         <div
           style={{
             width: '340px',
-            background: '#fff',
-            borderRight: '1px solid #d9d9d9',
+            background: palette.surfaceMuted,
+            borderRight: `1px solid ${palette.panelBorder}`,
             overflowY: 'auto',
             flexShrink: 0,
           }}
@@ -313,9 +339,9 @@ export const PrefillParamsApp: React.FC<PrefillParamsAppProps> = ({ vscode }) =>
                       border:
                         selectedClass?.type === item.type &&
                           selectedClass?.kind === item.kind
-                          ? '2px solid #1890ff'
-                          : '1px solid #d9d9d9',
-                      backgroundColor: isCustom ? '#fafafa' : '#fff',
+                          ? `2px solid ${palette.focusBorder}`
+                          : `1px solid ${palette.panelBorder}`,
+                      backgroundColor: isCustom ? palette.surfaceBackground : palette.surfaceMuted,
                     }}
                     onClick={() => handleClassSelect(item)}
                     hoverable
@@ -466,6 +492,7 @@ export const PrefillParamsApp: React.FC<PrefillParamsAppProps> = ({ vscode }) =>
           )}
         </div>
       </div>
-    </div>
+      </div>
+    </ConfigProvider>
   );
 };

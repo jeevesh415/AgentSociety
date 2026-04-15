@@ -308,6 +308,9 @@ export class SimSettingsEditorProvider implements vscode.CustomTextEditorProvide
     }
 
     body {
+      font-family: var(--vscode-font-family, -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif);
+      background: var(--vscode-editor-background);
+      color: var(--vscode-editor-foreground);
       height: 100vh;
       overflow: auto;
     }
@@ -369,4 +372,3 @@ export class SimSettingsEditorProvider implements vscode.CustomTextEditorProvide
     await vscode.workspace.applyEdit(edit);
   }
 }
-

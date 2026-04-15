@@ -13,6 +13,7 @@ import * as React from 'react';
 import { Typography, Tooltip, Space, Button, Input, Empty, Alert } from 'antd';
 import { CopyOutlined, ExpandOutlined, CompressOutlined, SearchOutlined } from '@ant-design/icons';
 import { CodeHighlighter } from '@ant-design/x';
+import { useVscodeTheme } from '../theme';
 
 const { Text } = Typography;
 
@@ -83,13 +84,13 @@ const JsonNode: React.FC<JsonNodeProps> = ({
       return <Text type="secondary">undefined</Text>;
     }
     if (typeof value === 'boolean') {
-      return <Text style={{ color: isDark ? '#ff9f43' : '#d4380d' }}>{String(value)}</Text>;
+      return <Text style={{ color: 'var(--vscode-terminal-ansiYellow, #d4380d)' }}>{String(value)}</Text>;
     }
     if (typeof value === 'number') {
-      return <Text style={{ color: isDark ? '#5dade2' : '#096dd9' }}>{value}</Text>;
+      return <Text style={{ color: 'var(--vscode-terminal-ansiBlue, #096dd9)' }}>{value}</Text>;
     }
     if (typeof value === 'string') {
-      return <Text style={{ color: isDark ? '#58d68d' : '#389e0d' }}>"{value}"</Text>;
+      return <Text style={{ color: 'var(--vscode-terminal-ansiGreen, #389e0d)' }}>"{value}"</Text>;
     }
     return null;
   };
@@ -100,7 +101,7 @@ const JsonNode: React.FC<JsonNodeProps> = ({
       <div style={{ display: 'flex', alignItems: 'baseline', gap: '4px', paddingLeft: keyName ? '0' : '16px' }}>
         {keyName !== undefined && (
           <>
-            <Text strong style={{ color: isDark ? '#bb86fc' : '#722ed1' }}>"{keyName}"</Text>
+            <Text strong style={{ color: 'var(--vscode-terminal-ansiMagenta, #722ed1)' }}>"{keyName}"</Text>
             <Text type="secondary">:</Text>
           </>
         )}
@@ -119,7 +120,7 @@ const JsonNode: React.FC<JsonNodeProps> = ({
       <div style={{ display: 'flex', alignItems: 'baseline', gap: '4px' }}>
         {keyName !== undefined && (
           <>
-            <Text strong style={{ color: isDark ? '#bb86fc' : '#722ed1' }}>"{keyName}"</Text>
+            <Text strong style={{ color: 'var(--vscode-terminal-ansiMagenta, #722ed1)' }}>"{keyName}"</Text>
             <Text type="secondary">:</Text>
           </>
         )}
@@ -137,7 +138,7 @@ const JsonNode: React.FC<JsonNodeProps> = ({
       >
         {keyName !== undefined && (
           <>
-            <Text strong style={{ color: isDark ? '#bb86fc' : '#722ed1' }}>"{keyName}"</Text>
+            <Text strong style={{ color: 'var(--vscode-terminal-ansiMagenta, #722ed1)' }}>"{keyName}"</Text>
             <Text type="secondary">:</Text>
           </>
         )}
@@ -155,7 +156,13 @@ const JsonNode: React.FC<JsonNodeProps> = ({
         )}
       </div>
       {expanded && (
-        <div style={{ paddingLeft: '16px', borderLeft: isDark ? '1px solid #444' : '1px solid #e8e8e8', marginLeft: '8px' }}>
+        <div
+          style={{
+            paddingLeft: '16px',
+            borderLeft: '1px solid var(--vscode-panel-border, #d9d9d9)',
+            marginLeft: '8px',
+          }}
+        >
           {entries.map(([k, v]) => (
             <JsonNode
               key={String(k)}
@@ -192,12 +199,10 @@ export const JsonViewer: React.FC<JsonViewerProps> = ({
   const [expandDepth, setExpandDepth] = React.useState(defaultExpandDepth);
   const [searchTerm, setSearchTerm] = React.useState('');
   const [copied, setCopied] = React.useState(false);
+  const { isDark: themeIsDark } = useVscodeTheme();
 
   // 检测暗色主题
-  const darkMode = isDark ?? (
-    document.body.classList.contains('vscode-dark') ||
-    document.body.classList.contains('vscode-high-contrast')
-  );
+  const darkMode = isDark ?? themeIsDark;
 
   // 解析数据
   const jsonData = React.useMemo(() => {
@@ -295,9 +300,9 @@ export const JsonViewer: React.FC<JsonViewerProps> = ({
           maxHeight: maxHeight,
           overflow: 'auto',
           padding: '12px',
-          backgroundColor: isDark ? '#1e1e1e' : '#f5f5f5',
+          backgroundColor: 'var(--vscode-textCodeBlock-background, #f5f5f5)',
           borderRadius: '4px',
-          fontFamily: 'Consolas, Monaco, "Courier New", monospace',
+          fontFamily: 'var(--vscode-editor-font-family, Consolas, Monaco, "Courier New", monospace)',
           fontSize: '13px',
         }}
       >
@@ -322,10 +327,8 @@ export const JsonHighlight: React.FC<{
   isDark?: boolean;
   maxHeight?: string;
 }> = ({ data, isDark, maxHeight = '300px' }) => {
-  const darkMode = isDark ?? (
-    document.body.classList.contains('vscode-dark') ||
-    document.body.classList.contains('vscode-high-contrast')
-  );
+  const { isDark: themeIsDark } = useVscodeTheme();
+  const darkMode = isDark ?? themeIsDark;
 
   if (!data) return <Empty description="No data" />;
 
@@ -333,7 +336,13 @@ export const JsonHighlight: React.FC<{
 
   return (
     <div style={{ maxHeight, overflow: 'auto' }}>
-      <CodeHighlighter lang="json" style={{ margin: 0 }}>
+      <CodeHighlighter
+        lang="json"
+        style={{
+          margin: 0,
+          background: 'var(--vscode-textCodeBlock-background, #f5f5f5)',
+        }}
+      >
         {jsonStr}
       </CodeHighlighter>
     </div>

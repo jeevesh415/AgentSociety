@@ -1,6 +1,5 @@
 """`AnalysisAgent`：数据优先、多阶段洞察 + ReAct 工具环 + 可视化与上下文压缩。"""
 
-import asyncio
 import shutil
 from datetime import datetime
 from pathlib import Path
@@ -358,7 +357,7 @@ Based on the experiment context and **actual data structure above**, generate an
                 # 构建累积错误的反馈
                 history_note = ""
                 if len(error_history) > 1:
-                    history_note = f"\n\n**之前的问题**（请避免重复）:\n" + "\n".join(f"- {err}" for err in error_history[:-1])
+                    history_note = "\n\n**之前的问题**（请避免重复）:\n" + "\n".join(f"- {err}" for err in error_history[:-1])
                 
                 feedback = (
                     f"Your previous output had a parsing error: {error_summary}\n"
@@ -395,7 +394,7 @@ Based on the experiment context and **actual data structure above**, generate an
             history_note = ""
             if len(error_history) > 1:
                 history_note = (
-                    f"\n\n**之前的问题**（已修复或无需处理）:\n"
+                    "\n\n**之前的问题**（已修复或无需处理）:\n"
                     + "\n".join(f"- {err}" for err in error_history[:-1])
                 )
             

@@ -59,28 +59,36 @@ jobs:
         uses: actions/setup-node@v4
         with:
           node-version: '20'
-
-      - name: Install pnpm
-        uses: pnpm/action-setup@v4
-        with:
-          version: '10.7.0'
+          cache: 'npm'
+          cache-dependency-path: extension/package-lock.json
 
       - name: Install dependencies
         working-directory: ./extension
-        run: pnpm install
+        run: npm ci
+
+      - name: Validate webpack config
+        working-directory: ./extension
+        run: node -c webpack.config.js
 
       - name: Build extension
         working-directory: ./extension
-        run: |
-          pnpm run compile
-          pnpm run build-webview
-
-      - name: Install vsce
-        run: npm install -g @vscode/vsce
+        run: npm run build
 
       - name: Package extension
         working-directory: ./extension
-        run: vsce package --out ai-social-scientist.vsix --no-dependencies
+        run: npm run package
+
+      - name: Verify VSIX contents
+        working-directory: ./extension
+        run: |
+          unzip -Z1 ai-social-scientist.vsix > vsix-contents.txt
+          grep -q '^extension/out/extension.js$' vsix-contents.txt
+          grep -q '^extension/out/webview/configPage.js$' vsix-contents.txt
+          grep -q '^extension/out/webview/initConfig.js$' vsix-contents.txt
+          grep -q '^extension/out/webview/prefillParams.js$' vsix-contents.txt
+          grep -q '^extension/out/webview/replay.js$' vsix-contents.txt
+          grep -q '^extension/out/webview/simSettings.js$' vsix-contents.txt
+          grep -q '^extension/node_modules/js-yaml/index.js$' vsix-contents.txt
 
       - name: Store the VSIX package
         uses: actions/upload-artifact@v4

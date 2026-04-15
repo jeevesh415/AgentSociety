@@ -8,7 +8,6 @@ from collections import defaultdict
 import numpy as np
 import torch
 import torch.nn as nn
-from sklearn.metrics import roc_auc_score
 
 from agentsociety2.logger import get_logger
 from ..core import RecommenderAlgorithm, RatingMatrix

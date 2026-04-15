@@ -1,4 +1,5 @@
 #!/usr/bin/env python
+# ruff: noqa: F841
 # -*- coding: utf-8 -*-
 """
 Tragedy of the Commons Game - V2 Framework Implementation
@@ -201,7 +202,7 @@ async def main():
                         data = json.loads(json_match.group(0))
                         if isinstance(data, dict):
                             pool_before = data.get("current_pool_resources", INITIAL_POOL_RESOURCES)
-                except:
+                except Exception:
                     pass
                 
                 print(f"Resource pool before round: {pool_before} units")
@@ -366,4 +367,3 @@ if __name__ == "__main__":
         print(f"Program error occurred: {e}")
         import traceback
         traceback.print_exc()
-

@@ -35,6 +35,7 @@ Example::
 """
 
 import asyncio
+import json
 import logging
 import os
 from abc import ABC, abstractmethod
@@ -423,6 +424,65 @@ class AgentBase(ABC):
             所有 skill 状态的字典副本
         """
         return self._skill_states.copy()
+
+    def _build_external_question_context(self, t: datetime) -> dict[str, Any]:
+        """构造外部问答上下文。
+
+        子类可覆盖本方法，补充各自维护的内部状态和记忆。
+        """
+        return {
+            "agent_id": self.id,
+            "agent_name": self.name,
+            "current_time": t.isoformat(),
+            "profile": self.get_profile(),
+            "skill_states": self.get_all_skill_states(),
+        }
+
+    @staticmethod
+    def _external_question_output_requirement(
+        response_type: str,
+        choices: list[str] | None = None,
+    ) -> str:
+        if response_type == "integer":
+            return "Reply with ONLY one integer."
+        if response_type == "float":
+            return "Reply with ONLY one number."
+        if response_type == "choice":
+            options = ", ".join(choices or [])
+            return f"Reply with ONLY one option exactly as written. Options: {options}"
+        if response_type == "json":
+            return "Reply with ONLY valid JSON."
+        return "Reply concisely in plain text."
+
+    async def answer_external_question(
+        self,
+        prompt: str,
+        *,
+        t: datetime,
+        response_type: str = "text",
+        choices: list[str] | None = None,
+    ) -> str:
+        """基于 agent 内部状态回答外部问题，不经过环境路由。"""
+        context = self._build_external_question_context(t)
+        context_json = json.dumps(context, ensure_ascii=False, default=str, indent=2)
+        system_prompt = (
+            "You are answering an external interview or questionnaire as the simulated agent. "
+            "Stay in first person, use the provided internal state as your source of truth, "
+            "and never mention being an AI, a model, or internal implementation details.\n\n"
+            f"Current time: {t.isoformat()}\n"
+            f"Output requirement: {self._external_question_output_requirement(response_type, choices)}\n\n"
+            "Internal agent context:\n"
+            f"```json\n{context_json}\n```"
+        )
+        response = await self.acompletion(
+            [
+                {"role": "system", "content": system_prompt},
+                {"role": "user", "content": prompt},
+            ],
+            stream=False,
+        )
+        content = response.choices[0].message.content  # type: ignore
+        return str(content or "").strip()
 
     @overload
     async def acompletion(

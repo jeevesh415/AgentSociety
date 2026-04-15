@@ -1,11 +1,12 @@
+# ruff: noqa: E402,F841
+
 import asyncio
 import json
 import logging
 import os
 import pickle
-import shutil
 import numpy as np
-from datetime import datetime, timedelta
+from datetime import datetime
 from dotenv import load_dotenv
 
 # load_dotenv(".env.openrouter")
@@ -16,10 +17,9 @@ from agentsociety2.contrib.env.event_space import EventSpace
 from agentsociety2.contrib.env.simple_social_space import SimpleSocialSpace
 from agentsociety2.contrib.env.social_media import SocialMediaSpace
 from agentsociety2.agent import PersonAgent
-from agentsociety2.env import CodeGenRouter, EnvBase
+from agentsociety2.env import CodeGenRouter
 from agentsociety2.society import AgentSociety
 from agentsociety2.logger import setup_logging, get_logger
-from typing import cast
 
 
 def _setup_debugpy_if_enabled(logger) -> None:
@@ -232,7 +232,7 @@ async def main(
     await society.run(num_steps=TOTAL_STEPS, tick=TIME_STEP_SECONDS)
 
     # ==================== 提取移动相关数据 ====================
-    logger.info(f"\n【步骤5/5】提取移动统计数据...")
+    logger.info("\n【步骤5/5】提取移动统计数据...")
     
     # 从 MobilitySpace 环境中获取移动相关数据
     trajectories_dict = mobility_env.get_all_persons_trajectories()
@@ -274,7 +274,7 @@ async def main(
         "visited_aois": visited_aois_dict,  # 保留访问的AOI数据
     }
     
-    logger.info(f"\n  ✓ 数据提取完成")
+    logger.info("\n  ✓ 数据提取完成")
     logger.info(f"    - gyration_radius shape: {results['gyration_radius'].shape}")
     logger.info(f"    - gyration_radius mean: {results['gyration_radius'].mean():.2f} 米")
     logger.info(f"    - gyration_radius std: {results['gyration_radius'].std():.2f} 米")
@@ -283,7 +283,7 @@ async def main(
     logger.info(f"    - daily_location_numbers max: {results['daily_location_numbers'].max()}")
     
     # ==================== 保存结果 ====================
-    logger.info(f"\n【保存结果】")
+    logger.info("\n【保存结果】")
     
     output_dir = "benchmark_results"
     os.makedirs(output_dir, exist_ok=True)

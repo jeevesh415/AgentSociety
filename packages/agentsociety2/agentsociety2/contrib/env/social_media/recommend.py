@@ -1,8 +1,7 @@
 import random
 import math
 from datetime import datetime
-from typing import List, Dict, Any, Optional, Set
-from collections import defaultdict
+from typing import List, Dict, Optional, Set
 
 from .models import Post
 

@@ -40,8 +40,16 @@ from .models import (
     RunStep,
     AskStep,
     InterveneStep,
+    QuestionItem,
+    QuestionnaireStep,
     StepUnion,
     StepsConfig,
+)
+from .questionnaire import (
+    AgentQuestionnaireResult,
+    Questionnaire,
+    QuestionnaireAnswer,
+    QuestionnaireResponse,
 )
 
 __all__ = [
@@ -53,6 +61,12 @@ __all__ = [
     "RunStep",
     "AskStep",
     "InterveneStep",
+    "QuestionItem",
+    "QuestionnaireStep",
     "StepUnion",
     "StepsConfig",
+    "Questionnaire",
+    "QuestionnaireAnswer",
+    "AgentQuestionnaireResult",
+    "QuestionnaireResponse",
 ]

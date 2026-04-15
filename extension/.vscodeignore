@@ -2,7 +2,10 @@
 .vscode-test/**
 src/**
 .gitignore
+.editorconfig
 .yarnrc
+.npmrc
+.prettierrc
 vsc-extension-quickstart.md
 **/tsconfig.json
 **/.eslintrc.json
@@ -21,10 +24,15 @@ TODO.md
 webpack.config.js
 package-lock.json
 .eslintrc.json
+eslint.config.mjs
 .git/**
 test-extension.js
 DEBUG_STEPS.md
 **/__pycache__/**
 
-# 打包后不需要 node_modules
+# 主扩展进程运行时仅依赖 js-yaml；其余依赖都已被 webview bundle 内联或仅用于开发
 node_modules/**
+!node_modules/js-yaml/
+!node_modules/js-yaml/index.js
+!node_modules/js-yaml/lib/
+!node_modules/js-yaml/lib/**

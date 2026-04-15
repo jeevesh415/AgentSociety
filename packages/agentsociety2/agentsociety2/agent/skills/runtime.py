@@ -1,11 +1,11 @@
-from __future__ import annotations
-
 """Agent 技能运行时（workspace + skill 执行）。
 
 该模块提供 :class:`~agentsociety2.agent.skills.runtime.AgentSkillRuntime`，用于把 PersonAgent 的
 “工作目录隔离、文件读写、thread/tool 日志、skill 激活与执行”等细节集中在一个组件内，
 避免 agent 主体过度膨胀。
 """
+
+from __future__ import annotations
 
 import json
 from collections import deque
@@ -279,4 +279,3 @@ class AgentSkillRuntime:
             if role in {"user", "assistant"} and content:
                 messages.append({"role": role, "content": content})
         return messages
-

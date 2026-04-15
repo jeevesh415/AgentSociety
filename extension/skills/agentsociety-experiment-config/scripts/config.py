@@ -246,7 +246,33 @@ steps_config = {{
     "start_t": start_time.isoformat(),
     "steps": [
         # TODO: 根据实验需求配置步骤
+        # 支持的步骤类型:
+        # - run: 运行仿真
+        # - ask: 对当前状态提问
+        # - intervene: 施加干预
+        # - questionnaire: 向 agent 发放结构化问卷
         {{"type": "run", "num_steps": 100, "tick": 1}},
+        # 示例问卷步骤（按需启用/修改）:
+        # {{
+        #     "type": "questionnaire",
+        #     "questionnaire_id": "post_run_survey",
+        #     "title": "Post-run survey",
+        #     "description": "Collect agent feedback after the simulation",
+        #     "target_agent_ids": [1, 2, 3],  # 可选；为空则发给全部 agents
+        #     "questions": [
+        #         {{
+        #             "id": "mood",
+        #             "prompt": "How do you feel about the outcome?",
+        #             "response_type": "choice",
+        #             "choices": ["positive", "neutral", "negative"],
+        #         }},
+        #         {{
+        #             "id": "reason",
+        #             "prompt": "Please explain your answer briefly.",
+        #             "response_type": "text",
+        #         }},
+        #     ],
+        # }},
     ]
 }}
 
@@ -268,9 +294,30 @@ except ImportError:
                 f.write(f"    num_steps: {{step['num_steps']}}\\n")
                 f.write(f"    tick: {{step['tick']}}\\n")
             elif step['type'] == 'ask':
-                f.write(f"    question: {{step['question']}}\\n")
+                f.write(f"    question: {{json.dumps(step['question'], ensure_ascii=False)}}\\n")
             elif step['type'] == 'intervene':
-                f.write(f"    instruction: {{step['instruction']}}\\n")
+                f.write(f"    instruction: {{json.dumps(step['instruction'], ensure_ascii=False)}}\\n")
+            elif step['type'] == 'questionnaire':
+                f.write(f"    questionnaire_id: {{json.dumps(step['questionnaire_id'], ensure_ascii=False)}}\\n")
+                if step.get('title') is not None:
+                    f.write(f"    title: {{json.dumps(step['title'], ensure_ascii=False)}}\\n")
+                if step.get('description') is not None:
+                    f.write(f"    description: {{json.dumps(step['description'], ensure_ascii=False)}}\\n")
+                if step.get('target_agent_ids') is not None:
+                    f.write(f"    target_agent_ids: {{json.dumps(step['target_agent_ids'], ensure_ascii=False)}}\\n")
+                f.write("    questions:\\n")
+                for question in step['questions']:
+                    f.write(f"      - id: {{json.dumps(question['id'], ensure_ascii=False)}}\\n")
+                    f.write(f"        prompt: {{json.dumps(question['prompt'], ensure_ascii=False)}}\\n")
+                    f.write(
+                        f"        response_type: "
+                        f"{{json.dumps(question.get('response_type', 'text'), ensure_ascii=False)}}\\n"
+                    )
+                    if question.get('choices'):
+                        f.write(
+                            f"        choices: "
+                            f"{{json.dumps(question['choices'], ensure_ascii=False)}}\\n"
+                        )
     print(f"✓ 已生成 steps.yaml")
 
 print("\\n配置文件生成完成！")

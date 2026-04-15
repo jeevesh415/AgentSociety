@@ -22,11 +22,10 @@ from agentsociety2.contrib.env.reputation_game import (
     ReputationGameConfig,
 )
 from agentsociety2.contrib.agent.llm_donor_agent import LLMDonorAgent
-from agentsociety2.env import EnvBase, EnvLLM, CodeGenRouter
+from agentsociety2.env import EnvBase, CodeGenRouter
 from agentsociety2.society.society import AgentSociety
 from agentsociety2.logger import get_logger
 from dotenv import load_dotenv
-from litellm.router import Router
 from mem0.configs.base import VectorStoreConfig
 from mem0.embeddings.configs import EmbedderConfig
 from mem0.llms.configs import LlmConfig
@@ -89,7 +88,7 @@ async def main():
     # ========================================================================
     # 0. 设置日志
     # ========================================================================
-    log_file = setup_logging(log_dir="log")
+    setup_logging(log_dir="log")
     logger = get_logger()
 
     # ========================================================================
@@ -214,7 +213,6 @@ async def main():
     # 7. 创建 Society 并运行
     # ========================================================================
     society = AgentSociety(
-        config=config,
         agents=agents,
         env_router=env_router,
         start_t=start_t,

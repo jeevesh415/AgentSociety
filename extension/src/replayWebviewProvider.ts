@@ -376,6 +376,37 @@ export class ReplayWebviewProvider {
             color: var(--vscode-editor-foreground);
             height: 100vh;
             overflow: hidden;
+            --as-border: var(--vscode-panel-border);
+            --as-muted-text: var(--vscode-descriptionForeground);
+            --as-strong-text: var(--vscode-editor-foreground);
+            --as-accent-text: var(--vscode-textLink-foreground);
+            --as-selection-bg: var(--vscode-list-activeSelectionBackground);
+            --as-tooltip-bg: rgba(0, 0, 0, 0.8);
+            --as-tooltip-fg: #ffffff;
+            --as-panel-bg: rgba(255, 255, 255, 0.72);
+            --as-panel-bg-strong: rgba(255, 255, 255, 0.92);
+            --as-panel-card-bg: rgba(255, 255, 255, 0.78);
+            --as-panel-chip-bg: rgba(255, 255, 255, 0.82);
+            --as-panel-muted-bg: rgba(0, 0, 0, 0.04);
+            --as-panel-muted-bg-strong: rgba(0, 0, 0, 0.08);
+            --as-accent-soft-bg: rgba(22, 119, 255, 0.12);
+            --as-accent-soft-bg-strong: rgba(22, 119, 255, 0.18);
+            --as-shadow: 0 4px 12px rgba(0, 0, 0, 0.16);
+            --as-reflection-border: var(--vscode-terminal-ansiMagenta, #9b59b6);
+        }
+
+        body.vscode-dark,
+        body.vscode-high-contrast {
+            --as-tooltip-bg: rgba(18, 18, 18, 0.92);
+            --as-panel-bg: rgba(37, 37, 38, 0.78);
+            --as-panel-bg-strong: rgba(37, 37, 38, 0.94);
+            --as-panel-card-bg: rgba(37, 37, 38, 0.84);
+            --as-panel-chip-bg: rgba(37, 37, 38, 0.92);
+            --as-panel-muted-bg: rgba(255, 255, 255, 0.06);
+            --as-panel-muted-bg-strong: rgba(255, 255, 255, 0.12);
+            --as-accent-soft-bg: rgba(22, 119, 255, 0.16);
+            --as-accent-soft-bg-strong: rgba(22, 119, 255, 0.24);
+            --as-shadow: 0 4px 14px rgba(0, 0, 0, 0.3);
         }
 
         #root {
@@ -458,9 +489,9 @@ export class ReplayWebviewProvider {
         }
 
         .left-inner {
-            background: rgba(255, 255, 255, 0.5);
-            border: 1px solid rgba(255, 255, 255, 0.1);
-            box-shadow: 0px 4px 4px rgba(0, 0, 0, 0.2);
+            background: var(--as-panel-bg);
+            border: 1px solid var(--as-border);
+            box-shadow: var(--as-shadow);
             border-radius: 0 8px 8px 0;
             margin: 8px 0;
             padding: 12px 16px;
@@ -499,7 +530,7 @@ export class ReplayWebviewProvider {
             padding: 8px;
             border-radius: 4px;
             align-items: center;
-            background: rgba(22, 119, 255, 0.06);
+            background: var(--as-accent-soft-bg);
             display: flex;
             justify-content: space-between;
         }
@@ -511,14 +542,14 @@ export class ReplayWebviewProvider {
 
         .left-info-block:hover,
         .left-info-block-status:hover {
-            background: rgba(22, 119, 255, 0.12);
+            background: var(--as-accent-soft-bg-strong);
             cursor: pointer;
             transition: background 0.3s;
         }
 
         .left-info-history-card {
             border-radius: 8px;
-            background-color: rgba(192, 192, 192, 0.1);
+            background-color: var(--as-panel-muted-bg);
             margin: 8px 0;
             width: 100%;
         }
@@ -529,22 +560,22 @@ export class ReplayWebviewProvider {
 
         .left-info-empty {
             padding: 12px 8px;
-            color: #5a5a5a;
+            color: var(--as-muted-text);
         }
 
         .left-label {
-            color: #4a4a4a;
+            color: var(--as-muted-text);
             margin-right: 4px;
         }
 
         .left-value {
-            color: #1f1f1f;
+            color: var(--as-strong-text);
         }
 
         .right-inner {
-            background: rgba(255, 255, 255, 0.5);
-            border: 1px solid rgba(255, 255, 255, 0.1);
-            box-shadow: 0px 4px 4px rgba(0, 0, 0, 0.2);
+            background: var(--as-panel-bg);
+            border: 1px solid var(--as-border);
+            box-shadow: var(--as-shadow);
             border-radius: 8px 0 0 8px;
             margin: 8px 0;
             width: var(--panel-width);
@@ -570,14 +601,14 @@ export class ReplayWebviewProvider {
             border: none;
             padding: 6px 10px;
             border-radius: 16px;
-            background: rgba(255, 255, 255, 0.6);
+            background: var(--as-panel-chip-bg);
             cursor: pointer;
             font-size: 12px;
         }
 
         .tab-item.active {
-            background: rgba(22, 119, 255, 0.2);
-            color: #1677FF;
+            background: var(--as-accent-soft-bg-strong);
+            color: var(--as-accent-text);
             font-weight: 600;
         }
 
@@ -594,7 +625,7 @@ export class ReplayWebviewProvider {
 
         .right-card,
         .right-info-card {
-            background: rgba(255, 255, 255, 0.7);
+            background: var(--as-panel-card-bg);
             border-radius: 8px;
             padding: 8px 10px;
             margin-bottom: 8px;
@@ -603,7 +634,7 @@ export class ReplayWebviewProvider {
 
         .right-card-meta {
             font-size: 11px;
-            color: #5a5a5a;
+            color: var(--as-muted-text);
             margin-bottom: 4px;
         }
 
@@ -612,7 +643,7 @@ export class ReplayWebviewProvider {
         }
 
         .right-empty {
-            color: #5a5a5a;
+            color: var(--as-muted-text);
             padding: 8px 0;
         }
 
@@ -623,9 +654,9 @@ export class ReplayWebviewProvider {
 
         .control-progress {
             position: absolute;
-            background: rgba(255, 255, 255, 1);
-            border: 1px solid rgba(255, 255, 255, 0.1);
-            box-shadow: 0px 4px 4px rgba(0, 0, 0, 0.2);
+            background: var(--as-panel-bg-strong);
+            border: 1px solid var(--as-border);
+            box-shadow: var(--as-shadow);
             border-radius: 28px;
             bottom: 32px;
             left: calc(50% - (var(--timeline-width) * 0.5));
@@ -666,7 +697,7 @@ export class ReplayWebviewProvider {
 
         /* V2 only uses 反思 (thought/reflection) */
         .dialog-type-thought {
-            border-left: 3px solid #9b59b6;
+            border-left: 3px solid var(--as-reflection-border);
         }
 
         /* Timeline player */
@@ -679,7 +710,7 @@ export class ReplayWebviewProvider {
 
         .status {
             border-radius: 16px;
-            background: rgba(192, 192, 192, 0.2);
+            background: var(--as-panel-muted-bg-strong);
             height: 32px;
             padding: 0 12px;
             display: flex;
@@ -691,7 +722,7 @@ export class ReplayWebviewProvider {
 
         .player {
             border-radius: 16px;
-            background: rgba(192, 192, 192, 0.2);
+            background: var(--as-panel-muted-bg-strong);
             height: 32px;
             padding: 0 12px;
             display: flex;
@@ -712,7 +743,7 @@ export class ReplayWebviewProvider {
             height: 28px;
             border: none;
             border-radius: 6px;
-            background: rgba(255, 255, 255, 0.6);
+            background: var(--as-panel-chip-bg);
             cursor: pointer;
             display: flex;
             align-items: center;
@@ -721,7 +752,7 @@ export class ReplayWebviewProvider {
         }
 
         .timeline-btn:hover {
-            background: rgba(22, 119, 255, 0.2);
+            background: var(--as-accent-soft-bg-strong);
         }
 
         .timeline-btn:disabled {
@@ -733,7 +764,7 @@ export class ReplayWebviewProvider {
             flex: 1;
             height: 4px;
             -webkit-appearance: none;
-            background: rgba(22, 119, 255, 0.3);
+            background: var(--as-accent-soft-bg-strong);
             border-radius: 2px;
             outline: none;
         }
@@ -743,7 +774,7 @@ export class ReplayWebviewProvider {
             width: 12px;
             height: 12px;
             border-radius: 50%;
-            background: #1677FF;
+            background: var(--as-accent-text);
             cursor: pointer;
         }
 
@@ -756,8 +787,8 @@ export class ReplayWebviewProvider {
         }
 
         .speed-selector select {
-            background: rgba(255, 255, 255, 0.7);
-            border: 1px solid rgba(255, 255, 255, 0.6);
+            background: var(--as-panel-chip-bg);
+            border: 1px solid var(--as-border);
             border-radius: 16px;
             padding: 2px 8px;
             font-size: 11px;
@@ -820,7 +851,7 @@ export class ReplayWebviewProvider {
             padding: 6px 4px !important;
             margin: 0 !important;
             border-radius: 14px !important;
-            background: rgba(0, 0, 0, 0.04) !important;
+            background: var(--as-panel-muted-bg) !important;
             font-size: 12px !important;
             border: none !important;
             transition: all 0.2s;
@@ -829,15 +860,15 @@ export class ReplayWebviewProvider {
         }
 
         .right-inner .ant-tabs-tab:hover {
-            background: rgba(22, 119, 255, 0.1) !important;
+            background: var(--as-accent-soft-bg) !important;
         }
 
         .right-inner .ant-tabs-tab-active {
-            background: rgba(22, 119, 255, 0.15) !important;
+            background: var(--as-accent-soft-bg-strong) !important;
         }
 
         .right-inner .ant-tabs-tab-active .ant-tabs-tab-btn {
-            color: #1677FF !important;
+            color: var(--as-accent-text) !important;
         }
 
         /* Bubble list styles */
@@ -866,22 +897,22 @@ export class ReplayWebviewProvider {
 
         .bubble-content {
             max-width: 80%;
-            background: rgba(255, 255, 255, 0.9);
+            background: var(--as-panel-bg-strong);
             border-radius: 8px;
             padding: 8px 12px;
-            box-shadow: 0 1px 2px rgba(0, 0, 0, 0.1);
+            box-shadow: var(--as-shadow);
         }
 
         .bubble-header {
             font-size: 11px;
-            color: #888;
+            color: var(--as-muted-text);
             margin-bottom: 4px;
         }
 
         .bubble-text {
             font-size: 13px;
             line-height: 1.4;
-            color: #333;
+            color: var(--as-strong-text);
             word-wrap: break-word;
         }
     </style>

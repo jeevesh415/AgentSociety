@@ -135,6 +135,17 @@ export class LiteratureIndexViewer {
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
   <title>${isChinese ? '文献索引预览' : 'Literature Index Viewer'}</title>
   <style>
+    :root {
+      --lit-entry-shadow: 0 2px 8px rgba(0, 0, 0, 0.1);
+      --lit-entry-bg: var(--vscode-editor-background);
+    }
+
+    body.vscode-dark,
+    body.vscode-high-contrast {
+      --lit-entry-shadow: 0 4px 14px rgba(0, 0, 0, 0.28);
+      --lit-entry-bg: var(--vscode-editorWidget-background, var(--vscode-editor-background));
+    }
+
     body {
       font-family: var(--vscode-font-family);
       background-color: var(--vscode-editor-background);
@@ -183,7 +194,7 @@ export class LiteratureIndexViewer {
     }
 
     .entry {
-      background-color: var(--vscode-editor-background);
+      background-color: var(--lit-entry-bg);
       border: 1px solid var(--vscode-panel-border);
       border-radius: 8px;
       padding: 15px;
@@ -192,7 +203,7 @@ export class LiteratureIndexViewer {
     }
 
     .entry:hover {
-      box-shadow: 0 2px 8px rgba(0, 0, 0, 0.1);
+      box-shadow: var(--lit-entry-shadow);
     }
 
     .entry-header {

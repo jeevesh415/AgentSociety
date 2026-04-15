@@ -1,3 +1,5 @@
+# ruff: noqa: E402
+
 """命令行接口，用于快速启动AgentSociety2模拟实验"""
 
 import argparse
@@ -48,8 +50,10 @@ from agentsociety2.society.models import (
     RunStep,
     AskStep,
     InterveneStep,
+    QuestionnaireStep,
     StepsConfig,
 )
+from agentsociety2.society.questionnaire import Questionnaire
 from agentsociety2.society.society import AgentSociety
 from agentsociety2.logger import get_logger, set_logger_level, add_file_handler
 
@@ -460,6 +464,41 @@ class ExperimentRunner:
                             # Markdown content
                             f.write(f"{intervene_result}\n")
                         logger.info(f"Intervene result saved to {artifact_file}")
+
+                    elif isinstance(step, QuestionnaireStep):
+                        questionnaire = Questionnaire(
+                            questionnaire_id=step.questionnaire_id,
+                            title=step.title or "",
+                            description=step.description or "",
+                            questions=step.questions,
+                        )
+                        logger.info(
+                            "Running questionnaire %s with %s questions",
+                            questionnaire.questionnaire_id,
+                            len(questionnaire.questions),
+                        )
+                        questionnaire_result = await self.society.run_questionnaire(
+                            questionnaire,
+                            target_agent_ids=step.target_agent_ids,
+                        )
+
+                        sim_time = self.society.current_time
+                        timestamp = sim_time.strftime("%Y%m%d_%H%M%S")
+                        artifact_file = (
+                            self.artifacts_dir
+                            / f"questionnaire_step_{step_idx}_{timestamp}.json"
+                        )
+                        with open(artifact_file, "w", encoding="utf-8") as f:
+                            json.dump(
+                                questionnaire_result.model_dump(mode="json"),
+                                f,
+                                indent=2,
+                                ensure_ascii=False,
+                            )
+                        logger.info(
+                            "Questionnaire result saved to %s",
+                            artifact_file,
+                        )
 
                     else:
                         logger.warning(f"Unknown step type: {step_type}, skipping")

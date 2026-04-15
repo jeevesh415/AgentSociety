@@ -3,7 +3,7 @@ DIN (Deep Interest Network) 算法配置
 """
 
 from dataclasses import dataclass
-from typing import List, Optional
+from typing import List
 
 
 @dataclass

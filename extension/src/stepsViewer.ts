@@ -25,7 +25,23 @@ interface InterveneStep {
   params?: Record<string, any>;
 }
 
-type Step = RunStep | AskStep | InterveneStep;
+interface QuestionItem {
+  id: string;
+  prompt: string;
+  response_type?: 'text' | 'integer' | 'float' | 'choice' | 'json';
+  choices?: string[];
+}
+
+interface QuestionnaireStep {
+  type: 'questionnaire';
+  questionnaire_id: string;
+  title?: string;
+  description?: string;
+  target_agent_ids?: number[];
+  questions?: QuestionItem[];
+}
+
+type Step = RunStep | AskStep | InterveneStep | QuestionnaireStep;
 
 interface StepsConfig {
   start_t?: string;
@@ -94,10 +110,12 @@ export class StepsViewer {
   ): void {
     const steps = data.steps || [];
     const isChinese = vscode.env.language.startsWith('zh');
+    const serializedYaml = this.serializeStepsConfig(data);
 
     const runCount = steps.filter(s => s.type === 'run').length;
     const askCount = steps.filter(s => s.type === 'ask').length;
     const interveneCount = steps.filter(s => s.type === 'intervene').length;
+    const questionnaireCount = steps.filter(s => s.type === 'questionnaire').length;
 
     panel.webview.html = `
 <!DOCTYPE html>
@@ -107,6 +125,32 @@ export class StepsViewer {
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
   <title>${isChinese ? '实验步骤预览' : 'Steps Preview'}</title>
   <style>
+    :root {
+      --steps-run-color: var(--vscode-testing-iconPassed, #52c41a);
+      --steps-ask-color: var(--vscode-textLink-foreground, #1890ff);
+      --steps-intervene-color: var(--vscode-editorWarning-foreground, #faad14);
+      --steps-questionnaire-color: var(--vscode-terminal-ansiCyan, #13c2c2);
+      --steps-run-bg: rgba(82, 196, 26, 0.15);
+      --steps-ask-bg: rgba(24, 144, 255, 0.15);
+      --steps-intervene-bg: rgba(250, 173, 20, 0.15);
+      --steps-questionnaire-bg: rgba(19, 194, 194, 0.15);
+      --steps-shadow: 0 2px 8px rgba(0, 0, 0, 0.1);
+      --steps-question-bg: rgba(24, 144, 255, 0.08);
+      --steps-question-border: var(--steps-ask-color);
+      --steps-card-bg: var(--vscode-input-background);
+      --steps-card-border: var(--vscode-panel-border);
+    }
+
+    body.vscode-dark,
+    body.vscode-high-contrast {
+      --steps-run-bg: rgba(82, 196, 26, 0.22);
+      --steps-ask-bg: rgba(24, 144, 255, 0.24);
+      --steps-intervene-bg: rgba(250, 173, 20, 0.24);
+      --steps-questionnaire-bg: rgba(19, 194, 194, 0.24);
+      --steps-shadow: 0 4px 14px rgba(0, 0, 0, 0.3);
+      --steps-question-bg: rgba(24, 144, 255, 0.18);
+    }
+
     body {
       font-family: var(--vscode-font-family);
       background-color: var(--vscode-editor-background);
@@ -145,18 +189,23 @@ export class StepsViewer {
     }
 
     .stat-badge.run {
-      background-color: rgba(82, 196, 26, 0.15);
-      color: #52c41a;
+      background-color: var(--steps-run-bg);
+      color: var(--steps-run-color);
     }
 
     .stat-badge.ask {
-      background-color: rgba(24, 144, 255, 0.15);
-      color: #1890ff;
+      background-color: var(--steps-ask-bg);
+      color: var(--steps-ask-color);
     }
 
     .stat-badge.intervene {
-      background-color: rgba(250, 173, 20, 0.15);
-      color: #faad14;
+      background-color: var(--steps-intervene-bg);
+      color: var(--steps-intervene-color);
+    }
+
+    .stat-badge.questionnaire {
+      background-color: var(--steps-questionnaire-bg);
+      color: var(--steps-questionnaire-color);
     }
 
     .start-time {
@@ -205,7 +254,7 @@ export class StepsViewer {
     }
 
     .step:hover {
-      box-shadow: 0 2px 8px rgba(0, 0, 0, 0.1);
+      box-shadow: var(--steps-shadow);
     }
 
     .step::before {
@@ -221,18 +270,23 @@ export class StepsViewer {
     }
 
     .step.run::before {
-      background-color: #52c41a;
-      border-color: #52c41a;
+      background-color: var(--steps-run-color);
+      border-color: var(--steps-run-color);
     }
 
     .step.ask::before {
-      background-color: #1890ff;
-      border-color: #1890ff;
+      background-color: var(--steps-ask-color);
+      border-color: var(--steps-ask-color);
     }
 
     .step.intervene::before {
-      background-color: #faad14;
-      border-color: #faad14;
+      background-color: var(--steps-intervene-color);
+      border-color: var(--steps-intervene-color);
+    }
+
+    .step.questionnaire::before {
+      background-color: var(--steps-questionnaire-color);
+      border-color: var(--steps-questionnaire-color);
     }
 
     .step-header {
@@ -258,9 +312,10 @@ export class StepsViewer {
       text-transform: uppercase;
     }
 
-    .step-label.run { color: #52c41a; }
-    .step-label.ask { color: #1890ff; }
-    .step-label.intervene { color: #faad14; }
+    .step-label.run { color: var(--steps-run-color); }
+    .step-label.ask { color: var(--steps-ask-color); }
+    .step-label.intervene { color: var(--steps-intervene-color); }
+    .step-label.questionnaire { color: var(--steps-questionnaire-color); }
 
     .step-number {
       background-color: var(--vscode-badge-background);
@@ -306,11 +361,105 @@ export class StepsViewer {
     .question-box {
       margin-top: 12px;
       padding: 12px 16px;
-      background-color: rgba(24, 144, 255, 0.08);
-      border-left: 3px solid #1890ff;
+      background-color: var(--steps-ask-bg);
+      border-left: 3px solid var(--steps-question-border);
       border-radius: 0 6px 6px 0;
       font-size: 13px;
       line-height: 1.6;
+    }
+
+    .questionnaire-block {
+      margin-top: 12px;
+      display: grid;
+      gap: 12px;
+    }
+
+    .questionnaire-meta {
+      padding: 12px 16px;
+      background-color: var(--steps-questionnaire-bg);
+      border-left: 3px solid var(--steps-questionnaire-color);
+      border-radius: 0 6px 6px 0;
+      font-size: 13px;
+      line-height: 1.7;
+    }
+
+    .questionnaire-title {
+      font-size: 15px;
+      font-weight: 600;
+      margin-bottom: 6px;
+    }
+
+    .questionnaire-description {
+      color: var(--vscode-descriptionForeground);
+    }
+
+    .questionnaire-targets {
+      margin-top: 10px;
+      display: flex;
+      flex-wrap: wrap;
+      gap: 8px;
+      align-items: center;
+    }
+
+    .target-pill,
+    .response-pill {
+      display: inline-flex;
+      align-items: center;
+      gap: 6px;
+      padding: 2px 10px;
+      border-radius: 999px;
+      background-color: var(--steps-card-bg);
+      border: 1px solid var(--steps-card-border);
+      font-size: 12px;
+    }
+
+    .question-list {
+      display: grid;
+      gap: 12px;
+    }
+
+    .question-card {
+      padding: 14px 16px;
+      border: 1px solid var(--steps-card-border);
+      border-radius: 8px;
+      background-color: var(--steps-card-bg);
+    }
+
+    .question-card-header {
+      display: flex;
+      justify-content: space-between;
+      align-items: center;
+      gap: 12px;
+      margin-bottom: 10px;
+    }
+
+    .question-id {
+      font-size: 12px;
+      color: var(--vscode-descriptionForeground);
+      font-family: var(--vscode-editor-font-family);
+    }
+
+    .question-prompt {
+      font-size: 13px;
+      line-height: 1.6;
+      white-space: pre-wrap;
+    }
+
+    .choices-wrap {
+      margin-top: 10px;
+      display: flex;
+      flex-wrap: wrap;
+      gap: 8px;
+    }
+
+    .choice-pill {
+      display: inline-flex;
+      align-items: center;
+      padding: 3px 10px;
+      border-radius: 999px;
+      background-color: var(--steps-question-bg);
+      border: 1px solid var(--steps-question-border);
+      font-size: 12px;
     }
 
     .empty-state {
@@ -342,6 +491,7 @@ export class StepsViewer {
       <span class="stat-badge run">▶ Run × ${runCount}</span>
       <span class="stat-badge ask">❓ Ask × ${askCount}</span>
       <span class="stat-badge intervene">✋ Intervene × ${interveneCount}</span>
+      <span class="stat-badge questionnaire">📝 Questionnaire × ${questionnaireCount}</span>
       </div>
     </div>
   </div>
@@ -366,10 +516,20 @@ export class StepsViewer {
   <script>
     const steps = ${JSON.stringify(steps)};
     const startT = ${JSON.stringify(data.start_t || '')};
+    const serializedYaml = ${JSON.stringify(serializedYaml)};
     const isChinese = ${isChinese ? 'true' : 'false'};
     const vscode = acquireVsCodeApi();
     
     let isEditing = false;
+
+    function escapeHtml(value) {
+      return String(value ?? '')
+        .replace(/&/g, '&amp;')
+        .replace(/</g, '&lt;')
+        .replace(/>/g, '&gt;')
+        .replace(/"/g, '&quot;')
+        .replace(/'/g, '&#39;');
+    }
     
     function toggleEditor() {
       const editor = document.getElementById('editor');
@@ -379,22 +539,7 @@ export class StepsViewer {
       if (isEditing) {
         editor.style.display = 'block';
         timeline.style.display = 'none';
-        const yamlLines = ['start_t: ' + (startT || ''), 'steps:'];
-        steps.forEach(function(s) {
-          if (s.type === 'run') {
-            yamlLines.push('  - type: run');
-            yamlLines.push('    num_steps: ' + (s.num_steps || 1));
-            yamlLines.push('    tick: ' + (s.tick || 60));
-          } else if (s.type === 'ask') {
-            yamlLines.push('  - type: ask');
-            yamlLines.push('    question: "' + (s.question || '') + '"');
-          } else if (s.type === 'intervene') {
-            yamlLines.push('  - type: intervene');
-            yamlLines.push('    target: ' + (s.target || ''));
-            yamlLines.push('    action: ' + (s.action || ''));
-          }
-        });
-        document.getElementById('yamlEditor').value = yamlLines.join('\\n');
+        document.getElementById('yamlEditor').value = serializedYaml;
         document.getElementById('editBtn').textContent = '👁️ ' + (isChinese ? '预览' : 'Preview');
       } else {
         editor.style.display = 'none';
@@ -425,13 +570,15 @@ export class StepsViewer {
       const icons = {
         run: '▶️',
         ask: '❓',
-        intervene: '✋'
+        intervene: '✋',
+        questionnaire: '📝'
       };
 
       const labels = {
         run: isChinese ? '运行模拟' : 'Run Simulation',
         ask: isChinese ? '提问观察' : 'Ask Question',
-        intervene: isChinese ? '干预操作' : 'Intervene'
+        intervene: isChinese ? '干预操作' : 'Intervene',
+        questionnaire: isChinese ? '问卷收集' : 'Questionnaire'
       };
 
       steps.forEach((step, index) => {
@@ -445,31 +592,72 @@ export class StepsViewer {
             <div class="step-params">
               <div class="param-row">
                 <span class="param-key">num_steps:</span>
-                <span class="param-value">\${step.num_steps || 1}</span>
+                <span class="param-value">\${escapeHtml(step.num_steps || 1)}</span>
               </div>
               <div class="param-row">
                 <span class="param-key">tick:</span>
-                <span class="param-value">\${step.tick || 60}s</span>
+                <span class="param-value">\${escapeHtml(step.tick || 60)}s</span>
               </div>
             </div>
           \`;
         } else if (step.type === 'ask') {
           content = \`
-            <div class="question-box">\${step.question || (isChinese ? '(无问题)' : '(No question)')}</div>
+            <div class="question-box">\${escapeHtml(step.question || (isChinese ? '(无问题)' : '(No question)'))}</div>
           \`;
         } else if (step.type === 'intervene') {
-          const params = Object.entries(step.params || {}).map(([k, v]) => \`<div class="param-row"><span class="param-key">\${k}:</span><span class="param-value">\${JSON.stringify(v)}</span></div>\`).join('');
+          const params = Object.entries(step.params || {}).map(([k, v]) => \`<div class="param-row"><span class="param-key">\${escapeHtml(k)}:</span><span class="param-value">\${escapeHtml(JSON.stringify(v))}</span></div>\`).join('');
           content = \`
             <div class="step-params">
               <div class="param-row">
                 <span class="param-key">target:</span>
-                <span class="param-value">\${step.target || '-'}</span>
+                <span class="param-value">\${escapeHtml(step.target || '-')}</span>
               </div>
               <div class="param-row">
                 <span class="param-key">action:</span>
-                <span class="param-value">\${step.action || '-'}</span>
+                <span class="param-value">\${escapeHtml(step.action || '-')}</span>
               </div>
               \${params}
+            </div>
+          \`;
+        } else if (step.type === 'questionnaire') {
+          const questionItems = (step.questions || []).map((question, questionIndex) => {
+            const choiceHtml = Array.isArray(question.choices) && question.choices.length > 0
+              ? \`<div class="choices-wrap">\${question.choices.map((choice) => \`<span class="choice-pill">\${escapeHtml(choice)}</span>\`).join('')}</div>\`
+              : '';
+
+            return \`
+              <div class="question-card">
+                <div class="question-card-header">
+                  <span class="question-id">\${escapeHtml(question.id || 'q_' + (questionIndex + 1))}</span>
+                  <span class="response-pill">\${escapeHtml(question.response_type || 'text')}</span>
+                </div>
+                <div class="question-prompt">\${escapeHtml(question.prompt || (isChinese ? '(无题目内容)' : '(No prompt)'))}</div>
+                \${choiceHtml}
+              </div>
+            \`;
+          }).join('');
+
+          const targetAgents = Array.isArray(step.target_agent_ids) && step.target_agent_ids.length > 0
+            ? step.target_agent_ids.map((agentId) => \`<span class="target-pill">Agent \${escapeHtml(agentId)}</span>\`).join('')
+            : \`<span class="target-pill">\${isChinese ? '全部 Agent' : 'All Agents'}</span>\`;
+
+          content = \`
+            <div class="questionnaire-block">
+              <div class="questionnaire-meta">
+                <div class="questionnaire-title">\${escapeHtml(step.title || step.questionnaire_id || (isChinese ? '未命名问卷' : 'Untitled Questionnaire'))}</div>
+                <div><strong>questionnaire_id:</strong> \${escapeHtml(step.questionnaire_id || '-')}</div>
+                \${step.description ? \`<div class="questionnaire-description">\${escapeHtml(step.description)}</div>\` : ''}
+                <div class="questionnaire-targets">
+                  <strong>\${isChinese ? '目标对象' : 'Targets'}:</strong>
+                  \${targetAgents}
+                </div>
+              </div>
+              <div>
+                <div style="margin-bottom: 8px; font-weight: 600;">\${isChinese ? '题目列表' : 'Questions'} (\${(step.questions || []).length})</div>
+                <div class="question-list">
+                  \${questionItems || \`<div class="empty-state" style="padding: 20px;">\${isChinese ? '暂无题目' : 'No questions configured'}</div>\`}
+                </div>
+              </div>
             </div>
           \`;
         }
@@ -493,23 +681,7 @@ export class StepsViewer {
 
     // 复制步骤配置
     document.getElementById('copyBtn').addEventListener('click', function() {
-      const yamlLines = ['start_t: ' + (data.start_t || ''), 'steps:'];
-      steps.forEach(function(s) {
-        if (s.type === 'run') {
-          yamlLines.push('  - type: run');
-          yamlLines.push('    num_steps: ' + (s.num_steps || 1));
-          yamlLines.push('    tick: ' + (s.tick || 60));
-        } else if (s.type === 'ask') {
-          yamlLines.push('  - type: ask');
-          yamlLines.push('    question: "' + (s.question || '') + '"');
-        } else if (s.type === 'intervene') {
-          yamlLines.push('  - type: intervene');
-          yamlLines.push('    target: ' + (s.target || ''));
-          yamlLines.push('    action: ' + (s.action || ''));
-        }
-      });
-      const yamlContent = yamlLines.join('\\n');
-      navigator.clipboard.writeText(yamlContent).then(function() {
+      navigator.clipboard.writeText(serializedYaml).then(function() {
         const btn = document.getElementById('copyBtn');
         const originalText = btn.textContent;
         btn.textContent = '✓ ' + (isChinese ? '已复制' : 'Copied');
@@ -523,5 +695,19 @@ export class StepsViewer {
   </script>
 </body>
 </html>`;
+  }
+
+  private static serializeStepsConfig(data: StepsConfig): string {
+    return yaml.dump(
+      {
+        ...(data.start_t !== undefined ? { start_t: data.start_t } : {}),
+        steps: data.steps || [],
+      },
+      {
+        noRefs: true,
+        lineWidth: -1,
+        sortKeys: false,
+      }
+    );
   }
 }
