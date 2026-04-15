@@ -40,6 +40,12 @@ RUN apt-get update && apt-get install -y \
     texlive-latex-extra \
     texlive-fonts-recommended \
     texlive-fonts-extra \
+    # Claude Code official office skills dependencies
+    pandoc \
+    libreoffice \
+    poppler-utils \
+    tesseract-ocr \
+    unzip \
     && rm -rf /var/lib/apt/lists/*
 
 WORKDIR /app
@@ -59,6 +65,24 @@ RUN echo "[[index]]\nurl = \"https://mirrors.tuna.tsinghua.edu.cn/pypi/web/simpl
 # 安装 agentsociety2 及其所有依赖到默认 Python 环境（不使用 venv）
 # 使用 --system 标志安装到系统 Python 环境，而不是创建虚拟环境
 RUN uv pip install --system -e ./packages/agentsociety2
+
+# Install Claude Code official office skills dependencies
+# These are required for the PDF, DOCX, XLSX, and PPTX skills
+RUN uv pip install --system \
+    # PDF processing (pdf skill)
+    pypdf \
+    pdfplumber \
+    reportlab \
+    pytesseract \
+    pdf2image \
+    # Excel processing (xlsx skill)
+    pandas \
+    openpyxl \
+    # PowerPoint processing (pptx skill)
+    python-pptx \
+    Pillow \
+    # Additional utilities
+    python-docx
 
 # Copy the vsix file from builder stage
 COPY --from=extension-builder /app/extension.vsix /app/extension.vsix
