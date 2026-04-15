@@ -60,11 +60,6 @@
         "icon": "$(edit)"
       },
       {
-        "command": "aiSocialScientist.parseWithMinerU",
-        "title": "AI Social Scientist: Parse with MinerU",
-        "icon": "$(file-code)"
-      },
-      {
         "command": "aiSocialScientist.openMarkdownInEditor",
         "title": "AI Social Scientist: Open Markdown in Editor",
         "icon": "$(edit)"
@@ -108,11 +103,6 @@
         "command": "aiSocialScientist.openConfigPage",
         "title": "AI Social Scientist: Open Configuration",
         "icon": "$(settings)"
-      },
-      {
-        "command": "aiSocialScientist.toggleParseMode",
-        "title": "AI Social Scientist: Toggle PDF Parse Mode",
-        "icon": "$(check-square)"
       },
       {
         "command": "aiSocialScientist.scanCustomModules",
@@ -180,26 +170,6 @@
         "icon": "$(trash)"
       },
       {
-        "command": "aiSocialScientist.mineruStatusMenu",
-        "title": "AI Social Scientist: MinerU Environment Status",
-        "icon": "$(file-code)"
-      },
-      {
-        "command": "aiSocialScientist.mineruRecheck",
-        "title": "AI Social Scientist: Re-check MinerU Environment",
-        "icon": "$(refresh)"
-      },
-      {
-        "command": "aiSocialScientist.mineruDownloadModels",
-        "title": "AI Social Scientist: Download MinerU Models",
-        "icon": "$(cloud-download)"
-      },
-      {
-        "command": "aiSocialScientist.showMinerULogs",
-        "title": "AI Social Scientist: Show MinerU Logs",
-        "icon": "$(output)"
-      },
-      {
         "command": "aiSocialScientist.copyFilePath",
         "title": "AI Social Scientist: Copy File Path",
         "icon": "$(copy)"
@@ -247,11 +217,6 @@
           "command": "aiSocialScientist.renameLiterature",
           "when": "view == projectStructureView && (viewItem == paper || viewItem == file || viewItem =~ /markdown/)",
           "group": "1_modification"
-        },
-        {
-          "command": "aiSocialScientist.parseWithMinerU",
-          "when": "view == projectStructureView && viewItem == paper",
-          "group": "2_actions"
         },
         {
           "command": "aiSocialScientist.openMarkdownInEditor",

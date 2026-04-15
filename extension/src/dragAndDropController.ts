@@ -13,16 +13,12 @@
  * 关联文件：
  * - @extension/src/extension.ts - 主入口，将DragAndDropController注册到TreeView
  * - @extension/src/projectStructureProvider.ts - 树视图数据提供者
- * - @extension/src/paperWatcher.ts - 文件上传后触发解析
- * - @extension/src/parseModeManager.ts - 解析模式管理
  */
 
 import * as vscode from 'vscode';
 import * as path from 'path';
 import { ProjectItem, ProjectStructureProvider } from './projectStructureProvider';
 import { localize } from './i18n';
-import { ParseModeManager } from './parseModeManager';
-import { PaperWatcher } from './paperWatcher';
 
 /**
  * 文件处理信息
@@ -68,13 +64,9 @@ export class ProjectDragAndDropController implements vscode.TreeDragAndDropContr
   /**
    * 构造函数
    * @param provider - 项目结构提供者，用于刷新视图
-   * @param parseModeManager - 解析模式管理器，用于判断是否自动解析
-   * @param paperWatcher - 论文监听器，用于触发PDF解析
    */
   constructor(
-    private provider: ProjectStructureProvider,
-    private parseModeManager: ParseModeManager,
-    private paperWatcher: PaperWatcher
+    private provider: ProjectStructureProvider
   ) {
     // 创建输出通道用于调试日志
     this.outputChannel = vscode.window.createOutputChannel('AI Social Scientist - Drag & Drop');
@@ -701,37 +693,16 @@ export class ProjectDragAndDropController implements vscode.TreeDragAndDropContr
 
   /**
    * 解析上传的PDF文件
-   * 在自动解析模式下，上传PDF后自动调用MinerU解析
+   * 文件上传后不再自动解析
+   * 用户应使用 Claude Code 官方的 PDF skill (pdfplumber) 来处理 PDF 文件
    */
   private async parseUploadedFiles(
     files: FileToProcess[],
     targetType: 'papers' | 'userdata'
   ): Promise<void> {
-    // 仅在文献库且自动解析模式下执行
-    if (targetType !== 'papers' || !this.parseModeManager.isAutoMode()) {
-      return;
-    }
-
-    // 筛选PDF文件
-    const pdfFiles = files.filter(f => {
-      const ext = path.extname(f.fileName).toLowerCase();
-      return ext === '.pdf';
-    });
-
-    if (pdfFiles.length === 0) {
-      return;
-    }
-
-    this.log(`Auto-parsing ${pdfFiles.length} PDF files in auto mode`);
-
-    // 逐个触发解析（静默模式）
-    for (const file of pdfFiles) {
-      try {
-        await this.paperWatcher.triggerParse(file.targetUri.fsPath, true);
-      } catch (error) {
-        this.log('Failed to trigger parse for:', file.fileName, error);
-      }
-    }
+    // 不再自动解析文件
+    // 用户应使用 Claude Code 官方的 skills (.claude/skills/pdf/) 来处理文档
+    return;
   }
 
   /**
