@@ -1,4 +1,5 @@
 #!/usr/bin/env python
+# ruff: noqa: F841
 # -*- coding: utf-8 -*-
 """
 Trust Game - V2 Framework Implementation
@@ -6,13 +7,10 @@ Main entry point for running Trust Game using V2 framework
 """
 import os
 import json
-from collections import defaultdict
 import sys
 import asyncio
 from datetime import datetime
 import logging
-import re
-import numpy as np
 
 # Add project root directory to Python path
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__)))))
@@ -425,7 +423,7 @@ async def main():
         logging.error(f"Failed to save overall results: {e}")
 
     # Print overall summary
-    print(f"\n========== Overall Summary ==========")
+    print("\n========== Overall Summary ==========")
     print(f"Number of games: {NUM_GAMES}")
     print(f"Number of rounds per game: {NUM_ROUNDS}")
     print(f"Number of pairs: {NUM_PAIRS}")
@@ -471,4 +469,3 @@ if __name__ == "__main__":
         print(f"Program error occurred: {e}")
         import traceback
         traceback.print_exc()
-

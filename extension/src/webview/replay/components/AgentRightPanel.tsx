@@ -13,7 +13,7 @@ const ENV_RAW_ROWS_REQUEST_KEY = 'env-raw-rows';
 
 function renderValue(value: any): React.ReactNode {
   if (value === null || value === undefined) {
-    return <span style={{ color: '#909399' }}>-</span>;
+    return <span style={{ color: 'var(--as-muted-text)' }}>-</span>;
   }
   if (typeof value === 'object') {
     return (
@@ -111,7 +111,7 @@ export const AgentRightPanel: React.FC = () => {
               <div key={dataset.dataset_id} className="right-card" style={{ marginBottom: '12px' }}>
                 <Flex align="center" justify="space-between" style={{ marginBottom: '8px' }}>
                   <div>
-                    <div style={{ fontWeight: 600, color: '#1677ff' }}>
+                    <div style={{ fontWeight: 600, color: 'var(--as-accent-text)' }}>
                       {dataset.title || dataset.dataset_id}
                     </div>
                     <div className="right-card-meta">
@@ -128,7 +128,7 @@ export const AgentRightPanel: React.FC = () => {
                 </Flex>
 
                 {dataset.description ? (
-                  <div style={{ fontSize: '12px', color: '#606266', marginBottom: '8px' }}>
+                  <div style={{ fontSize: '12px', color: 'var(--vscode-descriptionForeground)', marginBottom: '8px' }}>
                     {dataset.description}
                   </div>
                 ) : null}
@@ -137,7 +137,7 @@ export const AgentRightPanel: React.FC = () => {
                   <div className="right-empty">No row at current step</div>
                 ) : (
                   <Flex vertical gap={8}>
-                    <div style={{ fontSize: '11px', color: '#909399' }}>
+                    <div style={{ fontSize: '11px', color: 'var(--as-muted-text)' }}>
                       Step {String(row.step ?? '-')} · {row.t ? new Date(String(row.t)).toLocaleString() : 'No timestamp'}
                     </div>
                     {entries.length === 0 ? (
@@ -145,7 +145,7 @@ export const AgentRightPanel: React.FC = () => {
                     ) : (
                       entries.map(([key, value]) => (
                         <div key={key} className="right-info-card">
-                          <div style={{ fontSize: '11px', color: '#909399', marginBottom: '4px' }}>
+                          <div style={{ fontSize: '11px', color: 'var(--as-muted-text)', marginBottom: '4px' }}>
                             {getColumnLabel(dataset, key)}
                           </div>
                           <div className="right-card-content">{renderValue(value)}</div>

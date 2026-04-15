@@ -1,7 +1,6 @@
 import * as React from 'react';
 import {
   ConfigProvider,
-  theme,
   Card,
   Typography,
   Space,
@@ -31,6 +30,7 @@ import {
   EditOutlined,
 } from '@ant-design/icons';
 import type { VSCodeAPI, InitConfig, EnvModuleConfig, AgentConfig } from './types';
+import { useVscodeTheme } from '../theme';
 import '../i18n';
 
 const { Title, Text } = Typography;
@@ -147,7 +147,12 @@ const ParamEditor: React.FC<{
   if (typeof value === 'object') {
     const keys = Object.keys(value);
     return (
-      <div style={{ paddingLeft: depth > 0 ? 12 : 0, borderLeft: depth > 0 ? '2px solid #d9d9d9' : 'none' }}>
+      <div
+        style={{
+          paddingLeft: depth > 0 ? 12 : 0,
+          borderLeft: depth > 0 ? '2px solid var(--vscode-panel-border, #d9d9d9)' : 'none',
+        }}
+      >
         {keys.map((key) => (
           <div key={key} style={{ marginBottom: 8 }}>
             <Text strong style={{ marginRight: 8 }}>
@@ -168,6 +173,7 @@ const ParamEditor: React.FC<{
 };
 
 export const InitConfigApp: React.FC<InitConfigAppProps> = ({ vscode, initialConfig }) => {
+  const { palette, themeConfig } = useVscodeTheme();
   const [config, setConfig] = React.useState<InitConfig>(initialConfig || {});
   const [loading, setLoading] = React.useState<boolean>(true);
   const [saved, setSaved] = React.useState<boolean>(false);
@@ -248,18 +254,6 @@ export const InitConfigApp: React.FC<InitConfigAppProps> = ({ vscode, initialCon
     setConfig({ ...config, agents: newAgents });
   };
 
-  // 适配 VSCode 主题
-  const isDark: boolean =
-    document.body.classList.contains('vscode-dark') ||
-    document.body.classList.contains('vscode-high-contrast');
-
-  const themeConfig = React.useMemo(
-    () => ({
-      algorithm: isDark ? theme.darkAlgorithm : theme.defaultAlgorithm,
-    }),
-    [isDark]
-  );
-
   if (loading) {
     return (
       <ConfigProvider theme={themeConfig}>
@@ -285,7 +279,14 @@ export const InitConfigApp: React.FC<InitConfigAppProps> = ({ vscode, initialCon
 
   return (
     <ConfigProvider theme={themeConfig}>
-      <div style={{ padding: 24, minHeight: '100vh' }}>
+      <div
+        style={{
+          padding: 24,
+          minHeight: '100vh',
+          backgroundColor: palette.editorBackground,
+          color: palette.editorForeground,
+        }}
+      >
         <Title level={2} style={{ marginBottom: 24 }}>
           实验初始化配置
         </Title>
@@ -327,7 +328,9 @@ export const InitConfigApp: React.FC<InitConfigAppProps> = ({ vscode, initialCon
                 title="配置状态"
                 value={envModules.length > 0 && agents.length > 0 ? '完整' : '不完整'}
                 valueStyle={{
-                  color: envModules.length > 0 && agents.length > 0 ? '#52c41a' : '#faad14',
+                  color: envModules.length > 0 && agents.length > 0
+                    ? palette.successForeground
+                    : palette.warningForeground,
                 }}
               />
             </Card>

@@ -6,7 +6,7 @@ license: Proprietary. LICENSE.txt has complete terms
 
 # Experiment Config
 
-Generate and validate experiment configuration for AgentSociety2 simulations.
+Generate and validate experiment configuration for AgentSociety2 simulations, including questionnaire/survey steps in `steps.yaml`.
 
 ## Quick Start
 
@@ -113,7 +113,7 @@ Generate config_params.py that:
 - Uses ONLY standard library imports (json, pathlib, csv)
 - Reads from user_data/ directory
 - Generates valid init_config.json structure
-- Generates valid steps.yaml structure
+- Generates valid steps.yaml structure, including `questionnaire` steps when the experiment requires agent-facing surveys
 - Outputs to stdout
 
 ### Phase 3: Execution
@@ -146,7 +146,40 @@ steps:
     question: "Summarize current state"
   - type: intervene
     instruction: "Modify something..."
+  - type: questionnaire
+    questionnaire_id: "post_run_survey"
+    title: "Post-run survey"
+    description: "Collect structured responses from agents after the run"
+    target_agent_ids: [1, 2, 3]
+    questions:
+      - id: "mood"
+        prompt: "How do you feel about the outcome?"
+        response_type: "choice"
+        choices: ["positive", "neutral", "negative"]
+      - id: "reason"
+        prompt: "Briefly explain your answer."
+        response_type: "text"
 ```
+
+### questionnaire step
+
+Use a `questionnaire` step when the experiment needs structured answers from agents during or after the simulation.
+
+Required fields:
+- `type: questionnaire`
+- `questionnaire_id`: unique identifier for this questionnaire run
+- `questions`: non-empty list of question objects
+
+Optional fields:
+- `title`: questionnaire title shown in the prompt context
+- `description`: questionnaire-level instructions
+- `target_agent_ids`: list of agent IDs; omit to survey all agents
+
+Each question object supports:
+- `id`: unique question identifier
+- `prompt`: question text
+- `response_type`: one of `text`, `integer`, `float`, `choice`, `json`
+- `choices`: required when `response_type` is `choice`
 
 ## Important Notes
 
@@ -154,6 +187,8 @@ steps:
 2. **All parameters go in kwargs** dictionary
 3. **agent_id must equal kwargs.id**
 4. **Read user_data files** before generating configuration
+5. **Questionnaire steps must include questions** and each question must have an `id` and `prompt`
+6. **Choice questions must provide choices**; otherwise validation will fail
 
 ## Documentation Sync
 

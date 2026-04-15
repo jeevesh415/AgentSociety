@@ -346,8 +346,8 @@ export const AgentMap: React.FC<AgentMapProps> = ({ mapboxToken = MAPBOX_ACCESS_
               </div>
             `,
             style: {
-              backgroundColor: 'rgba(0, 0, 0, 0.8)',
-              color: 'white',
+              backgroundColor: 'var(--as-tooltip-bg)',
+              color: 'var(--as-tooltip-fg)',
               borderRadius: '4px',
             },
           };
@@ -372,10 +372,10 @@ export const AgentMap: React.FC<AgentMapProps> = ({ mapboxToken = MAPBOX_ACCESS_
         bottom: 16,
         left: 16,
         padding: '12px',
-        background: 'rgba(0, 0, 0, 0.8)',
+        background: 'var(--as-tooltip-bg)',
         borderRadius: '8px',
         fontSize: '11px',
-        color: 'white',
+        color: 'var(--as-tooltip-fg)',
       }}>
         <div style={{ fontWeight: 'bold', marginBottom: '8px' }}>
           {layoutMode === 'map' ? 'Agent Positions' : 'Random Agent Layout'}
@@ -385,7 +385,7 @@ export const AgentMap: React.FC<AgentMapProps> = ({ mapboxToken = MAPBOX_ACCESS_
           Zoom: {Number(viewState.zoom).toFixed(1)}
         </div>
         {selectedAgentId !== null && (
-          <div style={{ marginTop: '4px', color: '#ff6384' }}>
+          <div style={{ marginTop: '4px', color: 'var(--vscode-errorForeground)' }}>
             Selected: Agent {selectedAgentId}
           </div>
         )}
@@ -397,10 +397,10 @@ export const AgentMap: React.FC<AgentMapProps> = ({ mapboxToken = MAPBOX_ACCESS_
           top: 16,
           right: 16,
           padding: '10px 12px',
-          background: 'rgba(255, 255, 255, 0.92)',
+          background: 'var(--as-panel-bg-strong)',
           borderRadius: '8px',
           fontSize: '12px',
-          color: '#555',
+          color: 'var(--as-strong-text)',
         }}>
           {t('replay.noData')}
         </div>
@@ -412,12 +412,12 @@ export const AgentMap: React.FC<AgentMapProps> = ({ mapboxToken = MAPBOX_ACCESS_
           top: 16,
           left: 16,
           padding: '10px 12px',
-          background: 'rgba(255, 255, 255, 0.92)',
+          background: 'var(--as-panel-bg-strong)',
           borderRadius: '8px',
           fontSize: '12px',
-          color: '#b00020',
+          color: 'var(--vscode-errorForeground)',
           maxWidth: '360px',
-          boxShadow: '0 2px 8px rgba(0,0,0,0.2)',
+          boxShadow: 'var(--as-shadow)',
         }}>
           {t('replay.map.loadFailed')}: {mapError}
         </div>

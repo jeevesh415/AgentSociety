@@ -31,6 +31,7 @@ import { ApiClient } from './apiClient';
 import { ProjectDragAndDropController } from './dragAndDropController';
 import { localize } from './i18n';
 import { BackendManager } from './services/backendManager';
+import { WorkspaceExportManager } from './services/workspaceExportManager';
 import { AIChatInvoker } from './aiChatInvoker';
 import { LiteratureIndexViewer } from './literatureIndexViewer';
 import { StepsViewer } from './stepsViewer';
@@ -54,6 +55,7 @@ export function activate(context: vscode.ExtensionContext) {
   // ========== 初始化后端服务管理器 ==========
   // BackendManager 负责 FastAPI 后端进程的生命周期管理
   backendManager = new BackendManager(context);
+  const workspaceExportManager = new WorkspaceExportManager();
   context.subscriptions.push({
     dispose: () => {
       if (backendManager) {
@@ -62,10 +64,11 @@ export function activate(context: vscode.ExtensionContext) {
       }
     }
   });
+  context.subscriptions.push(workspaceExportManager);
 
   // 首次启动或配置未完成时，打开配置页；否则按设置决定是否自动启动后端
   const config = vscode.workspace.getConfiguration('aiSocialScientist');
-  const autoStart = config.get<boolean>('backend.autoStart', true);
+  const autoStart = config.get<boolean>('backend.autoStart', false);
   const hasCompletedInitialSetup = context.globalState.get<boolean>('configPage.hasCompletedInitialSetup');
   const hasLlmApiKey = hasConfiguredLlmApiKey();
 
@@ -140,6 +143,13 @@ export function activate(context: vscode.ExtensionContext) {
     'aiSocialScientist.fixWorkspace',
     async () => {
       await projectStructureProvider.fixWorkspace();
+    }
+  );
+
+  const exportWorkspaceZipCommand = vscode.commands.registerCommand(
+    'aiSocialScientist.exportWorkspaceZip',
+    async () => {
+      await workspaceExportManager.exportWorkspaceZip();
     }
   );
 
@@ -495,9 +505,6 @@ export function activate(context: vscode.ExtensionContext) {
       ConfigPageViewProvider.createOrShow(context, vscode.ViewColumn.Beside);
     }
   );
-
-  // ========== MinerU 环境管理命令 ==========
-  // 以下命令用于在命令面板和状态栏菜单中管理 MinerU 环境
 
   // ========== Custom Module Commands ==========
 
@@ -878,7 +885,16 @@ export function activate(context: vscode.ExtensionContext) {
       }
 
       try {
-        const atReference = `@${filePath}`;
+        const workspaceFolder = vscode.workspace.workspaceFolders?.[0];
+        if (!workspaceFolder) {
+          vscode.window.showErrorMessage(localize('customModules.noWorkspace'));
+          return;
+        }
+
+        const referencePath = (path.isAbsolute(filePath)
+          ? path.relative(workspaceFolder.uri.fsPath, filePath)
+          : filePath).replace(/\\/g, '/');
+        const atReference = `@${referencePath}`;
         await vscode.env.clipboard.writeText(atReference);
         vscode.window.showInformationMessage(`已复制引用: ${atReference}`);
       } catch (error: any) {
@@ -952,6 +968,7 @@ export function activate(context: vscode.ExtensionContext) {
     initProjectCommand,
     configureEnvCommand,
     fixWorkspaceCommand,
+    exportWorkspaceZipCommand,
     deleteLiteratureCommand,
     renameLiteratureCommand,
     openMarkdownInEditorCommand,

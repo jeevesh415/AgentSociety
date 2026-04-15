@@ -198,6 +198,11 @@
         "command": "aiSocialScientist.copyFileName",
         "title": "AI Social Scientist: Copy File Name",
         "icon": "$(symbol-text)"
+      },
+      {
+        "command": "aiSocialScientist.exportWorkspaceZip",
+        "title": "AI Social Scientist: Export Workspace ZIP",
+        "icon": "$(cloud-download)"
       }
     ],
     "menus": {
@@ -339,7 +344,7 @@
       "properties": {
         "aiSocialScientist.backend.autoStart": {
           "type": "boolean",
-          "default": true,
+          "default": false,
           "description": "是否在插件启动时自动启动后端服务",
           "markdownDescription": "如果启用，插件启动时会自动启动后端服务。如果禁用，需要手动启动后端服务。"
         },
@@ -378,9 +383,13 @@
   },
   "scripts": {
     "vscode:prepublish": "npm run build",
-    "compile": "webpack --mode development",
-    "watch": "webpack --mode development --watch",
-    "build": "rm -rf out && webpack --mode production",
+    "build": "npm run compile && npm run build-webview",
+    "compile": "tsc -p ./",
+    "watch": "tsc -watch -p ./",
+    "clean-webview": "node -e \"const fs=require('fs'); fs.rmSync('out/webview', { recursive: true, force: true }); fs.mkdirSync('out/webview', { recursive: true });\"",
+    "build-webview": "npm run clean-webview && node ./node_modules/webpack/bin/webpack.js --mode production",
+    "watch-webview": "webpack --mode development --watch",
+    "package": "npx @vscode/vsce package -o ai-social-scientist.vsix",
     "pretest": "npm run compile && npm run lint",
     "lint": "eslint src",
     "test": "node ./out/test/runTest.js"

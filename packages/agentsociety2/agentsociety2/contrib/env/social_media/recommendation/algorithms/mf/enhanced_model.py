@@ -4,7 +4,6 @@
 
 import pickle
 from typing import List, Tuple, Set, Dict, Optional
-from datetime import datetime
 import numpy as np
 import torch
 import torch.nn as nn

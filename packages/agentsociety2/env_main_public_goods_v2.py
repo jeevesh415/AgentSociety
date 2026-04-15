@@ -1,4 +1,5 @@
 #!/usr/bin/env python
+# ruff: noqa: F841
 # -*- coding: utf-8 -*-
 """
 Public Goods Game - V2 Framework Implementation
@@ -339,7 +340,7 @@ async def main():
         logging.error(f"Failed to save overall results: {e}")
 
     # Print overall summary
-    print(f"\n========== Overall Summary ==========")
+    print("\n========== Overall Summary ==========")
     print(f"Number of games: {NUM_GAMES}")
     print(f"Number of rounds per game: {NUM_ROUNDS}")
     print(f"Number of agents: {NUM_AGENTS}")
@@ -385,4 +386,3 @@ if __name__ == "__main__":
         print(f"Program error occurred: {e}")
         import traceback
         traceback.print_exc()
-

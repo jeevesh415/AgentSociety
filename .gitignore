@@ -53,6 +53,8 @@ result_trust_game_person_agent/
 result_volunteer_dilemma_person_agent/
 game_log/
 *.json
+*.jsonl
+*.log
 .vscode/
 !.vscode/settings.json
 !.vscode/launch.json

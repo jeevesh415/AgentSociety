@@ -3,20 +3,26 @@
  */
 
 import * as React from 'react';
+import { ConfigProvider } from 'antd';
 import { useTranslation } from 'react-i18next';
 import type { ExtensionMessage, VSCodeAPI } from './types';
 import { ReplayProvider, useReplay } from './store';
 import { TimelinePlayer, AgentDetailPanel, AgentMap, AgentRightPanel } from './components';
+import { useVscodeTheme } from '../theme';
 
 interface ReplayAppProps {
   vscode: VSCodeAPI;
 }
 
 export const ReplayApp: React.FC<ReplayAppProps> = ({ vscode }) => {
+  const { themeConfig } = useVscodeTheme();
+
   return (
-    <ReplayProvider vscode={vscode}>
-      <ReplayAppInner vscode={vscode} />
-    </ReplayProvider>
+    <ConfigProvider theme={themeConfig}>
+      <ReplayProvider vscode={vscode}>
+        <ReplayAppInner vscode={vscode} />
+      </ReplayProvider>
+    </ConfigProvider>
   );
 };
 

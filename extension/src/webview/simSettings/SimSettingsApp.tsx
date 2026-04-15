@@ -1,9 +1,10 @@
 import * as React from 'react';
-import { ConfigProvider, theme, Transfer, Button, Space, Typography, Card, Alert, Spin, Modal, Tag } from 'antd';
+import { ConfigProvider, Transfer, Button, Space, Typography, Card, Alert, Spin, Modal, Tag } from 'antd';
 import { SaveOutlined, ReloadOutlined, InfoCircleOutlined } from '@ant-design/icons';
 import { useTranslation } from 'react-i18next';
 import type { VSCodeAPI, SimSettings, AgentInfo, EnvModuleInfo } from './types';
 import { MarkdownRenderer } from '../components/MarkdownRenderer';
+import { useVscodeTheme } from '../theme';
 import '../i18n';
 
 const { Title, Text } = Typography;
@@ -27,6 +28,7 @@ export const SimSettingsApp: React.FC<SimSettingsAppProps> = ({
   initialSettings,
 }: SimSettingsAppProps) => {
   const { t } = useTranslation();
+  const { isDark, palette, themeConfig } = useVscodeTheme();
   const [agentClasses, setAgentClasses] = React.useState<Record<string, AgentInfo>>({});
   const [envModules, setEnvModules] = React.useState<Record<string, EnvModuleInfo>>({});
   const [loading, setLoading] = React.useState<boolean>(true);
@@ -142,16 +144,6 @@ export const SimSettingsApp: React.FC<SimSettingsAppProps> = ({
     setCurrentDescription(null);
   };
 
-  // 适配 VSCode 主题
-  const isDark: boolean =
-    document.body.classList.contains('vscode-dark') ||
-    document.body.classList.contains('vscode-high-contrast');
-
-  // 使用 ant-design 默认主题，只设置算法（dark/light）
-  const themeConfig = React.useMemo(() => ({
-    algorithm: isDark ? theme.darkAlgorithm : theme.defaultAlgorithm,
-  }), [isDark]);
-
   // 准备 Transfer 数据源
   const agentDataSource = Object.keys(agentClasses).map(type => ({
     key: type,
@@ -179,7 +171,7 @@ export const SimSettingsApp: React.FC<SimSettingsAppProps> = ({
         style={{
           marginBottom: '8px',
           cursor: item.description ? 'pointer' : 'default',
-          backgroundColor: item.is_custom ? '#fafafa' : '#fff',
+          backgroundColor: item.is_custom ? palette.surfaceBackground : palette.surfaceMuted,
         }}
         bodyStyle={{
           padding: '12px',
@@ -245,7 +237,7 @@ export const SimSettingsApp: React.FC<SimSettingsAppProps> = ({
         style={{
           marginBottom: '8px',
           cursor: item.description ? 'pointer' : 'default',
-          backgroundColor: item.is_custom ? '#fafafa' : '#fff',
+          backgroundColor: item.is_custom ? palette.surfaceBackground : palette.surfaceMuted,
         }}
         bodyStyle={{
           padding: '12px',
@@ -327,6 +319,8 @@ export const SimSettingsApp: React.FC<SimSettingsAppProps> = ({
         style={{
           padding: '20px',
           minHeight: '100vh',
+          backgroundColor: palette.editorBackground,
+          color: palette.editorForeground,
         }}
       >
         <Title level={2} style={{ marginBottom: '16px' }}>
@@ -514,4 +508,3 @@ export const SimSettingsApp: React.FC<SimSettingsAppProps> = ({
     </ConfigProvider>
   );
 };
-

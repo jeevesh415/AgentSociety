@@ -10,9 +10,8 @@ import shutil
 import tempfile
 from dataclasses import dataclass, field
 from pathlib import Path
-from typing import Any, Callable, Dict, List, Optional, Type
+from typing import Any, Dict, List, Optional, Type
 
-import json_repair
 from litellm import AllMessageValues
 from pydantic import BaseModel
 

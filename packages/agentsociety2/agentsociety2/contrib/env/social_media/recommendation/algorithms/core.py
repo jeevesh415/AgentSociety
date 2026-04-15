@@ -6,7 +6,7 @@
 """
 
 from abc import ABC, abstractmethod
-from typing import List, Tuple, Set, Dict, Optional
+from typing import List, Tuple, Set, Dict
 from dataclasses import dataclass
 import numpy as np
 import pandas as pd
@@ -235,7 +235,7 @@ class RecommenderAlgorithm(ABC):
             import inspect
             source = inspect.getsource(self.save)
             return 'NotImplementedError' not in source
-        except:
+        except Exception:
             return False
 
     def _supports_load(self) -> bool:
@@ -244,5 +244,5 @@ class RecommenderAlgorithm(ABC):
             import inspect
             source = inspect.getsource(self.load)
             return 'NotImplementedError' not in source
-        except:
+        except Exception:
             return False

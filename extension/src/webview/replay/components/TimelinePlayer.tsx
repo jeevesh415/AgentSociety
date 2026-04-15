@@ -20,7 +20,9 @@ const FlickeringDot: React.FC<{ active?: boolean }> = ({ active }) => {
         width: '10px',
         height: '10px',
         borderRadius: '50%',
-        backgroundColor: active ? '#52c41a' : '#d9d9d9',
+        backgroundColor: active
+          ? 'var(--vscode-testing-iconPassed, #52c41a)'
+          : 'var(--vscode-panel-border, #d9d9d9)',
         animation: active ? 'flicker 1s infinite' : 'none',
       }}
     />
@@ -138,7 +140,7 @@ export const TimelinePlayer: React.FC = () => {
       <Flex>
         <Flex vertical align="center">
           <strong>{t('replay.timeline.step', { current: currentStepNumber, total: totalSteps })}</strong>
-          <span style={{ fontSize: '11px', color: '#666' }}>
+          <span style={{ fontSize: '11px', color: 'var(--vscode-descriptionForeground)' }}>
             {currentTime ? currentTime.format('HH:mm:ss') : '--:--:--'}
           </span>
         </Flex>

@@ -8,9 +8,7 @@ import base64
 import json
 import mimetypes
 import shutil
-import sqlite3
-from dataclasses import dataclass, field
-from datetime import datetime
+from dataclasses import dataclass
 from pathlib import Path
 from typing import TYPE_CHECKING, Any, Dict, List, Optional, Tuple
 
@@ -219,7 +217,6 @@ class EDAGenerator:
 
         from .data import DataReader
         reader = DataReader(db_path)
-        schema = reader.read_schema()
         sample = reader.read_sample_data(limit=max_rows)
 
         if not sample:
@@ -355,7 +352,6 @@ class EDAGenerator:
 
         from .data import DataReader
         reader = DataReader(db_path)
-        schema = reader.read_schema()
         sample = reader.read_sample_data(limit=max_rows)
 
         if not sample:
@@ -457,7 +453,6 @@ class EDAGenerator:
 
         from .data import DataReader
         reader = DataReader(db_path)
-        schema = reader.read_schema()
         sample = reader.read_sample_data(limit=max_rows)
 
         if not sample:
@@ -567,7 +562,6 @@ class EDAGenerator:
 
         from .data import DataReader
         reader = DataReader(db_path)
-        schema = reader.read_schema()
         sample = reader.read_sample_data(limit=max_rows)
 
         if not sample:
@@ -812,7 +806,7 @@ Include charts where they support the narrative.
         if not files:
             return ""
 
-        return f"\n## EDA Reports\n" + "\n".join(files) + "\n"
+        return "\n## EDA Reports\n" + "\n".join(files) + "\n"
 
     def _format_data_context(self, data_summary: Optional[Any]) -> str:
         """格式化数据上下文"""

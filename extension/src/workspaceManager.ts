@@ -781,7 +781,7 @@ Follow this sequence for social science research:
    └─> agentsociety-hypothesis add
 
 5. Initialize Experiment
-   └─> agentsociety-experiment-config (validate → prepare → info → run → check)
+   └─> agentsociety-experiment-config (validate → prepare → info → run → check, supports questionnaire steps)
 
 6. Run Experiment
    └─> agentsociety-run-experiment start
@@ -846,11 +846,16 @@ Follow this sequence for social science research:
 │           ├── analysis_summary.json
 │           ├── report.md
 │           └── figures/
-└── presentation/         # Synthesized reports
-    └── hypothesis_{id}/
-        └── experiment_{id}/
-            ├── synthesis_report_zh.md
-            └── synthesis_report_en.md
+├── presentation/         # Experiment analysis reports
+│   └── hypothesis_{id}/
+│       └── experiment_{id}/
+│           ├── synthesis_report_zh.md
+│           └── synthesis_report_en.md
+└── synthesis/            # Comprehensive synthesis reports
+    ├── synthesis_report_YYYYMMDD_zh.md
+    ├── synthesis_report_YYYYMMDD_en.md
+    ├── synthesis_report_YYYYMMDD_zh.html
+    └── synthesis_report_YYYYMMDD_en.html
 \`\`\`
 
 ### Directory Notes
@@ -859,6 +864,7 @@ Follow this sequence for social science research:
 - **user_data/** - Store your custom datasets and data files here for experiment configuration.
 - **datasets/** - Downloaded datasets from the AgentSociety platform. Managed by \`agentsociety-use-dataset\`.
 - **.agentsociety/** - Internal workspace state, managed by the system.
+- **Claude Code conversations** - Stored outside the workspace at \`~/.claude/projects/<workspace-path-encoded>/\`. The workspace exporter includes the matching directory when it exists.
 
 ---
 
@@ -896,7 +902,7 @@ When interacting with users:
 |-------|---------|---------|
 | \`agentsociety-scan-modules\` | List available agents/envs | \`list --short\` |
 | \`agentsociety-hypothesis\` | Manage hypotheses | \`add\`, \`list\`, \`get\` |
-| \`agentsociety-experiment-config\` | Generate experiment config | \`validate\`, \`prepare\`, \`run\` |
+| \`agentsociety-experiment-config\` | Generate experiment config, including questionnaire steps | \`validate\`, \`prepare\`, \`run\` |
 | \`agentsociety-run-experiment\` | Execute simulations | \`start\`, \`status\`, \`stop\` |
 | \`agentsociety-analysis\` | Analyze results | \`--hypothesis-id 1 --experiment-id 1\` |
 | \`agentsociety-synthesize\` | Create reports | Bilingual synthesis |

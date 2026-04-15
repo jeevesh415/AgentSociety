@@ -6,9 +6,7 @@ import json
 import asyncio
 from pathlib import Path
 from typing import Dict, Any, List, Optional
-from datetime import datetime
 
-from .models import Item, Rating, UserPreference, FeedCache, RecommendationHistory
 
 
 class RecommendationStorageManager:

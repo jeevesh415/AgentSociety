@@ -240,6 +240,64 @@ class PersonAgent(AgentBase):
         self._workspace_cache.clear()
         self._step_context = {}
 
+    @staticmethod
+    def _tail_jsonl(raw: str, *, limit: int = 10) -> list[Any]:
+        """读取 JSONL 文本的最后若干条记录。"""
+        lines = [line.strip() for line in raw.splitlines() if line.strip()]
+        recent = lines[-limit:]
+        parsed: list[Any] = []
+        for line in recent:
+            try:
+                parsed.append(json_repair.loads(line))
+            except Exception:
+                parsed.append(line)
+        return parsed
+
+    def _build_external_question_context(self, t: datetime) -> dict[str, Any]:
+        """构造带 workspace 记忆的外部问答上下文。"""
+        context = super()._build_external_question_context(t)
+
+        workspace_context: dict[str, Any] = {}
+        json_paths = [
+            "emotion.json",
+            "intention.json",
+            "plan_state.json",
+            "session_state.json",
+            "observation_ctx.json",
+        ]
+        text_paths = [
+            "observation.txt",
+            "thought.txt",
+            "current_need.txt",
+        ]
+
+        for path in json_paths:
+            if self._skill_runtime.workspace_exists(path):
+                workspace_context[path] = self._skill_runtime.read_json(path, None)
+
+        for path in text_paths:
+            if self._skill_runtime.workspace_exists(path):
+                text = self._skill_runtime.workspace_read(path).strip()
+                if text:
+                    workspace_context[path] = self._truncate_text(text, max_len=3000)
+
+        if self._skill_runtime.workspace_exists("memory.jsonl"):
+            workspace_context["memory_recent"] = self._tail_jsonl(
+                self._skill_runtime.workspace_read("memory.jsonl"),
+                limit=10,
+            )
+
+        recent_tool_logs = self._skill_runtime.read_recent_tool_logs(limit=8)
+        if recent_tool_logs:
+            workspace_context["recent_tool_logs"] = recent_tool_logs
+
+        recent_thread = self._skill_runtime.read_recent_thread_messages(limit=8)
+        if recent_thread:
+            workspace_context["recent_thread_messages"] = recent_thread
+
+        context["workspace"] = workspace_context
+        return context
+
     def _bump_workspace_state_version(self) -> int:
         """递增 workspace 状态版本号并返回新值。"""
         self._workspace_state_version += 1

@@ -35,7 +35,6 @@ import logging
 import os
 import sys
 import time
-import warnings
 from typing import Any, Dict, List, Optional
 
 __all__ = [
@@ -340,12 +339,8 @@ def setup_logging(
         file_formatter = logging.Formatter(
             "%(asctime)s - %(levelname)s - %(message)s", datefmt="%Y-%m-%d %H:%M:%S"
         )
-        console_formatter = logging.Formatter(
-            "%(asctime)s - %(levelname)s - %(message)s", datefmt="%Y-%m-%d %H:%M:%S"
-        )
     else:
         file_formatter = logging.Formatter(log_format)
-        console_formatter = logging.Formatter(log_format)
 
     # Configure root logger
     root_logger = logging.getLogger()

@@ -1,5 +1,6 @@
 import * as React from 'react';
 import {
+  ConfigProvider,
   Layout,
   Form,
   Input,
@@ -18,6 +19,7 @@ import {
 import { SaveOutlined, KeyOutlined, CheckCircleOutlined, RocketOutlined, QuestionCircleOutlined, ReloadOutlined } from '@ant-design/icons';
 import { useTranslation } from 'react-i18next';
 import type { VSCodeAPI, ConfigValues, WorkspaceInfo } from './types';
+import { useVscodeTheme } from '../theme';
 import 'antd/dist/reset.css';
 
 const { Content } = Layout;
@@ -79,6 +81,7 @@ interface ValidationState {
 
 export const ConfigPageApp: React.FC<ConfigPageAppProps> = ({ vscode }) => {
   const { t } = useTranslation();
+  const { palette, themeConfig } = useVscodeTheme();
   const [form] = Form.useForm<ConfigValues>();
   const [loading, setLoading] = React.useState(false);
   const [startingBackend, setStartingBackend] = React.useState(false);
@@ -361,13 +364,22 @@ export const ConfigPageApp: React.FC<ConfigPageAppProps> = ({ vscode }) => {
   };
 
   return (
-    <Layout style={{ minHeight: '100vh', background: 'var(--vscode-editor-background)' }}>
-      <Content style={{ padding: '24px', maxWidth: 900, margin: '0 auto', width: '100%' }}>
+    <ConfigProvider theme={themeConfig}>
+      <Layout style={{ minHeight: '100vh', background: palette.editorBackground }}>
+        <Content
+          style={{
+            padding: '24px',
+            maxWidth: 900,
+            margin: '0 auto',
+            width: '100%',
+            color: palette.editorForeground,
+          }}
+        >
         <div style={{ marginBottom: 24 }}>
-          <Title level={2} style={{ color: 'var(--vscode-editor-foreground)' }}>
+          <Title level={2} style={{ color: palette.editorForeground }}>
             {t('configPage.title')}
           </Title>
-          <Text type="secondary" style={{ color: 'var(--vscode-descriptionForeground)' }}>
+          <Text type="secondary" style={{ color: palette.descriptionForeground }}>
             {t('configPage.subtitle')}
           </Text>
         </div>
@@ -588,7 +600,8 @@ export const ConfigPageApp: React.FC<ConfigPageAppProps> = ({ vscode }) => {
             </Space>
           </div>
         </Form>
-      </Content>
-    </Layout>
+        </Content>
+      </Layout>
+    </ConfigProvider>
   );
 };

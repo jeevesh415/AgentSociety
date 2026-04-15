@@ -4,6 +4,8 @@
 Endowment Effect Experiment - Main Entry Point
 Run Endowment Effect experiment using participant profiles from txt files
 """
+# ruff: noqa: E402
+
 import asyncio
 import json
 import logging
@@ -55,7 +57,7 @@ def get_participant_id_from_filename(filename: str) -> int:
 
 def create_default_profile(agent_id: int) -> str:
     """Create default profile summary for an agent when profile file is not available"""
-    return f"""## Profile Summary
+    return """## Profile Summary
 
 This participant is a typical individual with average personality traits and characteristics. 
 They demonstrate moderate levels of extraversion, agreeableness, conscientiousness, neuroticism, and openness. 
@@ -135,7 +137,7 @@ async def main(
     logger.info("Endowment Effect (EE) Experiment")
     logger.info("=" * 80)
     logger.info("Experiment Configuration:")
-    logger.info(f"  - Start time: 9:00:00 AM (UTC)")
+    logger.info("  - Start time: 9:00:00 AM (UTC)")
     logger.info(f"  - Time step: {tick_seconds} seconds")
     logger.info(f"  - Total steps: {num_steps}")
     logger.info(f"  - Agent count: {num_agents if participant_ids is None else len(participant_ids)}")
@@ -172,7 +174,7 @@ async def main(
     
     if not os.path.exists(profiles_dir):
         logger.warning(f"  [WARNING] Profile directory does not exist: {profiles_dir}")
-        logger.info(f"  [INFO] Will use default agent profiles")
+        logger.info("  [INFO] Will use default agent profiles")
         use_default_profiles = True
     else:
         logger.info(f"  [OK] Profile directory: {profiles_dir}")
@@ -186,12 +188,12 @@ async def main(
             )
         except Exception as e:
             logger.warning(f"  [WARNING] Failed to load profile files: {e}")
-            logger.info(f"  [INFO] Will use default agent profiles")
+            logger.info("  [INFO] Will use default agent profiles")
             use_default_profiles = True
     
     # If no profiles loaded, create default profiles
     if use_default_profiles or not profiles:
-        logger.info(f"  [INFO] Creating default agent profiles")
+        logger.info("  [INFO] Creating default agent profiles")
         if participant_ids:
             target_agent_count = len(participant_ids)
             agent_ids = participant_ids
@@ -258,7 +260,7 @@ async def main(
     logger.info(f"  [OK] Successfully created {len(agents)} agents")
 
     # ==================== Run Experiment ====================
-    logger.info(f"\n[Step 4/5] Running experiment...")
+    logger.info("\n[Step 4/5] Running experiment...")
     logger.info(f"  - Total steps: {TOTAL_STEPS}")
     logger.info(f"  - Time step: {TIME_STEP_SECONDS} seconds")
 
@@ -272,7 +274,7 @@ async def main(
     await society.run(num_steps=TOTAL_STEPS, tick=TIME_STEP_SECONDS)
 
     # ==================== Collect Results ====================
-    logger.info(f"\n[Step 5/5] Collecting results...")
+    logger.info("\n[Step 5/5] Collecting results...")
     
     # Get all evaluation results from environment
     results = ee_env.get_results()
@@ -306,10 +308,10 @@ async def main(
             for item in evaluated_items:
                 logger.info(f"      {item}: WTA={agent_evaluations[item]['wta']:.2f}, WTP={agent_evaluations[item]['wtp']:.2f}")
         else:
-            logger.warning(f"    - [WARNING] No items evaluated")
+            logger.warning("    - [WARNING] No items evaluated")
 
     # ==================== Save Results ====================
-    logger.info(f"\n[Saving Results]")
+    logger.info("\n[Saving Results]")
     
     output_dir = "endowment_effect_results"
     os.makedirs(output_dir, exist_ok=True)
@@ -351,7 +353,7 @@ async def main(
         logger.info(f"  [OK] CSV results saved to: {csv_file}")
     
     # Statistics
-    logger.info(f"\n[Statistics]")
+    logger.info("\n[Statistics]")
     total_evaluations = sum(len(results.get(agent_id, {})) for agent_id in actual_agent_ids)
     expected_evaluations = len(actual_agent_ids) * 4  # Each agent should evaluate 4 items
     completion_rate = (total_evaluations / expected_evaluations * 100) if expected_evaluations > 0 else 0
@@ -395,4 +397,3 @@ if __name__ == "__main__":
         num_steps=20,
         tick_seconds=150,
     ))
-

@@ -1,7 +1,7 @@
 import asyncio
 import random
 from datetime import datetime
-from typing import Any, Dict, List, Optional, Tuple
+from typing import Any, Dict, List, Optional
 
 from agentsociety2.agent.base import AgentBase
 from mem0 import AsyncMemory
@@ -271,7 +271,7 @@ This agent participates in a reputation-based donation game where it can choose 
                     return "\n".join(
                         [f"- {m.get('memory', '')}" for m in recent_memories]
                     )
-        except Exception as e:
+        except Exception:
             # 记忆查询失败不影响主流程，静默处理
             pass
         return ""
@@ -462,7 +462,7 @@ Only return "cooperate" or "defect", do not return any other content.
                     f"Result: {ans}",
                     user_id=self._memory_user_id,
                 )
-            except Exception as e:
+            except Exception:
                 # 记忆保存失败不影响主流程，静默处理
                 pass
 
@@ -513,7 +513,7 @@ Please summarize their success patterns and provide suggestions: How should I ad
                     )
                 except Exception:
                     pass
-        except Exception as e:
+        except Exception:
             # 学习失败不影响主流程，静默处理
             pass
 

@@ -250,7 +250,7 @@ export class BackendManager {
     return {
       pythonPath,
       workingDirectory,
-      autoStart: true,  // 默认自动启动
+      autoStart: false,  // 默认不自动启动
       env,
     };
   }

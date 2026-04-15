@@ -3,6 +3,7 @@ import { CodeHighlighter } from '@ant-design/x';
 import { XMarkdown, type ComponentProps } from '@ant-design/x-markdown';
 import '@ant-design/x-markdown/themes/light.css';
 import '@ant-design/x-markdown/themes/dark.css';
+import { useVscodeTheme } from '../theme';
 
 const Code: React.FC<ComponentProps> = (props) => {
   const { className, children } = props;
@@ -27,10 +28,8 @@ export const MarkdownRenderer: React.FC<MarkdownRendererProps> = ({
   isDark,
   customComponents,
 }) => {
-  const darkMode = isDark ?? (
-    document.body.classList.contains('vscode-dark') ||
-    document.body.classList.contains('vscode-high-contrast')
-  );
+  const { isDark: themeIsDark } = useVscodeTheme();
+  const darkMode = isDark ?? themeIsDark;
 
   return (
     <XMarkdown
@@ -39,7 +38,7 @@ export const MarkdownRenderer: React.FC<MarkdownRendererProps> = ({
         ...customComponents,
       }}
       paragraphTag="div"
-      className={darkMode ? 'dark' : 'light'}
+      className={[darkMode ? 'dark' : 'light', className].filter(Boolean).join(' ')}
       style={{
         fontSize: '13px',
         lineHeight: '1.6',
@@ -51,4 +50,3 @@ export const MarkdownRenderer: React.FC<MarkdownRendererProps> = ({
     </XMarkdown>
   );
 };
-

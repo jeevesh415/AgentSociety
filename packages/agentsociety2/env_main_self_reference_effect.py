@@ -4,6 +4,8 @@
 Self-Reference Effect (SRE) Experiment - Main Entry Point
 Run SRE experiment using agentsociety2 framework with profile txt files
 """
+# ruff: noqa: E402
+
 import asyncio
 import json
 import logging
@@ -74,7 +76,7 @@ def get_participant_id_from_filename(filename: str) -> int:
 
 def create_default_profile(agent_id: int) -> str:
     """Create default profile summary for an agent when profile file is not available"""
-    return f"""## Profile Summary
+    return """## Profile Summary
 
 This participant is a typical individual with average personality traits and characteristics. 
 They demonstrate moderate levels of extraversion, agreeableness, conscientiousness, neuroticism, and openness. 
@@ -287,7 +289,7 @@ async def main(
     
     if not os.path.exists(profiles_dir):
         logger.warning(f"  [WARNING] Profile directory does not exist: {profiles_dir}")
-        logger.info(f"  [INFO] Will use default agent profiles")
+        logger.info("  [INFO] Will use default agent profiles")
         use_default_profiles = True
     else:
         logger.info(f"  [OK] Profile directory: {profiles_dir}")
@@ -301,12 +303,12 @@ async def main(
             )
         except Exception as e:
             logger.warning(f"  [WARNING] Failed to load profile files: {e}")
-            logger.info(f"  [INFO] Will use default agent profiles")
+            logger.info("  [INFO] Will use default agent profiles")
             use_default_profiles = True
     
     # If no profiles loaded, create default profiles
     if use_default_profiles or not profiles:
-        logger.info(f"  [INFO] Creating default agent profiles")
+        logger.info("  [INFO] Creating default agent profiles")
         if participant_ids:
             target_agent_count = len(participant_ids)
             agent_ids = participant_ids
@@ -334,7 +336,7 @@ async def main(
     
     # Show sample profile summary
     if profiles:
-        logger.info(f"  [OK] Profile Summary sample (first 200 characters):")
+        logger.info("  [OK] Profile Summary sample (first 200 characters):")
         sample_summary = profiles[0]["profile_text"][:200]
         logger.info(f"    {sample_summary}...")
 
@@ -353,9 +355,9 @@ async def main(
             logger.info(f"  [OK] Loaded {len(encoding_traits)} encoding traits from data file")
             logger.info(f"  [OK] Loaded {len(recognition_traits)} recognition traits from data file")
         else:
-            logger.info(f"  [WARNING] Data file not found, will use default traits list")
+            logger.info("  [WARNING] Data file not found, will use default traits list")
     else:
-        logger.info(f"  [OK] Using default traits list")
+        logger.info("  [OK] Using default traits list")
 
     # ==================== Initialize Environment ====================
     logger.info("\n[Step 3/5] Initializing environment...")
@@ -420,7 +422,7 @@ async def main(
     await society.run(num_steps=TOTAL_STEPS, tick=TIME_STEP_SECONDS)
 
     # ==================== Extract Results ====================
-    logger.info(f"\n[Extracting Results]")
+    logger.info("\n[Extracting Results]")
     
     # Get all results from environment
     results = sre_env.get_results()
@@ -438,12 +440,12 @@ async def main(
         logger.info(f"  Agent {agent_id}: Encoding {encoding_count}/{len(sre_env.encoding_traits)}, Recognition {recognition_count}/{len(sre_env.recognition_traits)}")
         
         if encoding_count < len(sre_env.encoding_traits):
-            logger.warning(f"    [WARNING] Encoding phase not completed")
+            logger.warning("    [WARNING] Encoding phase not completed")
         if recognition_count < len(sre_env.recognition_traits):
-            logger.warning(f"    [WARNING] Recognition phase not completed")
+            logger.warning("    [WARNING] Recognition phase not completed")
 
     # ==================== Save Results ====================
-    logger.info(f"\n[Saving Results]")
+    logger.info("\n[Saving Results]")
     
     output_dir = "sre_experiment_results"
     os.makedirs(output_dir, exist_ok=True)
@@ -525,7 +527,7 @@ async def main(
     logger.info(f"  [OK] CSV results saved to: {csv_file}")
     
     # Print summary statistics
-    logger.info(f"\n[Statistics]")
+    logger.info("\n[Statistics]")
     all_encoding_ratings = []
     all_recognition_correct = []
     for agent_id in actual_agent_ids:
@@ -583,4 +585,3 @@ if __name__ == "__main__":
         tick_seconds=150,
         use_data_traits=False,
     ))
-

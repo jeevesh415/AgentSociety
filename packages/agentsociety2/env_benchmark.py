@@ -76,6 +76,8 @@ for test_case in test_data["instructions"]:
 import asyncio
 import json
 import logging
+# ruff: noqa: E402
+
 import os
 import pickle
 import re
@@ -92,8 +94,6 @@ from agentsociety2.contrib.env.mobility_space import MobilitySpace
 from agentsociety2.contrib.env.social_media import SocialMediaSpace
 from agentsociety2.env import (
     CodeGenRouter,
-    PlanExecuteRouter,
-    ReActRouter,
     SearchToolRouter,
     TwoTierPlanExecuteRouter,
     TwoTierReActRouter,
@@ -687,7 +687,7 @@ async def main(
     
     # 顺序执行所有测试用例（避免并行导致的限流重试，减少LLM调用次数）
     results = []
-    logger.info(f"  使用顺序执行，避免限流重试")
+    logger.info("  使用顺序执行，避免限流重试")
     logger.info(f"  Agent ID 循环使用: {context_agent_ids}")
     
     for idx, test_case in enumerate(tqdm(instructions, desc="测试用例")):
@@ -748,14 +748,14 @@ async def main(
         logger.info(f"无异常: {len(successful_results)}")
         logger.info(f"有异常: {len(failed_results)}")
         logger.info(f"成功调用（无异常+完美LCS+完美参数）: {successful_calls} ({successful_call_rate*100:.2f}%)")
-        logger.info(f"\n平均指标（所有测试用例）:")
+        logger.info("\n平均指标（所有测试用例）:")
         logger.info(f"  工具选择准确率 (IOU): {avg_tool_selection_iou:.4f}")
         logger.info(f"  调用序列准确率 (LCS): {avg_sequence_lcs:.4f}")
         if successful_results:
             logger.info(f"  参数准确率（仅无异常）: {avg_param_accuracy:.4f}")
         else:
-            logger.info(f"  参数准确率（仅无异常）: N/A（所有测试用例都有异常）")
-        logger.info(f"\nToken 使用统计（仅 coder 模型，包括所有结果，含异常调用）:")
+            logger.info("  参数准确率（仅无异常）: N/A（所有测试用例都有异常）")
+        logger.info("\nToken 使用统计（仅 coder 模型，包括所有结果，含异常调用）:")
         logger.info(f"  总 LLM 调用次数 (coder): {total_llm_calls}")
         logger.info(f"  平均每次测试 LLM 调用次数 (coder): {avg_llm_calls_per_test:.2f}")
         logger.info(f"  总 Input Tokens (coder): {total_input_tokens:,}")

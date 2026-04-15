@@ -1,9 +1,10 @@
+# ruff: noqa: F841
+
 import asyncio
 import os
 from datetime import datetime, timedelta
 from typing import cast
 
-from agentsociety2.agent.base import AgentBase
 from agentsociety2.contrib.env.global_information import GlobalInformationEnv
 from agentsociety2.contrib.env.mobility_space import MobilitySpace
 from agentsociety2.env import EnvBase, EnvLLM, CodeGenRouter
@@ -13,14 +14,8 @@ from agentsociety2.config import (
     HelperLLMConfig,
     LLMConfig,
 )
-from agentsociety2.society.society import AgentSociety
 from dotenv import load_dotenv
 from litellm.router import Router
-from mem0 import AsyncMemory
-from mem0.configs.base import VectorStoreConfig
-from mem0.embeddings.configs import EmbedderConfig
-from mem0.llms.configs import LlmConfig
-from mem0.memory.main import MemoryConfig
 
 load_dotenv()
 

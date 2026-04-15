@@ -4,7 +4,6 @@ Search Tool as Tool Router Implementation
 """
 
 import json
-import re
 from typing import Tuple, Dict, Any, List
 from litellm import AllMessageValues
 from openai.types.chat import ChatCompletionToolParam
@@ -401,8 +400,6 @@ class SearchToolRouter(RouterBase):
             
             # 计算匹配分数
             score = 0
-            tool_words = set(tool_desc.split())
-            
             # 名称匹配
             if query_lower in tool_name.lower():
                 score += 10
@@ -528,5 +525,4 @@ You have access to a search tool to find relevant environment tools, and then us
 Let's start!"""
         
         return prompt
-
 
