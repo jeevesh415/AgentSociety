@@ -48,6 +48,13 @@ export class WorkspaceManager {
   }
 
   /**
+   * Show the Workspace Manager output channel
+   */
+  showOutput(): void {
+    this.outputChannel.show();
+  }
+
+  /**
    * Initialize workspace
    */
   async init(options: WorkspaceInitOptions): Promise<WorkspaceInitResult> {
@@ -227,6 +234,17 @@ export class WorkspaceManager {
       }
       if (syncResult.created.length > 0) {
         filesCreated.push(...syncResult.created);
+      }
+
+      reportProgress('正在安装官方 Office 文档处理技能...');
+
+      const officeSkillsResult = await this.copyOfficialOfficeSkills();
+      if (!officeSkillsResult.success) {
+        this.log(`Failed to copy official office skills: ${officeSkillsResult.message}`);
+        // Don't fail initialization if office skills copy fails, just log it
+      } else {
+        filesCreated.push(...officeSkillsResult.downloaded.map(s => `.claude/skills/${s}/`));
+        this.log(`Copied official office skills: ${officeSkillsResult.downloaded.join(', ')}`);
       }
 
       reportProgress('正在完成初始化...');
@@ -428,12 +446,132 @@ export class WorkspaceManager {
   }
 
   /**
+   * Copy official Anthropic office skills (pdf, docx, xlsx, pptx)
+   * from extension bundle to .claude/skills/
+   *
+   * This replaces MinerU with official Claude Code skills for document processing.
+   * Skills are bundled with the extension for offline installation.
+   */
+  public async copyOfficialOfficeSkills(
+    workspacePath?: string
+  ): Promise<{ success: boolean; message: string; downloaded: string[] }> {
+    workspacePath = workspacePath || this.getWorkspacePath() || '';
+    if (!workspacePath) {
+      return {
+        success: false,
+        message: 'No workspace folder open',
+        downloaded: [],
+      };
+    }
+
+    const officialSkills = ['pdf', 'docx', 'xlsx', 'pptx'];
+    const downloaded: string[] = [];
+    const targetDir = path.join(workspacePath, '.claude', 'skills');
+
+    // Ensure target directory exists (recursive mkdir is idempotent)
+    fs.mkdirSync(targetDir, { recursive: true });
+
+    // Get extension skills directory - handle different execution contexts
+    // In production: __dirname = extension/out/, skills = extension/skills/
+    // In development: __dirname might vary, so we try multiple paths
+    let sourceSkillsDir: string;
+
+    // Try common paths for skills directory, based on actual __dirname structure
+    const possiblePaths = [
+      path.join(__dirname, '..', 'skills'),                  // extension/out/ -> extension/skills/
+      path.join(__dirname, '..', '..', 'extension', 'skills'), // workspace root -> extension/skills/
+      path.join(__dirname, '..', '..', '..', 'agentsociety', 'extension', 'skills'), // higher level
+      path.join(process.cwd(), 'agentsociety', 'extension', 'skills'), // from project root
+      path.join(process.cwd(), 'extension', 'skills'),        // alternative
+    ];
+
+    sourceSkillsDir = possiblePaths.find(p => fs.existsSync(p)) || '';
+
+    // Verify extension skills directory exists
+    if (!sourceSkillsDir) {
+      this.log(`Extension skills directory not found. Tried paths: ${possiblePaths.join(', ')}`);
+      return {
+        success: false,
+        message: `Extension skills directory not found. Please check extension installation.`,
+        downloaded: [],
+      };
+    }
+
+    // Show output channel for progress tracking
+    this.outputChannel.show();
+    this.log('='.repeat(60));
+    this.log('Copying official office skills from extension...');
+    this.log(`Extension __dirname: ${__dirname}`);
+    this.log(`Resolved source path: ${sourceSkillsDir}`);
+    this.log(`Target: ${targetDir}`);
+    this.log('='.repeat(60));
+
+    for (const skill of officialSkills) {
+      const sourceSkillDir = path.join(sourceSkillsDir, skill);
+      const targetSkillDir = path.join(targetDir, skill);
+
+      this.log(`[${skill}] Processing...`);
+
+      // Check if source skill exists
+      if (!fs.existsSync(sourceSkillDir)) {
+        this.log(`[${skill}] ✗ Not found in extension skills directory`);
+        continue;
+      }
+
+      try {
+        // Remove existing skill directory if present
+        if (fs.existsSync(targetSkillDir)) {
+          fs.rmSync(targetSkillDir, { recursive: true, force: true });
+          this.log(`[${skill}] Removed existing directory`);
+        }
+
+        // Copy skill directory
+        this.copyDirectoryRecursive(sourceSkillDir, targetSkillDir);
+        downloaded.push(skill);
+        this.log(`[${skill}] ✓ Successfully copied`);
+      } catch (error: any) {
+        this.log(`[${skill}] ✗ Failed: ${error.message}`);
+      }
+    }
+
+    this.log('='.repeat(60));
+    this.log(`Copy complete: ${downloaded.length}/${officialSkills.length} skills`);
+    this.log(`Copied: ${downloaded.join(', ') || 'none'}`);
+    if (downloaded.length < officialSkills.length) {
+      const missing = officialSkills.filter(s => !downloaded.includes(s));
+      this.log(`Missing: ${missing.join(', ') || 'none'}`);
+    }
+    this.log('='.repeat(60));
+
+    if (downloaded.length === 0) {
+      return {
+        success: false,
+        message: `Failed to copy any official office skills. Please check the extension installation.`,
+        downloaded,
+      };
+    }
+
+    if (downloaded.length < officialSkills.length) {
+      const missing = officialSkills.filter(s => !downloaded.includes(s));
+      return {
+        success: true,
+        message: `Copied ${downloaded.length}/${officialSkills.length} office skills. Missing: ${missing.join(', ')}`,
+        downloaded,
+      };
+    }
+
+    return {
+      success: true,
+      message: `Successfully copied all ${downloaded.length} official office skills: ${downloaded.join(', ')}`,
+      downloaded,
+    };
+  }
+  /**
    * Recursively copy a directory tree.
    */
   private copyDirectoryRecursive(source: string, target: string): void {
-    if (!fs.existsSync(target)) {
-      fs.mkdirSync(target, { recursive: true });
-    }
+    // Create target directory (recursive mkdir is idempotent)
+    fs.mkdirSync(target, { recursive: true });
 
     for (const item of fs.readdirSync(source)) {
       const sourcePath = path.join(source, item);

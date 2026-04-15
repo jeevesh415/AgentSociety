@@ -289,6 +289,9 @@ export class ProjectStructureProvider implements vscode.TreeDataProvider<Project
   // 当前工作区的路径
   private workspacePath: string = '';
 
+  // 批量操作标志 - 在批量文件操作期间暂停自动刷新
+  private batchOperationInProgress: boolean = false;
+
   // 防抖定时器 - 用于限制刷新频率
   private refreshTimer: NodeJS.Timeout | undefined;
 
@@ -309,6 +312,12 @@ export class ProjectStructureProvider implements vscode.TreeDataProvider<Project
   private agentSkillsCache: Array<{
     name: string; description: string; source: string; enabled: boolean; path: string; has_skill_md: boolean; script: string; requires: string[];
   }> = [];
+
+  // 树结构缓存 - 缓存节点的子项，避免重复的文件系统扫描
+  private treeItemCache: Map<string, { items: ProjectItem[]; timestamp: number }> = new Map();
+
+  // 缓存过期时间（5秒）
+  private readonly CACHE_TTL = 5000;
 
   // Workspace Manager - 本地文件操作
   private workspaceManager: WorkspaceManager;
@@ -395,21 +404,64 @@ export class ProjectStructureProvider implements vscode.TreeDataProvider<Project
       new vscode.RelativePattern(workspaceFolder, '**/*')
     );
 
+    // 创建辅助函数：检查路径是否应该被忽略
+    // 优化：使用更高效的路径匹配，提前检查常见情况
+    const shouldIgnorePath = (filePath: string): boolean => {
+      // 快速路径：检查路径中是否包含常见忽略目录
+      const quickIgnorePatterns = ['node_modules', '.git', '__pycache__', '.venv', 'venv', 'virtualenv', '.pytest_cache', '.mypy_cache', '.ipynb_checkpoints'];
+      for (const pattern of quickIgnorePatterns) {
+        if (filePath.includes(`/${pattern}/`) || filePath.includes(`\\${pattern}\\`)) {
+          return true;
+        }
+      }
+
+      // 文件扩展名快速检查
+      const ext = filePath.toLowerCase();
+      const ignoredExts = ['.pyc', '.pyo', '.log', '.ds_store', '.swp', '.swo', '.coverage'];
+      for (const ignoredExt of ignoredExts) {
+        if (ext.endsWith(ignoredExt)) {
+          return true;
+        }
+      }
+
+      // 更复杂的模式匹配（仅在快速检查失败时执行）
+      const complexIgnorePatterns = [
+        /\/out\//,         // 编译输出
+        /\/dist\//,        // 分发目录
+        /\/\.claude\/virtualenv\//,  // 项目虚拟环境
+        /\/\.claude\/\.venv\//,     // 项目虚拟环境
+        /coverage/,        // 覆盖率报告
+        /\.egg-info/,      // Python egg 信息
+        /\/\.Python\//,    // Python build 目录
+        /\/build\//,       // Python build 目录
+        /\/\.ipynb\//,     // Jupyter notebook 数据
+      ];
+      return complexIgnorePatterns.some(pattern => pattern.test(filePath));
+    };
+
     // 监听文件修改事件
-    // uri参数是文件的URI（统一资源标识符）
     this.watcher.onDidChange((uri) => {
+      if (shouldIgnorePath(uri.fsPath)) {
+        return;  // 忽略匹配的路径
+      }
       this.log(`File changed: ${uri.fsPath}`);
-      this.refresh();  // 文件变化时刷新视图
+      this.refresh();
     });
 
     // 监听文件创建事件
     this.watcher.onDidCreate((uri) => {
+      if (shouldIgnorePath(uri.fsPath)) {
+        return;  // 忽略匹配的路径
+      }
       this.log(`File created: ${uri.fsPath}`);
       this.refresh();
     });
 
     // 监听文件删除事件
     this.watcher.onDidDelete((uri) => {
+      if (shouldIgnorePath(uri.fsPath)) {
+        return;  // 忽略匹配的路径
+      }
       this.log(`File deleted: ${uri.fsPath}`);
       this.refresh();
     });
@@ -435,18 +487,89 @@ export class ProjectStructureProvider implements vscode.TreeDataProvider<Project
   }
 
   /**
+   * 生成缓存键
+   * @param element - 树节点元素
+   * @returns 缓存键字符串
+   */
+  private getCacheKey(element?: ProjectItem): string {
+    if (!element) {
+      return 'root';
+    }
+    return `${element.type}:${element.filePath || element.label || 'unknown'}`;
+  }
+
+  /**
+   * 从缓存获取节点子项
+   * @param element - 树节点元素
+   * @returns 缓存的子项或 undefined
+   */
+  private getCachedChildren(element?: ProjectItem): ProjectItem[] | undefined {
+    const key = this.getCacheKey(element);
+    const cached = this.treeItemCache.get(key);
+    if (cached && Date.now() - cached.timestamp < this.CACHE_TTL) {
+      this.log(`Cache hit for key: ${key}`);
+      return cached.items;
+    }
+    return undefined;
+  }
+
+  /**
+   * 缓存节点子项
+   * @param element - 树节点元素
+   * @param items - 要缓存的子项
+   */
+  private setCachedChildren(element: ProjectItem | undefined, items: ProjectItem[]): void {
+    const key = this.getCacheKey(element);
+    this.treeItemCache.set(key, {
+      items,
+      timestamp: Date.now()
+    });
+    // 限制缓存大小，避免内存泄漏
+    if (this.treeItemCache.size > 100) {
+      const oldestKey = Array.from(this.treeItemCache.keys())[0];
+      this.treeItemCache.delete(oldestKey);
+    }
+  }
+
+  /**
+   * 清除缓存
+   * @param pattern - 可选的清除模式，如果提供则只清除匹配的缓存
+   */
+  private clearCache(pattern?: string): void {
+    if (pattern) {
+      for (const key of this.treeItemCache.keys()) {
+        if (key.includes(pattern)) {
+          this.treeItemCache.delete(key);
+          this.log(`Cleared cache matching pattern: ${pattern}`);
+        }
+      }
+    } else {
+      this.treeItemCache.clear();
+      this.log('Cleared all cache');
+    }
+  }
+
+  /**
    * 刷新树形视图
-   * 
+   *
    * 使用防抖（debounce）机制：
    * - 如果200ms内多次调用refresh()，只会在最后一次调用后200ms执行刷新
    * - 这样可以避免频繁刷新，提升性能
-   * 
+   *
    * 工作原理：
    * 1. 第一次调用：启动200ms定时器
    * 2. 200ms内再次调用：清除旧定时器，启动新定时器
    * 3. 200ms内没有新调用：执行刷新（调用fire()）
    */
   refresh(): void {
+    // 如果正在进行批量操作，跳过自动刷新
+    if (this.batchOperationInProgress) {
+      return;
+    }
+
+    // 清除缓存以强制重新读取
+    this.clearCache();
+
     // 如果已有待执行的定时器，先清除它
     if (this.refreshTimer) {
       this.log('Debouncing: clearing existing refresh timer');
@@ -524,6 +647,15 @@ export class ProjectStructureProvider implements vscode.TreeDataProvider<Project
    * @returns 子节点数组
    */
   async getChildren(element?: ProjectItem): Promise<ProjectItem[]> {
+    // 检查缓存（只对稳定的节点类型使用缓存）
+    const stableNodeTypes = ['extensionSkillsGroup', 'agentSkillsGroup', 'agentSkillBuiltinGroup', 'agentSkillCustomGroup', 'agentSkillEnvGroup'];
+    if (element && stableNodeTypes.includes(element.type)) {
+      const cached = this.getCachedChildren(element);
+      if (cached) {
+        return cached;
+      }
+    }
+
     // 获取工作区文件夹
     const workspaceFolder = vscode.workspace.workspaceFolders?.[0];
     if (!workspaceFolder) {
@@ -721,6 +853,7 @@ export class ProjectStructureProvider implements vscode.TreeDataProvider<Project
 
       const skillsDir = path.join(this.context.extensionPath, 'skills');
       if (!fs.existsSync(skillsDir)) {
+        this.setCachedChildren(element, items);
         return items;
       }
       const skillDirs = fs.readdirSync(skillsDir).filter(name => {
@@ -734,46 +867,61 @@ export class ProjectStructureProvider implements vscode.TreeDataProvider<Project
         const skillMdPath = path.join(skillPath, 'SKILL.md');
         const item = new ProjectItem(
           dirName,
-          vscode.TreeItemCollapsibleState.Collapsed,
+          vscode.TreeItemCollapsibleState.None,  // 叶子节点，不可展开
           'extensionSkillItem',
           skillMdPath
         );
         item.contextValue = 'extensionSkillItem';
         (item as any).skillDirPath = skillPath;
+
+        // 统一使用 file 图标
+        (item as any).iconPath = new (vscode.ThemeIcon as any)('file');
+
+        // 直接设置 command，点击节点时打开 SKILL.md
+        item.command = {
+          command: 'aiSocialScientist.openAgentSkillDoc',
+          title: 'Open Skill Documentation',
+          arguments: [dirName, skillPath, false]  // false 表示不是内置 skill
+        };
+
         items.push(item);
       });
 
+      // 缓存结果
+      this.setCachedChildren(element, items);
       return items;
     }
 
     // 扩展自带 Skill Item 展开时显示目录内容
-    if (element.type === 'extensionSkillItem') {
-      const skillDirPath = (element as any).skillDirPath || element.filePath;
-      if (!skillDirPath || !fs.existsSync(skillDirPath) || !fs.statSync(skillDirPath).isDirectory()) {
-        return [];
-      }
-
-      const items: ProjectItem[] = [];
-      const entries = fs.readdirSync(skillDirPath);
-      for (const entry of entries) {
-        const fullPath = path.join(skillDirPath, entry);
-        const stat = fs.statSync(fullPath);
-        if (stat.isFile()) {
-          const fileItem = new ProjectItem(entry, vscode.TreeItemCollapsibleState.None, 'skillFile', fullPath);
-          if (entry.toLowerCase().endsWith('.md')) {
-            fileItem.command = {
-              command: 'markdown.showPreview',
-              title: 'Open Preview',
-              arguments: [vscode.Uri.file(fullPath)]
-            };
-          }
-          items.push(fileItem);
-        } else if (stat.isDirectory()) {
-          items.push(new ProjectItem(entry, vscode.TreeItemCollapsibleState.Collapsed, 'skillFile', fullPath));
-        }
-      }
-      return items;
-    }
+    // 已废弃：现在 Skill 节点是叶子节点，直接点击打开 SKILL.md
+    // if (element.type === 'extensionSkillItem') {
+    //   const skillDirPath = (element as any).skillDirPath || element.filePath;
+    //   if (!skillDirPath || !fs.existsSync(skillDirPath) || !fs.statSync(skillDirPath).isDirectory()) {
+    //     return [];
+    //   }
+    //
+    //   const items: ProjectItem[] = [];
+    //   const entries = fs.readdirSync(skillDirPath);
+    //   for (const entry of entries) {
+    //     const fullPath = path.join(skillDirPath, entry);
+    //     const stat = fs.statSync(fullPath);
+    //     if (stat.isFile()) {
+    //       const fileItem = new ProjectItem(entry, vscode.TreeItemCollapsibleState.None, 'skillFile', fullPath);
+    //       // 只允许打开 SKILL.md 文件，其他文件不可打开
+    //       if (entry === 'SKILL.md') {
+    //         fileItem.command = {
+    //           command: 'markdown.showPreview',
+    //           title: 'Open Skill Documentation',
+    //           arguments: [vscode.Uri.file(fullPath)]
+    //         };
+    //       }
+    //       items.push(fileItem);
+    //     } else if (stat.isDirectory()) {
+    //       items.push(new ProjectItem(entry, vscode.TreeItemCollapsibleState.Collapsed, 'skillFile', fullPath));
+    //     }
+    //   }
+    //   return items;
+    // }
 
     // Agent Skills 组的子节点
     if (element.type === 'agentSkillsGroup') {
@@ -872,25 +1020,33 @@ export class ProjectStructureProvider implements vscode.TreeDataProvider<Project
         items.push(emptyItem);
       }
 
+      // 缓存结果
+      this.setCachedChildren(element, items);
       return items;
     }
 
     // Builtin Skills 分组的子节点
     if (element.type === 'agentSkillBuiltinGroup') {
       const builtinSkills = this.agentSkillsCache.filter(s => s.source === 'builtin');
-      return this.createSkillItems(builtinSkills, true);
+      const items = this.createSkillItems(builtinSkills, true);
+      this.setCachedChildren(element, items);
+      return items;
     }
 
     // Custom Skills 分组的子节点
     if (element.type === 'agentSkillCustomGroup') {
       const customSkills = this.agentSkillsCache.filter(s => s.source === 'custom');
-      return this.createSkillItems(customSkills, false);
+      const items = this.createSkillItems(customSkills, false);
+      this.setCachedChildren(element, items);
+      return items;
     }
 
     // Environment Skills 分组的子节点
     if (element.type === 'agentSkillEnvGroup') {
       const envSkills = this.agentSkillsCache.filter(s => s.source !== 'builtin' && s.source !== 'custom');
-      return this.createSkillItems(envSkills, false);
+      const items = this.createSkillItems(envSkills, false);
+      this.setCachedChildren(element, items);
+      return items;
     }
 
     // Agent Skill Item 展开时显示目录内容
@@ -2741,6 +2897,7 @@ export class ProjectStructureProvider implements vscode.TreeDataProvider<Project
 
   /**
    * Update extension-bundled skills by re-syncing to workspace .claude/skills/
+   * This includes both AgentSociety skills and official Claude Code office skills (pdf, docx, xlsx, pptx).
    */
   async updateExtensionSkills(): Promise<void> {
     const workspaceFolder = vscode.workspace.workspaceFolders?.[0];
@@ -2749,16 +2906,129 @@ export class ProjectStructureProvider implements vscode.TreeDataProvider<Project
       return;
     }
 
-    const result = this.workspaceManager.syncClaudeCodeResources();
-    if (result.success) {
-      vscode.window.showInformationMessage(
-        localize('projectStructure.extensionSkillsUpdateSuccess', String(result.created.length))
+    // Declare in outer scope to be accessible in both steps
+    let syncResult: { success: boolean; message: string; created: string[] };
+
+    // 启动批量操作模式，暂停文件监视器的自动刷新
+    this.batchOperationInProgress = true;
+
+    try {
+      // Step 1: Sync AgentSociety extension skills
+      await vscode.window.withProgress(
+        {
+          location: vscode.ProgressLocation.Notification,
+          title: localize('projectStructure.updateSkills.step1'),
+          cancellable: false
+        },
+        async (progress) => {
+          // Immediately report progress to ensure notification shows up
+          progress.report({ increment: 0 });
+
+          // Yield to event loop so progress notification can render
+          await new Promise(resolve => setTimeout(resolve, 10));
+
+          // Now execute the synchronous operation
+          syncResult = this.workspaceManager.syncClaudeCodeResources();
+
+          if (!syncResult.success) {
+            throw new Error(syncResult.message);
+          }
+
+          progress.report({ increment: 50 });
+          this.outputChannel.appendLine(`[updateExtensionSkills] Synced ${syncResult.created.length} AgentSociety skills`);
+        }
       );
+
+      // Step 2: Copy official Claude Code office skills from extension (pdf, docx, xlsx, pptx)
+      await vscode.window.withProgress(
+        {
+          location: vscode.ProgressLocation.Notification,
+          title: localize('projectStructure.updateSkills.step2'),
+          cancellable: false
+        },
+        async (progress) => {
+          // Immediately report progress to ensure notification shows up
+          progress.report({ increment: 50 });
+
+          // Yield to event loop so progress notification can render
+          await new Promise(resolve => setTimeout(resolve, 10));
+
+          const officeSkillsResult = await this.workspaceManager.copyOfficialOfficeSkills();
+
+          // Combine results for user message
+          const agentSocietyCount = syncResult.created.length;
+          const officeSkillsCount = officeSkillsResult.downloaded.length;
+          const totalSkills = agentSocietyCount + officeSkillsCount;
+
+          let message: string;
+          let buttons: string[] = [
+            localize('projectStructure.updateSkills.viewDetails'),
+            localize('projectStructure.updateSkills.ok')
+          ];
+
+          if (officeSkillsCount === 0) {
+            // All office skills failed - critical issue
+            message = localize('projectStructure.updateSkills.partialIssues');
+            message += localize('projectStructure.updateSkills.agentsociety', agentSocietyCount);
+            message += localize('projectStructure.updateSkills.officeFailed');
+            message += `⚠️ ${officeSkillsResult.message}\n\n`;
+            message += localize('projectStructure.updateSkills.checkExtension');
+            buttons = [
+              localize('projectStructure.updateSkills.viewDetails'),
+              localize('projectStructure.updateSkills.close')
+            ];
+          } else if (!officeSkillsResult.success && officeSkillsResult.downloaded.length > 0) {
+            // Partial success
+            message = localize('projectStructure.updateSkills.partialSuccess');
+            message += localize('projectStructure.updateSkills.agentsociety', agentSocietyCount);
+            message += localize('projectStructure.updateSkills.partialOffice', officeSkillsCount);
+            message += `⚠️ ${officeSkillsResult.message}`;
+          } else {
+            // Full success
+            message = localize('projectStructure.updateSkills.success');
+            message += localize('projectStructure.updateSkills.agentsociety', agentSocietyCount);
+            message += localize('projectStructure.updateSkills.office', officeSkillsCount);
+            message += localize('projectStructure.updateSkills.total', totalSkills);
+          }
+
+          progress.report({ increment: 100 });
+
+          // Show final result with action button to view output
+          const result = await vscode.window.showInformationMessage(
+            message,
+            ...buttons
+          );
+
+          if (result === localize('projectStructure.updateSkills.viewDetails') ||
+              result === localize('projectStructure.updateSkills.viewInstructions')) {
+            // Show the Workspace Manager output channel
+            this.workspaceManager.showOutput();
+          }
+
+          this.refresh();
+        }
+      );
+
+    } catch (error: any) {
+      const errorMessage = localize('projectStructure.updateSkills.failed', error.message || error);
+      this.outputChannel.appendLine(`[updateExtensionSkills] Error: ${error.stack || error}`);
+
+      // Offer to view output for debugging
+      const viewOutput = await vscode.window.showErrorMessage(
+        errorMessage,
+        localize('projectStructure.updateSkills.viewOutput'),
+        localize('projectStructure.updateSkills.close')
+      );
+
+      if (viewOutput === localize('projectStructure.updateSkills.viewOutput')) {
+        this.workspaceManager.showOutput();
+      }
+    } finally {
+      // 结束批量操作模式，恢复文件监视器的自动刷新
+      this.batchOperationInProgress = false;
+
+      // 批量操作完成后，手动触发一次刷新以显示所有更改
       this.refresh();
-    } else {
-      vscode.window.showErrorMessage(
-        localize('projectStructure.extensionSkillsUpdateFailed', result.message)
-      );
     }
   }
 

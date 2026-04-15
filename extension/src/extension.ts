@@ -28,13 +28,9 @@ import { PrefillParamsViewProvider } from './prefillParamsViewProvider';
 import { ReplayWebviewProvider } from './replayWebviewProvider';
 import { ConfigPageViewProvider } from './configPageViewProvider';
 import { ApiClient } from './apiClient';
-import { PaperWatcher } from './paperWatcher';
 import { ProjectDragAndDropController } from './dragAndDropController';
-import { ParseModeManager } from './parseModeManager';
 import { localize } from './i18n';
 import { BackendManager } from './services/backendManager';
-import { MinerUInitializer } from './services/mineruInitializer';
-import { MinerUParser } from './mineruParser';
 import { AIChatInvoker } from './aiChatInvoker';
 import { LiteratureIndexViewer } from './literatureIndexViewer';
 import { StepsViewer } from './stepsViewer';
@@ -46,10 +42,6 @@ import { hasConfiguredLlmApiKey, migrateLegacySettingsToEnv } from './runtimeCon
 
 // 全局后端服务管理器实例（管理 FastAPI 后端进程的启动、停止、重启）
 let backendManager: BackendManager | null = null;
-// 全局 MinerU 初始化器实例（负责环境检查、模型下载、状态栏展示）
-let mineruInitializer: MinerUInitializer | null = null;
-// 全局 MinerU 解析器实例（负责调用 MinerU CLI 执行 PDF 解析）
-let mineruParser: MinerUParser | null = null;
 
 export function activate(context: vscode.ExtensionContext) {
   console.log(localize('extension.activate'));
@@ -92,59 +84,15 @@ export function activate(context: vscode.ExtensionContext) {
   // Initialize API client
   const apiClient = new ApiClient(context);
 
-  // ========== 初始化 MinerU 环境检查器 ==========
-  // MinerUInitializer 在后台检查 MinerU CLI 安装状态和模型下载状态，
-  // 并在 VSCode 状态栏展示当前环境状态（Ready / Not Installed / No Models 等）
-  mineruInitializer = new MinerUInitializer(context);
-  context.subscriptions.push({
-    dispose: () => {
-      if (mineruInitializer) {
-        mineruInitializer.dispose();
-        mineruInitializer = null;
-      }
-    }
-  });
-
-  // ========== 初始化 MinerU PDF 解析器 ==========
-  // MinerUParser 负责调用 MinerU CLI 执行 PDF 解析，
-  // 传入 initializer 以便在解析前检查环境是否就绪
-  mineruParser = new MinerUParser(mineruInitializer);
-  context.subscriptions.push({
-    dispose: () => {
-      if (mineruParser) {
-        mineruParser.dispose();
-        mineruParser = null;
-      }
-    }
-  });
-
   // Initialize AI Chat invoker
   const aiChatInvoker = new AIChatInvoker();
   context.subscriptions.push(aiChatInvoker);
 
-  // ========== 后台执行 MinerU 环境检查 ==========
-  // 异步执行环境检查，不阻塞扩展的激活流程。
-  // 检查内容包括：查找 CLI、获取版本、检查模型下载状态。
-  // 如果模型缺失，会自动弹窗提示用户下载。
-  mineruInitializer.checkAndInitialize().catch((error) => {
-    console.error('MinerU initialization check failed:', error);
-  });
-
-  // ========== 初始化解析模式管理器 ==========
-  // ParseModeManager 管理 PDF 解析模式（本地 MinerU 解析 vs 后端 API 解析）
-  const parseModeManager = new ParseModeManager(context);
-  context.subscriptions.push(parseModeManager);
-
-  // ========== 初始化论文文件监听器 ==========
-  // PaperWatcher 监听 papers/ 目录下的新 PDF 文件，自动触发 MinerU 解析
-  const paperWatcher = new PaperWatcher(context, mineruParser, parseModeManager);
-  context.subscriptions.push(paperWatcher);
-
   // ========== 初始化项目结构树视图（支持拖拽） ==========
   // ProjectStructureProvider 提供左侧树视图，展示工作区文件结构
   const projectStructureProvider = new ProjectStructureProvider(context, apiClient);
-  // 拖拽控制器：支持将 PDF 文件拖入 papers/ 目录并自动解析
-  const dragAndDropController = new ProjectDragAndDropController(projectStructureProvider, parseModeManager, paperWatcher);
+  // 拖拽控制器：支持将文件拖入 papers/ 目录
+  const dragAndDropController = new ProjectDragAndDropController(projectStructureProvider);
 
   // Use createTreeView instead of registerTreeDataProvider to support drag and drop
   const treeView = vscode.window.createTreeView('projectStructureView', {
@@ -359,63 +307,6 @@ export function activate(context: vscode.ExtensionContext) {
     }
   );
 
-  // 使用MinerU解析PDF命令 (本地调用MinerU CLI)
-  const parseWithMinerUCommand = vscode.commands.registerCommand(
-    'aiSocialScientist.parseWithMinerU',
-    async (item: any) => {
-      if (!item || !item.filePath) {
-        vscode.window.showErrorMessage(localize('extension.parseMinerU.noFile'));
-        return;
-      }
-
-      const workspaceFolder = vscode.workspace.workspaceFolders?.[0];
-      if (!workspaceFolder) {
-        vscode.window.showErrorMessage(localize('extension.parseMinerU.noWorkspace'));
-        return;
-      }
-
-      // 检查文件扩展名
-      const filePath = item.filePath;
-      const ext = filePath.split('.').pop()?.toLowerCase();
-      if (ext !== 'pdf') {
-        vscode.window.showWarningMessage(localize('extension.parseMinerU.unsupportedFormat'));
-        return;
-      }
-
-      if (!mineruParser) {
-        vscode.window.showErrorMessage('MinerU Parser not initialized');
-        return;
-      }
-
-      const fileName = item.label || path.basename(filePath);
-      vscode.window.showInformationMessage(localize('extension.parseMinerU.parsing', fileName));
-
-      try {
-        const result = await mineruParser.parse({
-          filePath,
-          workspacePath: workspaceFolder.uri.fsPath,
-        });
-
-        if (result.success) {
-          const openFileLabel = localize('extension.parseMinerU.openFile');
-          vscode.window.showInformationMessage(
-            localize('extension.parseMinerU.success', fileName),
-            openFileLabel
-          ).then((selection) => {
-            if (selection === openFileLabel && result.parsedFilePath) {
-              vscode.window.showTextDocument(vscode.Uri.file(result.parsedFilePath));
-            }
-          });
-          projectStructureProvider.refresh();
-        } else {
-          vscode.window.showErrorMessage(result.message);
-        }
-      } catch (error: any) {
-        vscode.window.showErrorMessage(localize('extension.parseMinerU.failed', error.message || error));
-      }
-    }
-  );
-
   // Register custom editor for SIM_SETTINGS.json
   context.subscriptions.push(
     vscode.window.registerCustomEditorProvider(
@@ -607,118 +498,6 @@ export function activate(context: vscode.ExtensionContext) {
 
   // ========== MinerU 环境管理命令 ==========
   // 以下命令用于在命令面板和状态栏菜单中管理 MinerU 环境
-
-  /**
-   * MinerU 状态菜单命令
-   *
-   * 点击状态栏的 MinerU 状态项时触发，弹出快速选择菜单。
-   * 菜单内容根据当前环境状态动态生成：
-   * - 始终显示：当前状态、重新检查环境、查看日志
-   * - not_installed 时额外显示：安装指南链接
-   * - cli_ready 时额外显示：下载模型按钮
-   */
-  const mineruStatusMenuCommand = vscode.commands.registerCommand(
-    'aiSocialScientist.mineruStatusMenu',
-    async () => {
-      const items: vscode.QuickPickItem[] = [];
-
-      if (mineruInitializer) {
-        const status = mineruInitializer.status;
-        items.push({
-          label: `$(info) ${localize('extension.mineru.status', status)}`,
-          detail: mineruInitializer.getStatusText(),
-        });
-
-        if (status === 'not_installed') {
-          items.push({
-            label: `$(link-external) ${localize('extension.mineru.installGuide')}`,
-            detail: 'https://github.com/opendatalab/MinerU',
-          });
-        } else if (status === 'cli_ready') {
-          items.push({
-            label: `$(cloud-download) ${localize('extension.mineru.downloadModels')}`,
-            detail: 'aiSocialScientist.mineruDownloadModels',
-          });
-        }
-
-        items.push({
-          label: `$(refresh) ${localize('extension.mineru.recheck')}`,
-          detail: 'aiSocialScientist.mineruRecheck',
-        });
-        items.push({
-          label: `$(output) ${localize('extension.mineru.showLogs')}`,
-          detail: 'aiSocialScientist.showMinerULogs',
-        });
-      }
-
-      if (items.length === 0) {
-        items.push({ label: localize('extension.mineru.notAvailable') });
-      }
-
-      const selected = await vscode.window.showQuickPick(items, {
-        placeHolder: localize('extension.mineru.envPlaceholder'),
-        matchOnDescription: true,
-        matchOnDetail: true,
-      });
-
-      if (selected?.detail) {
-        if (selected.detail.startsWith('http')) {
-          vscode.env.openExternal(vscode.Uri.parse(selected.detail));
-        } else {
-          await vscode.commands.executeCommand(selected.detail);
-        }
-      }
-    }
-  );
-
-  /**
-   * 重新检查 MinerU 环境命令
-   *
-   * 重新执行完整的环境检查流程（查找 CLI → 检查版本 → 检查模型）。
-   * 适用场景：用户安装了 MinerU 或下载了模型后，手动刷新环境状态。
-   */
-  const mineruRecheckCommand = vscode.commands.registerCommand(
-    'aiSocialScientist.mineruRecheck',
-    async () => {
-      if (mineruInitializer) {
-        vscode.window.showInformationMessage(localize('extension.mineru.rechecking'));
-        const status = await mineruInitializer.checkAndInitialize();
-        vscode.window.showInformationMessage(localize('extension.mineru.recheckResult', status));
-      }
-    }
-  );
-
-  /**
-   * 下载 MinerU 模型命令
-   *
-   * 手动触发模型下载流程。适用场景：
-   * - 用户之前跳过了自动下载提示
-   * - 模型下载失败后重试
-   * - 模型文件被删除后重新下载
-   */
-  const mineruDownloadModelsCommand = vscode.commands.registerCommand(
-    'aiSocialScientist.mineruDownloadModels',
-    async () => {
-      if (mineruInitializer) {
-        await mineruInitializer.downloadModels();
-      }
-    }
-  );
-
-  /**
-   * 显示 MinerU 日志命令
-   *
-   * 在 VSCode 输出面板中打开 "MinerU Initializer" 通道，
-   * 展示详细的环境检查和模型下载日志。
-   */
-  const showMinerULogsCommand = vscode.commands.registerCommand(
-    'aiSocialScientist.showMinerULogs',
-    () => {
-      if (mineruInitializer) {
-        mineruInitializer.showLogs();
-      }
-    }
-  );
 
   // ========== Custom Module Commands ==========
 
@@ -1175,7 +954,6 @@ export function activate(context: vscode.ExtensionContext) {
     fixWorkspaceCommand,
     deleteLiteratureCommand,
     renameLiteratureCommand,
-    parseWithMinerUCommand,
     openMarkdownInEditorCommand,
     openChatCommand,
     startBackendCommand,
@@ -1206,20 +984,13 @@ export function activate(context: vscode.ExtensionContext) {
     openInExplorerCommand,
     copyFileNameCommand,
     copyFilePathCommand,
-    copyAtReferenceCommand,
-    mineruStatusMenuCommand,
-    mineruRecheckCommand,
-    mineruDownloadModelsCommand,
-    showMinerULogsCommand
+    copyAtReferenceCommand
   );
 }
 
 export function deactivate() {
-  // 扩展停用时：停止后端服务并清理 MinerU 初始化器资源
+  // 扩展停用时：停止后端服务
   if (backendManager) {
     backendManager.stop();
-  }
-  if (mineruInitializer) {
-    mineruInitializer.dispose();
   }
 }
