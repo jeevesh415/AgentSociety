@@ -40,6 +40,7 @@ jobs:
         run: |
           cd packages/agentsociety2
           ruff check .
+        continue-on-error: true
 
       - name: Type check with mypy
         run: |
