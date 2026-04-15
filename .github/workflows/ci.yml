@@ -72,10 +72,9 @@ jobs:
       - name: Build package
         run: |
           cd packages/agentsociety2
-          uv build
+          uv build --out-dir dist
 
       - name: Check distribution
         run: |
           cd packages/agentsociety2
-          uv pip install twine
-          uv run twine check dist/*
+          uv run --with twine twine check dist/*
