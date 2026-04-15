@@ -57,15 +57,6 @@ const translations: Record<string, Record<string, string>> = {
     'extension.openMarkdown.warning': '此命令仅适用于 Markdown 文件',
     'extension.openMarkdown.failed': '打开文件失败: {0}',
 
-    // extension.ts - parseWithMinerU
-    'extension.parseMinerU.noFile': '无法解析：未选择有效的文件',
-    'extension.parseMinerU.noWorkspace': '未找到工作区文件夹',
-    'extension.parseMinerU.unsupportedFormat': 'MinerU解析目前仅支持PDF文件',
-    'extension.parseMinerU.parsing': '正在解析 {0}...',
-    'extension.parseMinerU.success': '成功解析文件: {0}',
-    'extension.parseMinerU.openFile': '打开文件',
-    'extension.parseMinerU.failed': '解析失败: {0}',
-
     // projectStructureProvider.ts
     'projectStructure.noWorkspace': '未找到工作区文件夹',
     'projectStructure.literature': '文献库',
@@ -83,22 +74,6 @@ const translations: Record<string, Record<string, string>> = {
     'workspaceInit.initializing': '正在初始化工作区，请稍候...',
     'workspaceInit.success': '工作区初始化成功：{0}',
     'workspaceInit.failed': '工作区初始化失败：{0}',
-
-    // paperWatcher.ts
-    'paperWatcher.newFile': '发现新文件: {0}',
-    'paperWatcher.parsePrompt': '是否使用MinerU解析该文档？',
-    'paperWatcher.parse': '解析',
-    'paperWatcher.later': '稍后',
-    'paperWatcher.dontAsk': '不再提示',
-    'paperWatcher.skipped': '已跳过文件 {0}，将不再提示解析该文件',
-    'paperWatcher.parsing': '正在解析 {0}...',
-    'paperWatcher.success': '成功解析文件: {0}',
-    'paperWatcher.parsedFile': '解析文件: {0}',
-    'paperWatcher.failed': '解析文件失败: {0}',
-    'paperWatcher.error': '解析文件时出错: {0}',
-    'paperWatcher.parseMode': 'PDF解析模式',
-    'paperWatcher.autoParseEnabled': 'PDF自动解析',
-    'paperWatcher.autoParseDisabled': 'PDF手动解析',
 
     // dragAndDropController.ts
     'dragDrop.noTarget': '请拖拽到"文献库"或"用户数据"节点',
@@ -163,42 +138,6 @@ const translations: Record<string, Record<string, string>> = {
     'projectStructure.extensionSkillsUpdate': '更新 Skills',
     'projectStructure.extensionSkillsUpdateSuccess': '已更新 {0} 个 Skills',
     'projectStructure.extensionSkillsUpdateFailed': '更新 Skills 失败: {0}',
-
-    // mineruInitializer.ts
-    'mineruInitializer.promptDownload.message': 'MinerU CLI 已安装但模型未下载。PDF 解析需要模型支持。是否立即下载？',
-    'mineruInitializer.promptDownload.download': '下载模型',
-    'mineruInitializer.promptDownload.dismiss': '稍后',
-    'mineruInitializer.download.notFound': '未找到 mineru-models-download 命令，请确认 MinerU 已正确安装。',
-    'mineruInitializer.download.title': 'MinerU: 正在下载模型',
-    'mineruInitializer.download.timeout': 'MinerU 模型下载超时，请重试。',
-    'mineruInitializer.download.success': 'MinerU 模型下载成功。',
-    'mineruInitializer.download.failed': 'MinerU 模型下载失败（退出码: {0}），请查看输出日志。',
-    'mineruInitializer.download.error': 'MinerU 模型下载出错: {0}',
-
-    // mineruParser.ts
-    'mineruParser.notInstalled': 'MinerU CLI 未安装。PDF 解析需要 MinerU。',
-    'mineruParser.showInstallGuide': '查看安装指南',
-    'mineruParser.noModels': 'MinerU 模型未下载。PDF 解析需要模型支持。是否立即下载？',
-    'mineruParser.downloadModels': '下载模型',
-    'mineruParser.cancel': '取消',
-    'mineruParser.downloading': 'MinerU 模型正在下载中，请稍候...',
-    'mineruParser.checking': 'MinerU 环境正在检查中，请稍候...',
-    'mineruParser.initFailed': 'MinerU 初始化失败，PDF 解析可能无法正常工作。',
-    'mineruParser.retryCheck': '重新检查',
-    'mineruParser.showLogs': '查看日志',
-    'mineruParser.envNotReady': 'MinerU 环境未就绪，请先解决通知中提示的问题。',
-    'mineruParser.cliNotFound': '未找到 MinerU CLI，请安装 MinerU 并添加到 PATH。',
-
-    // extension.ts - MinerU commands
-    'extension.mineru.status': '状态: {0}',
-    'extension.mineru.installGuide': '查看 MinerU 安装指南',
-    'extension.mineru.downloadModels': '下载模型',
-    'extension.mineru.recheck': '重新检查环境',
-    'extension.mineru.showLogs': '查看 MinerU 日志',
-    'extension.mineru.notAvailable': 'MinerU 初始化器不可用',
-    'extension.mineru.envPlaceholder': 'MinerU 环境',
-    'extension.mineru.rechecking': '正在重新检查 MinerU 环境...',
-    'extension.mineru.recheckResult': 'MinerU 状态: {0}',
 
     // backendManager.ts
     'backendManager.openSettings': '打开设置',
@@ -276,6 +215,25 @@ const translations: Record<string, Record<string, string>> = {
     'projectStructure.running': '运行中',
     'projectStructure.datasets': '数据集',
     'projectStructure.datasetItem': '数据集',
+
+    // projectStructureProvider.ts - skills update
+    'projectStructure.updateSkills.step1': '正在更新 Skills - 步骤 1/2: AgentSociety 技能',
+    'projectStructure.updateSkills.step2': '正在更新 Skills - 步骤 2/2: 官方 Office 技能',
+    'projectStructure.updateSkills.success': '✅ Skills 更新完成！\n\n',
+    'projectStructure.updateSkills.agentsociety': '✓ AgentSociety 技能: {0} 项\n',
+    'projectStructure.updateSkills.office': '✓ 官方 Office 技能: {0} 项 (pdf, docx, xlsx, pptx)\n\n',
+    'projectStructure.updateSkills.total': '总计: {0} 项',
+    'projectStructure.updateSkills.partialIssues': '⚠️ Skills 更新完成但存在问题\n\n',
+    'projectStructure.updateSkills.officeFailed': '✗ 官方 Office 技能: 0 项 (复制失败)\n\n',
+    'projectStructure.updateSkills.partialSuccess': '⚠️ Skills 部分更新完成\n\n',
+    'projectStructure.updateSkills.partialOffice': '✓ 官方 Office 技能: {0} 项\n\n',
+    'projectStructure.updateSkills.checkExtension': '📋 请检查扩展安装是否正确。',
+    'projectStructure.updateSkills.viewDetails': '查看详情',
+    'projectStructure.updateSkills.viewInstructions': '查看说明',
+    'projectStructure.updateSkills.close': '关闭',
+    'projectStructure.updateSkills.ok': '确定',
+    'projectStructure.updateSkills.failed': 'Skills 更新失败: {0}',
+    'projectStructure.updateSkills.viewOutput': '查看输出',
   },
   'en-US': {
     // extension.ts
@@ -352,22 +310,6 @@ const translations: Record<string, Record<string, string>> = {
     'workspaceInit.success': 'Workspace initialized successfully: {0}',
     'workspaceInit.failed': 'Workspace initialization failed: {0}',
 
-    // paperWatcher.ts
-    'paperWatcher.newFile': 'New file detected: {0}',
-    'paperWatcher.parsePrompt': 'Would you like to parse this document with MinerU?',
-    'paperWatcher.parse': 'Parse',
-    'paperWatcher.later': 'Later',
-    'paperWatcher.dontAsk': "Don't ask again",
-    'paperWatcher.skipped': 'Skipped file {0}, will not prompt to parse this file again',
-    'paperWatcher.parsing': 'Parsing {0}...',
-    'paperWatcher.success': 'Successfully parsed file: {0}',
-    'paperWatcher.parseMode': 'PDF Parse Mode',
-    'paperWatcher.autoParseEnabled': 'PDF Auto-parse',
-    'paperWatcher.autoParseDisabled': 'PDF Manual',
-    'paperWatcher.parsedFile': 'Parsed file: {0}',
-    'paperWatcher.failed': 'Failed to parse file: {0}',
-    'paperWatcher.error': 'Error parsing file: {0}',
-
     // dragAndDropController.ts
     'dragDrop.noTarget': 'Please drag to "Literature" or "User Data" node',
     'dragDrop.invalidTarget': 'Cannot drag to "{0}" node, please drag to "Literature" or "User Data" node',
@@ -431,42 +373,6 @@ const translations: Record<string, Record<string, string>> = {
     'projectStructure.extensionSkillsUpdate': 'Update Skills',
     'projectStructure.extensionSkillsUpdateSuccess': 'Updated {0} Skills',
     'projectStructure.extensionSkillsUpdateFailed': 'Failed to update Skills: {0}',
-
-    // mineruInitializer.ts
-    'mineruInitializer.promptDownload.message': 'MinerU CLI is installed but models are not downloaded. PDF parsing requires models. Download now?',
-    'mineruInitializer.promptDownload.download': 'Download Models',
-    'mineruInitializer.promptDownload.dismiss': 'Not Now',
-    'mineruInitializer.download.notFound': 'MinerU models-download command not found. Please ensure MinerU is properly installed.',
-    'mineruInitializer.download.title': 'MinerU: Downloading Models',
-    'mineruInitializer.download.timeout': 'MinerU model download timed out. Please try again.',
-    'mineruInitializer.download.success': 'MinerU models downloaded successfully.',
-    'mineruInitializer.download.failed': 'MinerU model download failed (exit code: {0}). Check output for details.',
-    'mineruInitializer.download.error': 'MinerU model download error: {0}',
-
-    // mineruParser.ts
-    'mineruParser.notInstalled': 'MinerU CLI is not installed. PDF parsing requires MinerU.',
-    'mineruParser.showInstallGuide': 'Show Install Guide',
-    'mineruParser.noModels': 'MinerU models are not downloaded. PDF parsing requires models. Download now?',
-    'mineruParser.downloadModels': 'Download Models',
-    'mineruParser.cancel': 'Cancel',
-    'mineruParser.downloading': 'MinerU models are still downloading. Please wait...',
-    'mineruParser.checking': 'MinerU environment is still being checked. Please wait...',
-    'mineruParser.initFailed': 'MinerU initialization failed. PDF parsing may not work correctly.',
-    'mineruParser.retryCheck': 'Retry Check',
-    'mineruParser.showLogs': 'Show Logs',
-    'mineruParser.envNotReady': 'MinerU environment is not ready. Please resolve the issues shown in the notification.',
-    'mineruParser.cliNotFound': 'MinerU CLI not found. Please install MinerU and add it to your PATH.',
-
-    // extension.ts - MinerU commands
-    'extension.mineru.status': 'Status: {0}',
-    'extension.mineru.installGuide': 'Open MinerU Install Guide',
-    'extension.mineru.downloadModels': 'Download Models',
-    'extension.mineru.recheck': 'Re-check Environment',
-    'extension.mineru.showLogs': 'Show MinerU Logs',
-    'extension.mineru.notAvailable': 'MinerU initializer not available',
-    'extension.mineru.envPlaceholder': 'MinerU Environment',
-    'extension.mineru.rechecking': 'Re-checking MinerU environment...',
-    'extension.mineru.recheckResult': 'MinerU status: {0}',
 
     // backendManager.ts
     'backendManager.openSettings': 'Open Settings',
@@ -544,6 +450,25 @@ const translations: Record<string, Record<string, string>> = {
     'projectStructure.running': 'Running',
     'projectStructure.datasets': 'Datasets',
     'projectStructure.datasetItem': 'Dataset',
+
+    // projectStructureProvider.ts - skills update
+    'projectStructure.updateSkills.step1': 'Updating Skills - Step 1/2: AgentSociety Skills',
+    'projectStructure.updateSkills.step2': 'Updating Skills - Step 2/2: Official Office Skills',
+    'projectStructure.updateSkills.success': '✅ Skills update complete!\n\n',
+    'projectStructure.updateSkills.agentsociety': '✓ AgentSociety skills: {0} items\n',
+    'projectStructure.updateSkills.office': '✓ Official office skills: {0} items (pdf, docx, xlsx, pptx)\n\n',
+    'projectStructure.updateSkills.total': 'Total: {0} items',
+    'projectStructure.updateSkills.partialIssues': '⚠️ Skills update completed with issues\n\n',
+    'projectStructure.updateSkills.officeFailed': '✗ Official office skills: 0 items (copy failed)\n\n',
+    'projectStructure.updateSkills.partialSuccess': '⚠️ Skills update partially completed\n\n',
+    'projectStructure.updateSkills.partialOffice': '✓ Official office skills: {0} items\n\n',
+    'projectStructure.updateSkills.checkExtension': '📋 Please check your extension installation.',
+    'projectStructure.updateSkills.viewDetails': 'View Details',
+    'projectStructure.updateSkills.viewInstructions': 'View Instructions',
+    'projectStructure.updateSkills.close': 'Close',
+    'projectStructure.updateSkills.ok': 'OK',
+    'projectStructure.updateSkills.failed': 'Skills update failed: {0}',
+    'projectStructure.updateSkills.viewOutput': 'View Output',
   },
 };
 
